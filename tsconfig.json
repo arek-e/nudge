@@ -5,6 +5,8 @@
     { "path": "./packages/domain" },
     { "path": "./packages/effect-services" },
     { "path": "./packages/db" },
-    { "path": "./packages/evals" }
+    { "path": "./packages/evals" },
+    { "path": "./packages/observability" },
+    { "path": "./packages/ui" }
   ]
 }

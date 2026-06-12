@@ -6,5 +6,6 @@
     "rootDir": "src",
     "tsBuildInfoFile": "../../.tsbuild/packages/db.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

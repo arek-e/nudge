@@ -428,6 +428,6 @@ The hard part is not integrations alone. The hard part is turning integrations i
 - Second Loop
 - Operating Self
 - Day Kernel
-- Personal Agent OS
+- Lares
 
-Current repo name `personal-agent-os` still fits.
+The product name is now Lares. The original repo name `personal-agent-os` still describes the category, but Lares is the product brand.

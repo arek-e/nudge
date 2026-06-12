@@ -25,12 +25,15 @@ Use Cloudflare as the deployed runtime:
 - Cloudflare Workers for the app/API runtime.
 - Hono for thin HTTP routing.
 - Effect TS for core workflows, services, errors, retries, and dependency injection.
+- Observability from the first slice: request ids, structured logs, Server-Timing headers, Effect spans/log annotations, meaningful Workers Workflow step names, Cloudflare Agents diagnostics-channel events, and later OTLP export through Effect observability layers.
 - D1 for source-linked events, memories, skills, harness versions, evaluations, and evolution records.
+- Drizzle ORM for typed schema/repository implementation behind an Effect database service port, with D1 as the first adapter and future provider swaps isolated to the database package.
 - Cloudflare Agents SDK and Durable Objects for live per-user agent/session coordination, Review Queue waits, and Resume Token wakeups.
 - Workers Workflows for long-running multi-step jobs such as Digest generation, calendar sync, memory consolidation, and Human-in-the-Loop pause/resume.
 - Workers cron for morning, evening, weekly, and consolidation jobs.
 - Queues later for sync/evaluation fanout once cron/API work becomes too heavy.
 - Vectorize later, after relational memory and source links prove useful.
+- Wrangler-first infrastructure: `wrangler.jsonc` owns Worker-native bindings and deployments; Terraform/Pulumi/SST are deferred until account/zone-level infrastructure needs justify them.
 
 Do not build directly on Mem0, Letta, or HyperAgents. Use them as references. The implementation should stay Cloudflare-native and should apply the research lessons: explicit memory operations, versioned skills/harnesses, evaluation before activation, retirement, rollback, and user-visible provenance.
 

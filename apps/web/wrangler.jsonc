@@ -1,19 +1,37 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "personal-agent-os-web",
+  "name": "lares-web",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-11",
+  "compatibility_date": "2026-06-12",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health", "/__test/*"],
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
+    "LOG_HTTP_REQUESTS": "true",
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "personal-agent-os-local",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "lares-local",
+      "database_id": "f64cce82-7370-4cfa-8570-617f5c5484ca",
       "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TRACE_ARTIFACTS",
+      "bucket_name": "lares-trace-artifacts",
     },
   ],
   "durable_objects": {

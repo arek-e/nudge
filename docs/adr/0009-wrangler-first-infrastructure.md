@@ -1,0 +1,5 @@
+# Wrangler-First Infrastructure
+
+Lares uses `wrangler.jsonc` as the source of truth for Worker-native infrastructure: the Worker entrypoint, D1 binding, Durable Object binding and migrations, Workers Workflows, observability, Worker environments, and future bindings such as Queues, R2, Vectorize, and Tail Workers. Wrangler is the fastest-moving and most complete interface for Cloudflare Workers platform features, especially newer features such as Workflows and Agents/Durable Object patterns.
+
+Terraform, Pulumi, or SST should not be introduced for Worker-native bindings until there is a concrete need that Wrangler does not cover. Add a separate IaC layer later for account/zone-level resources such as DNS records, custom domains, Cloudflare Access, API tokens, logpush destinations, or organization policy. If that need appears, prefer Terraform for stable account/zone governance, Pulumi for TypeScript-heavy cross-cloud infrastructure, and SST only if Lares grows into a multi-provider full-stack app that benefits from SST's higher-level components and dev/stage orchestration.

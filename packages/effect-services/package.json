@@ -1,12 +1,12 @@
 {
-  "name": "@personal-agent-os/effect-services",
+  "name": "@lares/effect-services",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@personal-agent-os/domain": "workspace:*",
+    "@lares/domain": "workspace:*",
     "effect": "catalog:"
   }
 }

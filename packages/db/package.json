@@ -1,8 +1,12 @@
 {
-  "name": "@personal-agent-os/db",
+  "name": "@lares/db",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:"
   }
 }

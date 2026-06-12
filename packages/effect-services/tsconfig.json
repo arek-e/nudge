@@ -7,5 +7,6 @@
     "tsBuildInfoFile": "../../.tsbuild/packages/effect-services.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "../domain" }]
 }

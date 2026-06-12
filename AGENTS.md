@@ -18,6 +18,19 @@ Tests should verify behavior, not implementation details. Prefer public seams su
 
 Use the project glossary in `CONTEXT.md` for test names, issue names, and domain language. Respect ADRs in `docs/adr/` before introducing architectural changes.
 
+Before implementing framework/tooling-specific code, check the relevant opencode reference and follow its current conventions:
+
+- `effect-smol` for Effect v4 service, layer, workflow, and test patterns.
+- `cloudflare-agents` for Cloudflare Agents SDK and Durable Object-backed agent sessions.
+- `cloudflare-workers-sdk` for Workers, D1, Durable Objects, Workers Workflows, Wrangler, and local development behavior.
+- `hono` for Worker-native routing and route tests.
+- `bun` for Bun workspaces, catalogs, scripts, and test runner behavior.
+- `oxc` for Oxlint/Oxfmt configuration, import sorting, Tailwind class sorting, and JS plugin support.
+
+## Mistakes and Gotchas
+
+- Do not write double assertions like `as unknown as SomeType`. They hide type problems and make tests lie. Prefer typed ports, small interfaces, `Pick<>`, framework-provided test adapters, or explicit test doubles that satisfy the smallest public shape being exercised.
+
 ## Agent Skills
 
 ### TDD

@@ -1,9 +1,5 @@
-import {
-  DurableObject,
-  WorkflowEntrypoint,
-  type WorkflowEvent,
-  type WorkflowStep,
-} from "cloudflare:workers";
+import { Agent } from "agents";
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { Env } from "./env";
 import { createApp } from "./app";
 
@@ -11,8 +7,8 @@ const app = createApp();
 
 export default app;
 
-export class UserAgentSession extends DurableObject<Env> {
-  async fetch() {
+export class UserAgentSession extends Agent<Env> {
+  async onRequest() {
     return Response.json({
       ok: true,
       role: "user-agent-session",

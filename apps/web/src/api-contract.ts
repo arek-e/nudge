@@ -1,0 +1,92 @@
+import { oc } from "@orpc/contract";
+import { z } from "zod";
+
+export const eventRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  type: z.string(),
+  source: z.string(),
+  occurredAt: z.string(),
+  schemaVersion: z.number().int(),
+  payload: z.unknown(),
+  createdAt: z.string(),
+});
+
+export const eventInputSchema = z.object({
+  type: z.string().min(1),
+  source: z.string().min(1),
+  occurredAt: z.string().datetime(),
+  schemaVersion: z.number().int().min(1),
+  payload: z.unknown(),
+});
+
+export const eventListInputSchema = z.object({
+  from: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  to: z.string().datetime().optional(),
+});
+
+export const frameRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  key: z.string(),
+  title: z.string(),
+  prompt: z.string(),
+  status: z.literal("active"),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const synthesisRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  frameId: z.string(),
+  summary: z.string(),
+  themes: z.array(z.string()),
+  openQuestions: z.array(z.string()),
+  sourceSignalIds: z.array(z.string()),
+  generatedAt: z.string(),
+  createdAt: z.string(),
+});
+
+export const synthesisResponseSchema = z.object({
+  frame: frameRecordSchema,
+  synthesis: synthesisRecordSchema,
+});
+
+const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
+
+export const apiContract = {
+  captures: {
+    append: oc
+      .route({ method: "POST", path: "/captures" })
+      .input(eventInputSchema)
+      .output(eventRecordSchema),
+  },
+  events: {
+    append: oc
+      .route({ method: "POST", path: "/events" })
+      .input(eventInputSchema)
+      .output(eventRecordSchema),
+    list: oc
+      .route({ method: "GET", path: "/events" })
+      .input(eventListInputSchema)
+      .output(z.object({ events: z.array(eventRecordSchema) })),
+  },
+  signals: {
+    list: oc
+      .route({ method: "GET", path: "/signals" })
+      .input(eventListInputSchema)
+      .output(z.object({ signals: z.array(eventRecordSchema) })),
+  },
+  syntheses: {
+    create: oc
+      .route({ method: "POST", path: "/syntheses" })
+      .input(synthesisInputSchema)
+      .output(synthesisResponseSchema),
+    latest: oc
+      .route({ method: "GET", path: "/syntheses/latest" })
+      .input(synthesisInputSchema)
+      .output(synthesisResponseSchema),
+  },
+};

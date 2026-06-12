@@ -125,6 +125,36 @@ A personal improvement agent can become meaningfully better if it improves throu
 
 The product should feel like a coach, but the system should behave like a versioned experimental platform.
 
+## Reference Paper Map For Lares
+
+Use these papers as architectural references rather than direct implementation dependencies:
+
+- HyperAgents: archive of variants, parent selection, meta-agent/task-agent separation, evaluation before activation, and cross-run improvement of the improvement process.
+- Ratchet: hygiene rules for self-evolving agents, including caps, retirement, validation, non-regression checks, and explicit approval for behavior changes.
+- HORIZONBENCH: long-horizon personalization evaluation across changing user preferences, not just one-shot answer quality.
+- Trajectory-Informed Memory Generation: deriving useful memories from interaction trajectories and outcomes, not generic summaries.
+- EVOLVEMEM: evolving memory architecture and extraction policies over time.
+- EXG: experience graphs for connecting events, decisions, people, goals, outcomes, and lessons.
+- HARBOR: automated harness optimization for prompts, tools, routing, evaluators, and workflow policies.
+- The Last Harness You'll Ever Build: treating the agent harness as a versioned artifact that can evolve rather than a static prompt stack.
+- EvoSkill and EvoSkills: discovering reusable skills from repeated tasks and validating them through co-evolutionary checks.
+- SkillOS: curating skills by keeping, merging, retiring, or activating them based on usefulness.
+- Your Agents Are Aging Too: lifecycle management for stale or harmful agents, memories, skills, and policies.
+- Evolving Deception: warning that weak evaluations can select for deceptive or reward-hacking behavior.
+
+Design grouping:
+
+- Memory evolution: Trajectory-Informed Memory Generation, EVOLVEMEM, EXG, EvoMemBench.
+- Skill evolution: EvoSkill, EvoSkills, SkillOS, MUSE-Autoskill, SkillClaw.
+- Harness and workflow evolution: HyperAgents, HARBOR, The Last Harness You'll Ever Build, GraphMind.
+- Safety and evaluation: Ratchet, HORIZONBENCH, SEA-Eval, Your Agents Are Aging Too, Evolving Deception.
+
+Practical takeaway:
+
+```txt
+Lares = memory + skills + harnesses + evaluators, all versioned and lifecycle-managed
+```
+
 ## Updated Recommendation After HyperAgents Review
 
 Do not build directly on HyperAgents. It is a research runner for generated-code evolution, not a Cloudflare app framework, and its license is non-commercial.

@@ -18,7 +18,7 @@
       },
       {
         "groupName": "workspace",
-        "elementNamePattern": ["@personal-agent-os/**"]
+        "elementNamePattern": ["@lares/**"]
       }
     ],
     "groups": [

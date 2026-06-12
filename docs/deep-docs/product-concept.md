@@ -301,6 +301,6 @@ See `ui-and-surfaces.md`.
 
 ## Current Name
 
-`personal-agent-os` still works as the repo name because it does not overfit to one mode.
+The product name is now Lares. The original `personal-agent-os` repo name described the category, but Lares better captures the private, protective, household-guardian posture of the product.
 
 Potential product names can come later.

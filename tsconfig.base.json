@@ -11,10 +11,12 @@
     "types": ["@cloudflare/workers-types"],
     "baseUrl": ".",
     "paths": {
-      "@personal-agent-os/domain": ["packages/domain/src/index.ts"],
-      "@personal-agent-os/effect-services": ["packages/effect-services/src/index.ts"],
-      "@personal-agent-os/db": ["packages/db/src/index.ts"],
-      "@personal-agent-os/evals": ["packages/evals/src/index.ts"]
+      "@lares/domain": ["packages/domain/src/index.ts"],
+      "@lares/effect-services": ["packages/effect-services/src/index.ts"],
+      "@lares/db": ["packages/db/src/index.ts"],
+      "@lares/evals": ["packages/evals/src/index.ts"],
+      "@lares/observability": ["packages/observability/src/index.ts"],
+      "@lares/ui": ["packages/ui/src/index.tsx"]
     }
   }
 }

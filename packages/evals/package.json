@@ -1,5 +1,5 @@
 {
-  "name": "@personal-agent-os/evals",
+  "name": "@lares/evals",
   "private": true,
   "type": "module",
   "exports": {

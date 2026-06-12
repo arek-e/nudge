@@ -1,16 +1,16 @@
-import { Context, Effect } from "effect";
-import type { DevUser } from "@personal-agent-os/domain";
+import { Context, Effect, Layer } from "effect";
+import type { DevUser } from "@lares/domain";
 
-export class AuthService extends Context.Tag("AuthService")<
+export class AuthService extends Context.Service<
   AuthService,
   {
     readonly currentUser: Effect.Effect<DevUser>;
   }
->() {}
-
-export const DevAuthService = AuthService.of({
-  currentUser: Effect.succeed({
-    id: "dev-user",
-    displayName: "Dev User",
-  }),
-});
+>()("lares/AuthService") {
+  static readonly layerDev = Layer.succeed(AuthService)({
+    currentUser: Effect.succeed({
+      id: "dev-user",
+      displayName: "Dev User",
+    }),
+  });
+}
