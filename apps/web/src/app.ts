@@ -5,15 +5,30 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
-import { AuthService } from "@lares/effect-services";
-import type { Env } from "./env";
+import { AuthService, PrimitiveWorkflows } from "@lares/effect-services";
 import { apiContract } from "./api-contract";
-import { addWideEventFields, requestObservability, serverTiming } from "./observability";
+import {
+  addWideEventFields,
+  evlogWideEvents,
+  type ObservabilityHonoEnv,
+  requestObservability,
+  runWithRequestSpan,
+  serverTiming,
+} from "./observability";
 
 type AppDbLayer = Layer.Layer<Db>;
 
 interface ApiContext {
   readonly db: DbService;
+  readonly recordSpan: <A>(
+    name: string,
+    input: {
+      readonly attributes?: Readonly<Record<string, unknown>>;
+      readonly kind?: "client" | "internal";
+    },
+    task: () => Promise<A>,
+  ) => Promise<A>;
+  readonly traceDb?: D1Database;
   readonly user: {
     readonly id: string;
     readonly displayName: string;
@@ -29,144 +44,182 @@ const api = implement(apiContract).$context<ApiContext>();
 export const apiRouter = api.router({
   captures: {
     append: api.captures.append.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.appendEvent({ ...input, userId: context.user.id });
-      });
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.appendSignal({ ...input, user: context.user }),
+      );
     }),
   },
   events: {
     append: api.events.append.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.appendEvent({ ...input, userId: context.user.id });
-      });
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.appendSignal({ ...input, user: context.user }),
+      );
     }),
     list: api.events.list.handler(async ({ context, input }) => {
-      const events = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const query = {
-          userId: context.user.id,
+      const events = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listSignals({
           limit: input.limit,
-          ...(input.from ? { occurredFrom: input.from } : {}),
-          ...(input.to ? { occurredTo: input.to } : {}),
-        };
-        return yield* context.db.listRecentEvents(query);
-      });
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.to ? { to: input.to } : {}),
+          user: context.user,
+        }),
+      );
 
       return { events: [...events] };
     }),
   },
   signals: {
     list: api.signals.list.handler(async ({ context, input }) => {
-      const signals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const query = {
-          userId: context.user.id,
+      const signals = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listSignals({
           limit: input.limit,
-          ...(input.from ? { occurredFrom: input.from } : {}),
-          ...(input.to ? { occurredTo: input.to } : {}),
-        };
-        return yield* context.db.listRecentEvents(query);
-      });
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.to ? { to: input.to } : {}),
+          user: context.user,
+        }),
+      );
 
       return { signals: [...signals] };
     }),
   },
   proposals: {
     generate: api.proposals.generate.handler(async ({ context, input }) => {
-      const proposals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* ensureFrame(context.db, context.user.id, input.frameKey);
-        const synthesis = yield* context.db.getLatestSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-        });
-        if (!synthesis) return [];
-
-        const proposalInputs = buildDeterministicProposals({
-          userId: context.user.id,
-          synthesisId: synthesis.id,
-          openQuestions: synthesis.openQuestions,
-          themes: synthesis.themes,
-        });
-        const created = [];
-        for (const proposalInput of proposalInputs) {
-          created.push(yield* context.db.appendProposal(proposalInput));
-        }
-        return created;
-      });
+      const proposals = await context.recordSpan(
+        "proposals.generate",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.generateProposals({ frameKey: input.frameKey, user: context.user }),
+          ),
+      );
 
       return { proposals: proposals.map(toProposalResponse) };
     }),
     list: api.proposals.list.handler(async ({ context, input }) => {
-      const proposals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.listPendingProposals({
-          userId: context.user.id,
-          limit: input.limit,
-        });
-      });
+      const proposals = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listPendingProposals({ limit: input.limit, user: context.user }),
+      );
 
       return { proposals: proposals.map(toProposalResponse) };
     }),
   },
   reviews: {
     create: api.reviews.create.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.reviewProposal({
-          userId: context.user.id,
-          proposalId: input.proposalId,
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.reviewProposal({
           decision: input.decision,
           ...(input.editedTitle ? { editedTitle: input.editedTitle } : {}),
           ...(input.editedBody ? { editedBody: input.editedBody } : {}),
-        });
-      });
+          proposalId: input.proposalId,
+          user: context.user,
+        }),
+      );
     }),
   },
   syntheses: {
     create: api.syntheses.create.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* context.db.upsertCurrentFrame(
-          defaultFrame(context.user.id, input.frameKey),
-        );
-        const signals = yield* context.db.listRecentEvents({
-          userId: context.user.id,
-          limit: 20,
-        });
-        const synthesisInput = buildDeterministicSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-          signals,
-        });
-        const synthesis = yield* context.db.appendSynthesis(synthesisInput);
-        return { frame, synthesis: toSynthesisResponse(synthesis) };
-      });
+      return context.recordSpan(
+        "syntheses.create",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.createSynthesis({ frameKey: input.frameKey, user: context.user }),
+          ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
+      );
     }),
     latest: api.syntheses.latest.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* ensureFrame(context.db, context.user.id, input.frameKey);
-        const latest = yield* context.db.getLatestSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-        });
-        if (latest) return { frame, synthesis: toSynthesisResponse(latest) };
-
-        const signals = yield* context.db.listRecentEvents({
-          userId: context.user.id,
-          limit: 20,
-        });
-        const synthesis = yield* context.db.appendSynthesis(
-          buildDeterministicSynthesis({ userId: context.user.id, frameId: frame.id, signals }),
-        );
-        return { frame, synthesis: toSynthesisResponse(synthesis) };
-      });
+      return context.recordSpan(
+        "syntheses.latest",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.latestSynthesis({ frameKey: input.frameKey, user: context.user }),
+          ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
+      );
+    }),
+  },
+  traces: {
+    recent: api.traces.recent.handler(async ({ context, input }) => {
+      const rows = await Effect.runPromise(listRecentTraceSpans(context.traceDb, input.limit));
+      return { spans: rows.map(toTraceSpanSummary) };
     }),
   },
 });
+
+interface TraceSpanRow {
+  readonly id: string;
+  readonly trace_id: string;
+  readonly parent_span_id: string | null;
+  readonly name: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly duration_ms: number | null;
+  readonly route_name: string | null;
+  readonly method: string | null;
+  readonly path: string | null;
+}
+
+function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
+  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
+
+  return Effect.tryPromise({
+    try: async () => {
+      const result = await traceDb
+        .prepare(
+          `SELECT
+            span_id AS id,
+            trace_id,
+            parent_span_id,
+            name,
+            kind,
+            status,
+            started_at,
+            ended_at,
+            duration_ms,
+            route_name,
+            method,
+            path
+          FROM trace_spans
+          WHERE route_name IS NULL OR route_name != 'api.traces'
+          ORDER BY started_at DESC
+          LIMIT ?`,
+        )
+        .bind(limit)
+        .all<TraceSpanRow>();
+
+      return result.results ?? [];
+    },
+    catch: (cause) => cause,
+  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
+}
+
+function toTraceSpanSummary(row: TraceSpanRow) {
+  return {
+    id: row.id,
+    traceId: row.trace_id,
+    parentSpanId: row.parent_span_id,
+    name: row.name,
+    kind: row.kind,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    durationMs: row.duration_ms,
+    routeName: row.route_name,
+    method: row.method,
+    path: row.path,
+  };
+}
 
 function toSynthesisResponse(synthesis: {
   readonly id: string;
@@ -202,117 +255,8 @@ function toProposalResponse(proposal: {
   return proposal;
 }
 
-function defaultFrame(userId: string, key: string) {
-  return {
-    userId,
-    key,
-    title: key === "current_state" ? "What matters now?" : key,
-    prompt: "Synthesize recent signals into current context.",
-  };
-}
-
-function ensureFrame(db: DbService, userId: string, key: string) {
-  return Effect.gen(function* () {
-    const current = yield* db.getCurrentFrame({ userId, key });
-    if (current) return current;
-    return yield* db.upsertCurrentFrame(defaultFrame(userId, key));
-  });
-}
-
-function buildDeterministicSynthesis(input: {
-  readonly userId: string;
-  readonly frameId: string;
-  readonly signals: ReadonlyArray<{
-    readonly id: string;
-    readonly payload: unknown;
-    readonly type: string;
-  }>;
-}) {
-  const latestNote = noteFromPayload(input.signals[0]?.payload);
-  const themes = [...new Set(input.signals.flatMap((signal) => themesFromSignal(signal)))];
-
-  return {
-    userId: input.userId,
-    frameId: input.frameId,
-    summary:
-      input.signals.length === 0
-        ? "No recent signals captured."
-        : `${input.signals.length} signal${input.signals.length === 1 ? "" : "s"} captured. Latest: ${latestNote}`,
-    themes: themes.length > 0 ? themes : ["current-context"],
-    openQuestions: ["What needs attention next?"],
-    sourceSignalIds: input.signals.map((signal) => signal.id),
-  };
-}
-
-function buildDeterministicProposals(input: {
-  readonly userId: string;
-  readonly synthesisId: string;
-  readonly openQuestions: ReadonlyArray<string>;
-  readonly themes: ReadonlyArray<string>;
-}) {
-  const [firstQuestion] = input.openQuestions;
-  if (firstQuestion) {
-    return [
-      {
-        userId: input.userId,
-        synthesisId: input.synthesisId,
-        kind: "clarify" as const,
-        title: "Clarify next attention point",
-        body: `Answer: ${firstQuestion}`,
-        rationale: "Created from an open question in the synthesis.",
-      },
-    ];
-  }
-
-  if (input.themes.includes("travel")) {
-    return [
-      {
-        userId: input.userId,
-        synthesisId: input.synthesisId,
-        kind: "follow_up" as const,
-        title: "Review travel constraints",
-        body: "Check whether travel changes what needs attention next.",
-        rationale: "Created from a travel theme in the synthesis.",
-      },
-    ];
-  }
-
-  return [
-    {
-      userId: input.userId,
-      synthesisId: input.synthesisId,
-      kind: "clarify" as const,
-      title: "Capture more context",
-      body: "Add another capture so Lares has enough context to help.",
-      rationale: "Created because there were no open questions or specific themes.",
-    },
-  ];
-}
-
-function noteFromPayload(payload: unknown) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "note" in payload &&
-    typeof payload.note === "string"
-  ) {
-    return payload.note;
-  }
-
-  return "No note available";
-}
-
-function themesFromSignal(signal: { readonly payload: unknown; readonly type: string }) {
-  const note = noteFromPayload(signal.payload).toLowerCase();
-  const themes = [];
-  if (note.includes("travel") || note.includes("traveling")) themes.push("travel");
-  if (note.includes("follow up") || note.includes("follow-up")) themes.push("follow-up");
-  if (note.includes("work") || signal.type.includes("work")) themes.push("work");
-  return themes;
-}
-
-function runWithDb<A>(db: DbService, f: () => Generator<Effect.Effect<any>, A, any>) {
-  return Effect.runPromise(Effect.provideService(Effect.gen(f), Db, db));
+function runWorkflow<A, E>(db: DbService, workflow: Effect.Effect<A, E, Db>) {
+  return Effect.runPromise(Effect.provideService(workflow, Db, db));
 }
 
 function makeApiHandler() {
@@ -369,12 +313,21 @@ const currentUser = Effect.gen(function* () {
 });
 
 export function createApp(options: CreateAppOptions = {}) {
-  const app = new Hono<{ Bindings: Env }>();
+  const app = new Hono<ObservabilityHonoEnv>();
   const apiHandler = makeApiHandler();
   const sharedDb = options.dbLayer ? resolveDb(options.dbLayer) : undefined;
 
+  app.use("*", evlogWideEvents());
   app.use("*", requestObservability());
   app.use("*", serverTiming());
+
+  app.get("/api/version", (c) => {
+    addWideEventFields(c, { routeName: "api.version" });
+    return c.json({
+      service: "lares-web",
+      version: c.env.APP_VERSION ?? "0.0.0",
+    });
+  });
 
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
@@ -387,16 +340,37 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.proposals" });
     } else if (c.req.path.startsWith("/api/reviews")) {
       addWideEventFields(c, { routeName: "api.reviews" });
+    } else if (c.req.path.startsWith("/api/traces")) {
+      addWideEventFields(c, { routeName: "api.traces" });
     } else if (c.req.path.startsWith("/api/events")) {
       addWideEventFields(c, { routeName: "api.events" });
     }
 
-    const db = sharedDb ? await sharedDb : await resolveDb(Db.layerD1(c.env.DB));
-    const user = await resolveCurrentUser();
-    const result = await apiHandler.handle(c.req.raw, {
-      context: { db, user },
-      prefix: "/api",
-    });
+    const db = await runWithRequestSpan(
+      c,
+      {
+        attributes: { "db.system.name": "cloudflare-d1" },
+        kind: "client",
+        name: "db.resolve",
+      },
+      () => (sharedDb ? sharedDb : resolveDb(Db.layerD1(c.env.DB))),
+    );
+    const user = await runWithRequestSpan(
+      c,
+      { attributes: { "lares.auth.mode": "dev" }, name: "auth.current_user" },
+      () => resolveCurrentUser(),
+    );
+    const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
+      runWithRequestSpan(c, { ...input, name }, task);
+    const result = await runWithRequestSpan(
+      c,
+      { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
+      () =>
+        apiHandler.handle(c.req.raw, {
+          context: { db, recordSpan, traceDb: c.env.DB, user },
+          prefix: "/api",
+        }),
+    );
 
     if (result.matched) {
       return c.newResponse(result.response.body, result.response);
@@ -660,14 +634,6 @@ export function createApp(options: CreateAppOptions = {}) {
         dailyDigestWorkflow: Boolean(env.DAILY_DIGEST_WORKFLOW),
         userAgentSession: Boolean(env.USER_AGENT_SESSION),
       },
-    });
-  });
-
-  app.get("/api/version", (c) => {
-    addWideEventFields(c, { routeName: "api.version" });
-    return c.json({
-      service: "lares-web",
-      version: c.env.APP_VERSION ?? "0.0.0",
     });
   });
 

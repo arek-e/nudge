@@ -26,6 +26,7 @@
       "drizzle-kit": "0.31.10",
       "drizzle-orm": "0.45.2",
       "effect": "4.0.0-beta.80",
+      "evlog": "2.19.1",
       "hono": "4.12.25",
       "lefthook": "2.1.9",
       "motion": "12.40.0",

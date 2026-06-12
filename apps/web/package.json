@@ -37,6 +37,7 @@
     "@tanstack/react-router": "catalog:",
     "agents": "catalog:",
     "effect": "catalog:",
+    "evlog": "catalog:",
     "hono": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

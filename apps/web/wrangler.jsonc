@@ -12,8 +12,14 @@
     "run_worker_first": ["/api/*", "/health", "/__test/*"],
   },
   "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
   },
   "vars": {
     "ENVIRONMENT": "local",

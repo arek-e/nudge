@@ -77,6 +77,21 @@ export const reviewRecordSchema = z.object({
   createdAt: z.string(),
 });
 
+export const traceSpanSummarySchema = z.object({
+  id: z.string(),
+  traceId: z.string(),
+  parentSpanId: z.string().nullable(),
+  name: z.string(),
+  kind: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  durationMs: z.number().nullable(),
+  routeName: z.string().nullable(),
+  method: z.string().nullable(),
+  path: z.string().nullable(),
+});
+
 const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const proposalsInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const reviewInputSchema = z.object({
@@ -134,5 +149,11 @@ export const apiContract = {
       .route({ method: "GET", path: "/syntheses/latest" })
       .input(synthesisInputSchema)
       .output(synthesisResponseSchema),
+  },
+  traces: {
+    recent: oc
+      .route({ method: "GET", path: "/traces/recent" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
+      .output(z.object({ spans: z.array(traceSpanSummarySchema) })),
   },
 };

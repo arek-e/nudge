@@ -17,10 +17,10 @@ const env = {
 const createTraceDb = () => {
   const rows: Array<ReadonlyArray<unknown>> = [];
   const db = {
-    prepare: () => ({
+    prepare: (sql: string) => ({
       bind: (...values: ReadonlyArray<unknown>) => ({
         run: async () => {
-          rows.push(values);
+          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
           return { success: true };
         },
       }),
@@ -72,7 +72,25 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-request-id")).toBe("test-ray");
+    expect(response.headers.get("traceparent")).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/);
     expect(response.headers.get("Server-Timing")).toContain("total;dur=");
+  });
+
+  test("GET /health continues valid incoming trace context", async () => {
+    const incomingTraceId = "0af7651916cd43dd8448eb211c80319c";
+    const incomingSpanId = "b7ad6b7169203331";
+    const app = createApp();
+
+    const response = await app.request(
+      "/health",
+      { headers: { traceparent: `00-${incomingTraceId}-${incomingSpanId}-01` } },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("traceparent")).toMatch(
+      new RegExp(`^00-${incomingTraceId}-[a-f0-9]{16}-01$`),
+    );
   });
 
   test("GET /health records request telemetry meters", async () => {
@@ -104,8 +122,8 @@ describe("web app", () => {
         { ...env, LOG_HTTP_REQUESTS: "true" },
       );
 
-      const event = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]));
-      expect(event).toMatchObject({
+      const log = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]));
+      expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
         service: "lares-web",
@@ -121,8 +139,8 @@ describe("web app", () => {
         routeName: "health",
         userAgent: "test-agent",
       });
-      expect(typeof event.durationMs).toBe("number");
-      expect(typeof event.timestamp).toBe("string");
+      expect(typeof log.event.durationMs).toBe("number");
+      expect(typeof log.event.timestamp).toBe("string");
     } finally {
       consoleLog.mockRestore();
     }
@@ -162,6 +180,133 @@ describe("web app", () => {
     ]);
   });
 
+  test("GET /health persists a root request trace span", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp();
+
+    const response = await app.request(
+      "/health",
+      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
+      { ...env, DB: traceDb },
+    );
+
+    expect(response.status).toBe(200);
+    expect(spanRows).toHaveLength(1);
+    expect(spanRows[0]).toEqual([
+      expect.stringMatching(/^[a-f0-9]{32}$/),
+      expect.stringMatching(/^[a-f0-9]{16}$/),
+      null,
+      "GET /health",
+      "server",
+      "ok",
+      expect.any(String),
+      expect.any(String),
+      expect.any(Number),
+      "lares-web",
+      "test",
+      "test-version",
+      "span-ray",
+      "health",
+      "GET",
+      "/health",
+      200,
+      "success",
+      expect.any(String),
+      expect.any(String),
+    ]);
+  });
+
+  test("POST /api/syntheses records framework and primitive child spans", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/syntheses",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "cf-ray": "synthesis-ray" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      { ...env, DB: traceDb },
+    );
+
+    const names = spanRows.map((row) => row[3]);
+    const traceIds = new Set(spanRows.map((row) => row[0]));
+    const rootSpan = spanRows.find((row) => row[2] === null);
+    const childSpans = spanRows.filter((row) => row[2] !== null);
+
+    expect(response.status).toBe(200);
+    expect(names).toContain("POST /api/syntheses");
+    expect(names).toContain("db.resolve");
+    expect(names).toContain("auth.current_user");
+    expect(names).toContain("orpc.handle");
+    expect(names).toContain("syntheses.create");
+    expect(traceIds.size).toBe(1);
+    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
+    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
+  });
+
+  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          all: async () => ({ results: [] }),
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp();
+
+    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(spanRows).toHaveLength(0);
+  });
+
+  test("GET /api/version bypasses db and auth spans", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp();
+
+    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
+  });
+
   test("request errors still emit one wide request completion log", async () => {
     const app = createApp();
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
@@ -173,11 +318,11 @@ describe("web app", () => {
         { ...env, LOG_HTTP_REQUESTS: "true" },
       );
 
-      const event = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]));
+      const log = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]));
 
       expect(response.status).toBe(500);
       expect(consoleLog.mock.calls).toHaveLength(1);
-      expect(event).toMatchObject({
+      expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
         requestId: "error-ray",
@@ -204,6 +349,62 @@ describe("web app", () => {
     expect(body).toEqual({
       service: "lares-web",
       version: "test-version",
+    });
+  });
+
+  test("GET /api/traces/recent lists safe trace span summaries", async () => {
+    const rows = [
+      {
+        id: "span-1",
+        trace_id: "trace-1",
+        parent_span_id: null,
+        name: "GET /health",
+        kind: "server",
+        status: "ok",
+        started_at: "2026-06-12T10:00:00.000Z",
+        ended_at: "2026-06-12T10:00:00.125Z",
+        duration_ms: 125,
+        route_name: "health",
+        method: "GET",
+        path: "/health",
+      },
+    ];
+    let capturedSelectSql = "";
+    const traceDb = {
+      prepare: (sql: string) => {
+        if (sql.includes("SELECT")) capturedSelectSql = sql;
+        return {
+          bind: () => ({
+            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
+            run: async () => ({ success: true }),
+          }),
+        };
+      },
+    } as D1Database;
+    const app = createApp();
+
+    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(capturedSelectSql).toContain("span_id AS id");
+    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
+    expect(await response.json()).toEqual({
+      spans: [
+        {
+          id: "span-1",
+          traceId: "trace-1",
+          parentSpanId: null,
+          name: "GET /health",
+          kind: "server",
+          status: "ok",
+          startedAt: "2026-06-12T10:00:00.000Z",
+          endedAt: "2026-06-12T10:00:00.125Z",
+          durationMs: 125,
+          routeName: "health",
+          method: "GET",
+          path: "/health",
+        },
+      ],
     });
   });
 

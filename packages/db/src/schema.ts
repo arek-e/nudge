@@ -1,4 +1,12 @@
-import { index, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -131,6 +139,38 @@ export const reviews = sqliteTable(
   ],
 );
 
+export const traceSpans = sqliteTable(
+  "trace_spans",
+  {
+    traceId: text("trace_id").notNull(),
+    spanId: text("span_id").primaryKey(),
+    parentSpanId: text("parent_span_id"),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    startedAt: text("started_at").notNull(),
+    endedAt: text("ended_at"),
+    durationMs: real("duration_ms"),
+    service: text("service").notNull(),
+    environment: text("environment").notNull(),
+    version: text("version").notNull(),
+    requestId: text("request_id"),
+    routeName: text("route_name"),
+    method: text("method"),
+    path: text("path"),
+    httpStatus: integer("http_status"),
+    outcome: text("outcome"),
+    attributes: text("attributes").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("trace_spans_trace_started_idx").on(table.traceId, table.startedAt),
+    index("trace_spans_parent_idx").on(table.parentSpanId),
+    index("trace_spans_route_started_idx").on(table.routeName, table.startedAt),
+    index("trace_spans_status_started_idx").on(table.status, table.startedAt),
+  ],
+);
+
 export const schema = {
   events,
   frames,
@@ -138,5 +178,6 @@ export const schema = {
   reviews,
   syntheses,
   synthesisSources,
+  traceSpans,
   users,
 };
