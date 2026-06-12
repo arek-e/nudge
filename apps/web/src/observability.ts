@@ -6,10 +6,12 @@ import { Effect } from "effect";
 import {
   buildRootServerSpan,
   buildTraceSpanRow,
-  buildTraceEventRow,
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
+  persistTraceCacheEvent,
+  persistTraceCacheSpan,
+  pruneTraceCache,
   recordHttpRequestTelemetry,
   safeErrorFields,
 } from "@lares/observability";
@@ -154,7 +156,7 @@ export const requestObservability = (): AppMiddleware => {
 
       c.get("log").set(wideEvent);
 
-      if (cacheable) {
+      if (cacheable && typeof c.env.DB?.prepare === "function") {
         runBackgroundEffect(
           c,
           Effect.gen(function* () {
@@ -167,7 +169,21 @@ export const requestObservability = (): AppMiddleware => {
               startedAt: startedAtIso,
               traceId,
             });
-            yield* pruneTraceCache(c);
+            yield* pruneTraceCache(c.env.DB).pipe(
+              Effect.catch((cause) =>
+                Effect.sync(() => {
+                  console.warn(
+                    JSON.stringify({
+                      event: "trace_cache_prune_failed",
+                      logKind: "wide_event",
+                      service: "lares-web",
+                      requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+                      ...safeErrorFields(cause),
+                    }),
+                  );
+                }),
+              ),
+            );
           }),
         );
       }
@@ -246,9 +262,11 @@ const numberField = (event: Record<string, unknown>, key: string) => {
 const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
   if (typeof c.env.DB?.prepare !== "function") return Effect.void;
 
-  const row = buildTraceEventRow({ event, id: crypto.randomUUID(), now: new Date().toISOString() });
-
-  return runD1Row(c.env.DB, row).pipe(
+  return persistTraceCacheEvent(c.env.DB, {
+    event,
+    id: crypto.randomUUID(),
+    now: new Date().toISOString(),
+  }).pipe(
     Effect.catch((cause) =>
       Effect.sync(() => {
         console.warn(
@@ -282,49 +300,11 @@ const persistRootTraceSpan = (c: AppContext, event: Record<string, unknown>) => 
   return persistTraceSpanRow(c, row);
 };
 
-const pruneTraceCache = (c: AppContext) => {
-  if (typeof c.env.DB?.prepare !== "function") return Effect.void;
-
-  return Effect.gen(function* () {
-    yield* runD1Statement(
-      c.env.DB,
-      "DELETE FROM trace_spans WHERE julianday(created_at) < julianday('now', '-7 days')",
-    );
-    yield* runD1Statement(
-      c.env.DB,
-      "DELETE FROM trace_spans WHERE span_id NOT IN (SELECT span_id FROM trace_spans ORDER BY created_at DESC LIMIT 5000)",
-    );
-    yield* runD1Statement(
-      c.env.DB,
-      "DELETE FROM trace_events WHERE julianday(created_at) < julianday('now', '-7 days')",
-    );
-    yield* runD1Statement(
-      c.env.DB,
-      "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
-    );
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.sync(() => {
-        console.warn(
-          JSON.stringify({
-            event: "trace_cache_prune_failed",
-            logKind: "wide_event",
-            service: "lares-web",
-            requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
-            ...safeErrorFields(cause),
-          }),
-        );
-      }),
-    ),
-    Effect.asVoid,
-  );
-};
-
 const persistTraceSpanRow = (
   c: AppContext,
   row: { readonly sql: string; readonly values: ReadonlyArray<unknown> },
 ) => {
-  return runD1Row(c.env.DB, row).pipe(
+  return persistTraceCacheSpan(c.env.DB, row).pipe(
     Effect.catch((cause) =>
       Effect.sync(() => {
         console.warn(
@@ -357,25 +337,4 @@ const runBackgroundEffect = (c: AppContext, effect: Effect.Effect<void, unknown>
     executionCtx.waitUntil(persistence);
     return;
   }
-};
-
-const runD1Statement = (db: D1Database, sql: string) => {
-  return Effect.tryPromise({
-    try: () => db.prepare(sql).bind().run(),
-    catch: (cause) => cause,
-  }).pipe(Effect.asVoid);
-};
-
-const runD1Row = (
-  db: D1Database,
-  row: { readonly sql: string; readonly values: ReadonlyArray<unknown> },
-) => {
-  return Effect.tryPromise({
-    try: () =>
-      db
-        .prepare(row.sql)
-        .bind(...row.values)
-        .run(),
-    catch: (cause) => cause,
-  }).pipe(Effect.asVoid);
 };

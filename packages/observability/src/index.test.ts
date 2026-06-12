@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import {
   buildRootServerSpan,
   buildTraceSpanRow,
@@ -6,6 +7,9 @@ import {
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
+  persistTraceCacheEvent,
+  persistTraceCacheSpan,
+  pruneTraceCache,
   safeErrorFields,
   shouldSampleWideEvent,
   statusGroup,
@@ -213,5 +217,57 @@ describe("observability", () => {
   test("creates OpenTelemetry-compatible trace and span identifiers", () => {
     expect(createTraceId()).toMatch(/^[a-f0-9]{32}$/);
     expect(createSpanId()).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  test("persists and prunes trace cache rows through a small D1 adapter", async () => {
+    const statements: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            statements.push({ sql, values });
+            return { success: true };
+          },
+        }),
+      }),
+    };
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* persistTraceCacheEvent(db, {
+          event: { event: "http_request_completed", requestId: "ray-1" },
+          id: "event-1",
+          now: "2026-06-12T10:00:00.000Z",
+        });
+        yield* persistTraceCacheSpan(
+          db,
+          buildTraceSpanRow({
+            attributes: {},
+            durationMs: 1,
+            endedAt: "2026-06-12T10:00:00.001Z",
+            environment: "test",
+            kind: "internal",
+            name: "test.span",
+            parentSpanId: null,
+            service: "lares-web",
+            spanId: "span-1",
+            startedAt: "2026-06-12T10:00:00.000Z",
+            status: "ok",
+            traceId: "trace-1",
+            version: "test-version",
+          }),
+        );
+        yield* pruneTraceCache(db);
+      }),
+    );
+
+    expect(statements.map((statement) => statement.sql)).toEqual([
+      expect.stringContaining("INSERT INTO trace_events"),
+      expect.stringContaining("INSERT INTO trace_spans"),
+      expect.stringContaining("DELETE FROM trace_spans"),
+      expect.stringContaining("DELETE FROM trace_spans"),
+      expect.stringContaining("DELETE FROM trace_events"),
+      expect.stringContaining("DELETE FROM trace_events"),
+    ]);
   });
 });

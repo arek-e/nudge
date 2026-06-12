@@ -66,6 +66,14 @@ export interface SqlInsertRow {
   readonly values: ReadonlyArray<unknown>;
 }
 
+export interface TraceCacheDb {
+  readonly prepare: (sql: string) => {
+    readonly bind: (...values: ReadonlyArray<unknown>) => {
+      readonly run: () => Promise<unknown>;
+    };
+  };
+}
+
 const randomHex = (bytes: number) => {
   const values = new Uint8Array(bytes);
   crypto.getRandomValues(values);
@@ -262,6 +270,51 @@ export const buildTraceSpanRow = (input: TraceSpanRowInput): SqlInsertRow => {
       input.endedAt,
     ],
   };
+};
+
+export const persistTraceCacheEvent = (db: TraceCacheDb, input: TraceEventRowInput) =>
+  runTraceCacheRow(db, buildTraceEventRow(input));
+
+export const persistTraceCacheSpan = (db: TraceCacheDb, row: SqlInsertRow) => {
+  return runTraceCacheRow(db, row);
+};
+
+export const pruneTraceCache = (db: TraceCacheDb) =>
+  Effect.gen(function* () {
+    yield* runTraceCacheStatement(
+      db,
+      "DELETE FROM trace_spans WHERE julianday(created_at) < julianday('now', '-7 days')",
+    );
+    yield* runTraceCacheStatement(
+      db,
+      "DELETE FROM trace_spans WHERE span_id NOT IN (SELECT span_id FROM trace_spans ORDER BY created_at DESC LIMIT 5000)",
+    );
+    yield* runTraceCacheStatement(
+      db,
+      "DELETE FROM trace_events WHERE julianday(created_at) < julianday('now', '-7 days')",
+    );
+    yield* runTraceCacheStatement(
+      db,
+      "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
+    );
+  });
+
+const runTraceCacheRow = (db: TraceCacheDb, row: SqlInsertRow) => {
+  return Effect.tryPromise({
+    try: () =>
+      db
+        .prepare(row.sql)
+        .bind(...row.values)
+        .run(),
+    catch: (cause) => cause,
+  }).pipe(Effect.asVoid);
+};
+
+const runTraceCacheStatement = (db: TraceCacheDb, sql: string) => {
+  return Effect.tryPromise({
+    try: () => db.prepare(sql).bind().run(),
+    catch: (cause) => cause,
+  }).pipe(Effect.asVoid);
 };
 
 const httpRequestsTotal = Metric.counter("http_requests_total", {
