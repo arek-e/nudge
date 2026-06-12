@@ -408,7 +408,7 @@ describe("web app", () => {
     });
   });
 
-  test("GET /api/agent-sessions/:sessionId/tools/list-recent-signals forwards to the agent session", async () => {
+  test("GET /api/conversations/:conversationId/tools/list-recent-signals forwards to the agent session", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNamespace = {
       idFromName: (name: string) => ({ name }),
@@ -416,7 +416,7 @@ describe("web app", () => {
         fetch: async (request: Request) => {
           forwardedRequests.push(request);
           return Response.json({
-            sessionId: "focus",
+            conversationId: "focus",
             tool: "listRecentSignals",
             signals: [
               {
@@ -440,7 +440,7 @@ describe("web app", () => {
     let loggedEvent: unknown;
     try {
       response = await app.request(
-        "/api/agent-sessions/focus/tools/list-recent-signals?limit=5",
+        "/api/conversations/focus/tools/list-recent-signals?limit=5",
         {},
         { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
       );
@@ -453,12 +453,13 @@ describe("web app", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
+    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
     expect(loggedEvent).toMatchObject({
       agentTool: "listRecentSignals",
-      routeName: "api.agentSessions",
+      routeName: "api.conversations",
     });
     expect(await response.json()).toEqual({
-      sessionId: "focus",
+      conversationId: "focus",
       tool: "listRecentSignals",
       signals: [
         {

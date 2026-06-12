@@ -11,21 +11,21 @@ const app = createApp();
 export default app;
 
 interface UserAgentSessionState {
+  readonly conversationId: string | null;
   readonly createdAt: string | null;
   readonly recentToolEvents: ReadonlyArray<{
     readonly at: string;
     readonly resultCount: number;
     readonly tool: "listRecentSignals";
   }>;
-  readonly sessionId: string | null;
   readonly updatedAt: string | null;
   readonly userId: string;
 }
 
 const initialUserAgentSessionState = {
+  conversationId: null,
   createdAt: null,
   recentToolEvents: [],
-  sessionId: null,
   updatedAt: null,
   userId: "dev-user",
 } satisfies UserAgentSessionState;
@@ -48,7 +48,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async listRecentSignals(request: Request, url: URL) {
-    const sessionId = request.headers.get("x-lares-session-id") ?? "default";
+    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 50);
     const signals = await Effect.runPromise(
       Effect.provide(
@@ -63,18 +63,18 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const previous = this.state ?? initialUserAgentSessionState;
 
     this.setState({
+      conversationId,
       createdAt: previous.createdAt ?? timestamp,
       recentToolEvents: [
         { at: timestamp, resultCount: signals.length, tool: "listRecentSignals" as const },
         ...previous.recentToolEvents,
       ].slice(0, 20),
-      sessionId,
       updatedAt: timestamp,
       userId: "dev-user",
     });
 
     return Response.json({
-      sessionId,
+      conversationId,
       tool: "listRecentSignals",
       signals: signals.map((signal) => ({
         id: signal.id,

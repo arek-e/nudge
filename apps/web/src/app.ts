@@ -329,13 +329,13 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
-  app.get("/api/agent-sessions/:sessionId/tools/list-recent-signals", async (c) => {
+  app.get("/api/conversations/:conversationId/tools/list-recent-signals", async (c) => {
     addWideEventFields(c, {
-      routeName: "api.agentSessions",
+      routeName: "api.conversations",
       agentTool: "listRecentSignals",
     });
-    const sessionId = c.req.param("sessionId");
-    const agentId = c.env.USER_AGENT_SESSION.idFromName(sessionId);
+    const conversationId = c.req.param("conversationId");
+    const agentId = c.env.USER_AGENT_SESSION.idFromName(conversationId);
     const agent = c.env.USER_AGENT_SESSION.get(agentId);
     const url = new URL(c.req.url);
     url.pathname = "/tools/list-recent-signals";
@@ -343,7 +343,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const response = await agent.fetch(
       new Request(url, {
         headers: {
-          "x-lares-session-id": sessionId,
+          "x-lares-conversation-id": conversationId,
         },
         method: "GET",
       }),
