@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../.tsbuild/apps/web",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../.tsbuild/apps/web.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/effect-services" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/evals" }
+  ]
+}

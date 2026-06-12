@@ -1,0 +1,34 @@
+[tools]
+bun = "1.3.3"
+node = "22.21.1"
+
+[env]
+_.path = ["node_modules/.bin"]
+
+[tasks.install]
+description = "Install workspace dependencies with the pinned Bun runtime"
+run = "bun install"
+
+[tasks.dev]
+description = "Run the Cloudflare Worker locally"
+run = "bun run dev"
+
+[tasks.test]
+description = "Run the test suite"
+run = "bun test"
+
+[tasks.typecheck]
+description = "Run TypeScript project references"
+run = "bun ./node_modules/typescript/bin/tsc -b"
+
+[tasks.lint]
+description = "Run Oxlint"
+run = "bun run lint"
+
+[tasks.format]
+description = "Format code, imports, Tailwind classes, and docs"
+run = "bun run format"
+
+[tasks.check]
+description = "Run formatting check, lint, typecheck, and tests"
+run = "bun run check"

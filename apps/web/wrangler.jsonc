@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "personal-agent-os-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "local",
+    "APP_VERSION": "0.0.0",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "personal-agent-os-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_AGENT_SESSION",
+        "class_name": "UserAgentSession",
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "name": "daily-digest-workflow",
+      "binding": "DAILY_DIGEST_WORKFLOW",
+      "class_name": "DailyDigestWorkflow",
+    },
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserAgentSession"],
+    },
+  ],
+}

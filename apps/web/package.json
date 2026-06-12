@@ -1,0 +1,18 @@
+{
+  "name": "@personal-agent-os/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@personal-agent-os/db": "workspace:*",
+    "@personal-agent-os/domain": "workspace:*",
+    "@personal-agent-os/effect-services": "workspace:*",
+    "@personal-agent-os/evals": "workspace:*",
+    "effect": "catalog:",
+    "hono": "catalog:"
+  }
+}

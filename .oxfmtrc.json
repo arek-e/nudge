@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "sortImports": {
+    "newlinesBetween": false,
+    "customGroups": [
+      {
+        "groupName": "cloudflare",
+        "elementNamePattern": ["cloudflare:workers"]
+      },
+      {
+        "groupName": "hono",
+        "elementNamePattern": ["hono", "hono/**"]
+      },
+      {
+        "groupName": "effect",
+        "elementNamePattern": ["effect", "effect/**"]
+      },
+      {
+        "groupName": "workspace",
+        "elementNamePattern": ["@personal-agent-os/**"]
+      }
+    ],
+    "groups": [
+      "type-import",
+      ["value-builtin", "value-external"],
+      "cloudflare",
+      "hono",
+      "effect",
+      "workspace",
+      ["type-parent", "type-sibling", "type-index"],
+      ["value-parent", "value-sibling", "value-index"],
+      "unknown"
+    ]
+  },
+  "sortTailwindcss": {
+    "functions": ["clsx", "cva", "cn"],
+    "preserveWhitespace": true
+  },
+  "sortPackageJson": {
+    "sortScripts": true
+  },
+  "ignorePatterns": ["node_modules/**", ".tsbuild/**", ".wrangler/**"]
+}

@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../.tsbuild/packages/effect-services",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../.tsbuild/packages/effect-services.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../domain" }]
+}

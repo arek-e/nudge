@@ -1,0 +1,13 @@
+{
+  "plugins": ["typescript", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "import/no-duplicates": "error"
+  },
+  "ignorePatterns": ["node_modules/**", ".tsbuild/**", ".wrangler/**"]
+}

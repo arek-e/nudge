@@ -1,0 +1,8 @@
+{
+  "name": "@personal-agent-os/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

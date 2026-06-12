@@ -1,0 +1,40 @@
+{
+  "name": "personal-agent-os",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
+    "deploy": "bun --cwd apps/web run deploy",
+    "dev": "bun --cwd apps/web run dev",
+    "format": "bun run format:write",
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    "hooks:install": "lefthook install",
+    "lint": "oxlint .",
+    "prepare": "test ! -d .git || lefthook install",
+    "test": "bun test",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc -b"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "lefthook": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "catalog": {
+    "@cloudflare/workers-types": "4.20260612.1",
+    "effect": "3.21.3",
+    "hono": "4.12.25",
+    "lefthook": "2.1.9",
+    "oxfmt": "0.54.0",
+    "oxlint": "1.69.0",
+    "typescript": "6.0.3",
+    "wrangler": "4.100.0"
+  }
+}
