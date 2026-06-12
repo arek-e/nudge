@@ -35,6 +35,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   async onRequest(request: Request) {
     const url = new URL(request.url);
+    if (url.pathname === "/metadata") {
+      return this.metadata(request);
+    }
     if (url.pathname === "/tools/list-recent-signals") {
       return this.listRecentSignals(request, url);
     }
@@ -43,6 +46,20 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       ok: true,
       role: "user-agent-session",
       session: this.state,
+      tools: ["listRecentSignals"],
+    });
+  }
+
+  private metadata(request: Request) {
+    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const state = this.state ?? initialUserAgentSessionState;
+
+    return Response.json({
+      conversationId,
+      userId: state.userId,
+      createdAt: state.createdAt,
+      updatedAt: state.updatedAt,
+      recentToolEvents: state.recentToolEvents,
       tools: ["listRecentSignals"],
     });
   }
@@ -78,6 +95,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       tool: "listRecentSignals",
       signals: signals.map((signal) => ({
         id: signal.id,
+        userId: signal.userId,
         type: signal.type,
         source: signal.source,
         occurredAt: signal.occurredAt,

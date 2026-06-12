@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
@@ -6,7 +7,11 @@ import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
 import { AuthService, PrimitiveWorkflows } from "@lares/effect-services";
-import { apiContract } from "./api-contract";
+import {
+  apiContract,
+  conversationMetadataSchema,
+  listRecentSignalsToolResponseSchema,
+} from "./api-contract";
 import {
   addWideEventFields,
   evlogWideEvents,
@@ -19,6 +24,7 @@ import {
 type AppDbLayer = Layer.Layer<Db>;
 
 interface ApiContext {
+  readonly agentSessions: DurableObjectNamespace;
   readonly db: DbService;
   readonly recordSpan: <A>(
     name: string,
@@ -42,6 +48,26 @@ interface CreateAppOptions {
 const api = implement(apiContract).$context<ApiContext>();
 
 export const apiRouter = api.router({
+  conversations: {
+    get: api.conversations.get.handler(async ({ context, input }) => {
+      return proxyConversationRequest(
+        context.agentSessions,
+        input.conversationId,
+        "/metadata",
+        conversationMetadataSchema,
+      );
+    }),
+    listRecentSignals: api.conversations.listRecentSignals.handler(async ({ context, input }) => {
+      const url = new URL("https://lares.local/tools/list-recent-signals");
+      url.searchParams.set("limit", String(input.limit ?? 10));
+      return proxyConversationRequest(
+        context.agentSessions,
+        input.conversationId,
+        url,
+        listRecentSignalsToolResponseSchema,
+      );
+    }),
+  },
   captures: {
     append: api.captures.append.handler(async ({ context, input }) => {
       return runWorkflow(
@@ -61,7 +87,7 @@ export const apiRouter = api.router({
       const events = await runWorkflow(
         context.db,
         PrimitiveWorkflows.listSignals({
-          limit: input.limit,
+          limit: input.limit ?? 50,
           ...(input.from ? { from: input.from } : {}),
           ...(input.to ? { to: input.to } : {}),
           user: context.user,
@@ -76,7 +102,7 @@ export const apiRouter = api.router({
       const signals = await runWorkflow(
         context.db,
         PrimitiveWorkflows.listSignals({
-          limit: input.limit,
+          limit: input.limit ?? 50,
           ...(input.from ? { from: input.from } : {}),
           ...(input.to ? { to: input.to } : {}),
           user: context.user,
@@ -94,7 +120,10 @@ export const apiRouter = api.router({
         () =>
           runWorkflow(
             context.db,
-            PrimitiveWorkflows.generateProposals({ frameKey: input.frameKey, user: context.user }),
+            PrimitiveWorkflows.generateProposals({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
           ),
       );
 
@@ -103,7 +132,7 @@ export const apiRouter = api.router({
     list: api.proposals.list.handler(async ({ context, input }) => {
       const proposals = await runWorkflow(
         context.db,
-        PrimitiveWorkflows.listPendingProposals({ limit: input.limit, user: context.user }),
+        PrimitiveWorkflows.listPendingProposals({ limit: input.limit ?? 20, user: context.user }),
       );
 
       return { proposals: proposals.map(toProposalResponse) };
@@ -131,7 +160,10 @@ export const apiRouter = api.router({
         () =>
           runWorkflow(
             context.db,
-            PrimitiveWorkflows.createSynthesis({ frameKey: input.frameKey, user: context.user }),
+            PrimitiveWorkflows.createSynthesis({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
           ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
       );
     }),
@@ -142,18 +174,47 @@ export const apiRouter = api.router({
         () =>
           runWorkflow(
             context.db,
-            PrimitiveWorkflows.latestSynthesis({ frameKey: input.frameKey, user: context.user }),
+            PrimitiveWorkflows.latestSynthesis({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
           ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
       );
     }),
   },
   traces: {
     recent: api.traces.recent.handler(async ({ context, input }) => {
-      const rows = await Effect.runPromise(listRecentTraceSpans(context.traceDb, input.limit));
+      const rows = await Effect.runPromise(
+        listRecentTraceSpans(context.traceDb, input.limit ?? 20),
+      );
       return { spans: rows.map(toTraceSpanSummary) };
     }),
   },
 });
+
+async function proxyConversationRequest<Schema extends z.ZodType>(
+  agentSessions: DurableObjectNamespace,
+  conversationId: string,
+  pathOrUrl: string | URL,
+  schema: Schema,
+): Promise<z.infer<Schema>> {
+  const agentId = agentSessions.idFromName(conversationId);
+  const agent = agentSessions.get(agentId);
+  const url =
+    typeof pathOrUrl === "string" ? new URL(`https://lares.local${pathOrUrl}`) : pathOrUrl;
+  const response = await agent.fetch(
+    new Request(url, {
+      headers: { "x-lares-conversation-id": conversationId },
+      method: "GET",
+    }),
+  );
+
+  if (!response.ok) {
+    throw new Error(`Conversation agent request failed with ${response.status}`);
+  }
+
+  return schema.parse(await response.json());
+}
 
 interface TraceSpanRow {
   readonly id: string;
@@ -329,32 +390,14 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
-  app.get("/api/conversations/:conversationId/tools/list-recent-signals", async (c) => {
-    addWideEventFields(c, {
-      routeName: "api.conversations",
-      agentTool: "listRecentSignals",
-    });
-    const conversationId = c.req.param("conversationId");
-    const agentId = c.env.USER_AGENT_SESSION.idFromName(conversationId);
-    const agent = c.env.USER_AGENT_SESSION.get(agentId);
-    const url = new URL(c.req.url);
-    url.pathname = "/tools/list-recent-signals";
-
-    const response = await agent.fetch(
-      new Request(url, {
-        headers: {
-          "x-lares-conversation-id": conversationId,
-        },
-        method: "GET",
-      }),
-    );
-
-    return c.newResponse(response.body, response);
-  });
-
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
+    } else if (c.req.path.startsWith("/api/conversations")) {
+      addWideEventFields(c, { routeName: "api.conversations" });
+      if (c.req.path.includes("/tools/list-recent-signals")) {
+        addWideEventFields(c, { agentTool: "listRecentSignals" });
+      }
     } else if (c.req.path.startsWith("/api/signals")) {
       addWideEventFields(c, { routeName: "api.signals" });
     } else if (c.req.path.startsWith("/api/syntheses")) {
@@ -390,7 +433,13 @@ export function createApp(options: CreateAppOptions = {}) {
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
       () =>
         apiHandler.handle(c.req.raw, {
-          context: { db, recordSpan, traceDb: c.env.DB, user },
+          context: {
+            agentSessions: c.env.USER_AGENT_SESSION,
+            db,
+            recordSpan,
+            traceDb: c.env.DB,
+            user,
+          },
           prefix: "/api",
         }),
     );

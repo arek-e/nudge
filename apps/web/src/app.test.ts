@@ -421,6 +421,7 @@ describe("web app", () => {
             signals: [
               {
                 id: "signal-1",
+                userId: "dev-user",
                 type: "capture.note",
                 source: "test",
                 occurredAt: "2026-06-12T10:00:00.000Z",
@@ -464,6 +465,7 @@ describe("web app", () => {
       signals: [
         {
           id: "signal-1",
+          userId: "dev-user",
           type: "capture.note",
           source: "test",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -472,6 +474,46 @@ describe("web app", () => {
           createdAt: "2026-06-12T10:00:00.000Z",
         },
       ],
+    });
+  });
+
+  test("GET /api/conversations/:conversationId returns conversation metadata", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => ({ name }),
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          return Response.json({
+            conversationId: "focus",
+            userId: "dev-user",
+            createdAt: null,
+            updatedAt: null,
+            recentToolEvents: [],
+            tools: ["listRecentSignals"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp();
+
+    const response = await app.request(
+      "/api/conversations/focus",
+      {},
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
+    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(await response.json()).toEqual({
+      conversationId: "focus",
+      userId: "dev-user",
+      createdAt: null,
+      updatedAt: null,
+      recentToolEvents: [],
+      tools: ["listRecentSignals"],
     });
   });
 
@@ -726,6 +768,14 @@ describe("web app", () => {
     });
     expect(spec.paths["/signals"].get).toMatchObject({
       operationId: "signals.list",
+    });
+    expect(spec.paths["/conversations/{conversationId}"].get).toMatchObject({
+      operationId: "conversations.get",
+    });
+    expect(
+      spec.paths["/conversations/{conversationId}/tools/list-recent-signals"].get,
+    ).toMatchObject({
+      operationId: "conversations.listRecentSignals",
     });
   });
 

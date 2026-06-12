@@ -92,6 +92,27 @@ export const traceSpanSummarySchema = z.object({
   path: z.string().nullable(),
 });
 
+export const conversationToolEventSchema = z.object({
+  at: z.string(),
+  resultCount: z.number().int().min(0),
+  tool: z.literal("listRecentSignals"),
+});
+
+export const conversationMetadataSchema = z.object({
+  conversationId: z.string(),
+  userId: z.string(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  recentToolEvents: z.array(conversationToolEventSchema),
+  tools: z.array(z.literal("listRecentSignals")),
+});
+
+export const listRecentSignalsToolResponseSchema = z.object({
+  conversationId: z.string(),
+  tool: z.literal("listRecentSignals"),
+  signals: z.array(eventRecordSchema),
+});
+
 const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const proposalsInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const reviewInputSchema = z.object({
@@ -100,8 +121,27 @@ const reviewInputSchema = z.object({
   editedTitle: z.string().optional(),
   editedBody: z.string().optional(),
 });
+const conversationInputSchema = z.object({
+  conversationId: z.string().min(1).max(128),
+});
+const conversationSignalsInputSchema = conversationInputSchema.extend({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
 
 export const apiContract = {
+  conversations: {
+    get: oc
+      .route({ method: "GET", path: "/conversations/{conversationId}" })
+      .input(conversationInputSchema)
+      .output(conversationMetadataSchema),
+    listRecentSignals: oc
+      .route({
+        method: "GET",
+        path: "/conversations/{conversationId}/tools/list-recent-signals",
+      })
+      .input(conversationSignalsInputSchema)
+      .output(listRecentSignalsToolResponseSchema),
+  },
   captures: {
     append: oc
       .route({ method: "POST", path: "/captures" })
