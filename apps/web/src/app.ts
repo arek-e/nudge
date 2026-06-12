@@ -1,6 +1,6 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
-import { implement } from "@orpc/server";
+import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
@@ -73,6 +73,58 @@ export const apiRouter = api.router({
       return { signals: [...signals] };
     }),
   },
+  proposals: {
+    generate: api.proposals.generate.handler(async ({ context, input }) => {
+      const proposals = await runWithDb(context.db, function* () {
+        yield* context.db.ensureUser(context.user);
+        const frame = yield* ensureFrame(context.db, context.user.id, input.frameKey);
+        const synthesis = yield* context.db.getLatestSynthesis({
+          userId: context.user.id,
+          frameId: frame.id,
+        });
+        if (!synthesis) return [];
+
+        const proposalInputs = buildDeterministicProposals({
+          userId: context.user.id,
+          synthesisId: synthesis.id,
+          openQuestions: synthesis.openQuestions,
+          themes: synthesis.themes,
+        });
+        const created = [];
+        for (const proposalInput of proposalInputs) {
+          created.push(yield* context.db.appendProposal(proposalInput));
+        }
+        return created;
+      });
+
+      return { proposals: proposals.map(toProposalResponse) };
+    }),
+    list: api.proposals.list.handler(async ({ context, input }) => {
+      const proposals = await runWithDb(context.db, function* () {
+        yield* context.db.ensureUser(context.user);
+        return yield* context.db.listPendingProposals({
+          userId: context.user.id,
+          limit: input.limit,
+        });
+      });
+
+      return { proposals: proposals.map(toProposalResponse) };
+    }),
+  },
+  reviews: {
+    create: api.reviews.create.handler(async ({ context, input }) => {
+      return runWithDb(context.db, function* () {
+        yield* context.db.ensureUser(context.user);
+        return yield* context.db.reviewProposal({
+          userId: context.user.id,
+          proposalId: input.proposalId,
+          decision: input.decision,
+          ...(input.editedTitle ? { editedTitle: input.editedTitle } : {}),
+          ...(input.editedBody ? { editedBody: input.editedBody } : {}),
+        });
+      });
+    }),
+  },
   syntheses: {
     create: api.syntheses.create.handler(async ({ context, input }) => {
       return runWithDb(context.db, function* () {
@@ -135,6 +187,21 @@ function toSynthesisResponse(synthesis: {
   };
 }
 
+function toProposalResponse(proposal: {
+  readonly id: string;
+  readonly userId: string;
+  readonly synthesisId: string;
+  readonly kind: "clarify" | "follow_up" | "commit" | "ignore";
+  readonly status: "pending" | "accepted" | "edited" | "rejected";
+  readonly title: string;
+  readonly body: string;
+  readonly rationale: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}) {
+  return proposal;
+}
+
 function defaultFrame(userId: string, key: string) {
   return {
     userId,
@@ -177,6 +244,51 @@ function buildDeterministicSynthesis(input: {
   };
 }
 
+function buildDeterministicProposals(input: {
+  readonly userId: string;
+  readonly synthesisId: string;
+  readonly openQuestions: ReadonlyArray<string>;
+  readonly themes: ReadonlyArray<string>;
+}) {
+  const [firstQuestion] = input.openQuestions;
+  if (firstQuestion) {
+    return [
+      {
+        userId: input.userId,
+        synthesisId: input.synthesisId,
+        kind: "clarify" as const,
+        title: "Clarify next attention point",
+        body: `Answer: ${firstQuestion}`,
+        rationale: "Created from an open question in the synthesis.",
+      },
+    ];
+  }
+
+  if (input.themes.includes("travel")) {
+    return [
+      {
+        userId: input.userId,
+        synthesisId: input.synthesisId,
+        kind: "follow_up" as const,
+        title: "Review travel constraints",
+        body: "Check whether travel changes what needs attention next.",
+        rationale: "Created from a travel theme in the synthesis.",
+      },
+    ];
+  }
+
+  return [
+    {
+      userId: input.userId,
+      synthesisId: input.synthesisId,
+      kind: "clarify" as const,
+      title: "Capture more context",
+      body: "Add another capture so Lares has enough context to help.",
+      rationale: "Created because there were no open questions or specific themes.",
+    },
+  ];
+}
+
 function noteFromPayload(payload: unknown) {
   if (
     payload &&
@@ -205,6 +317,20 @@ function runWithDb<A>(db: DbService, f: () => Generator<Effect.Effect<any>, A, a
 
 function makeApiHandler() {
   return new OpenAPIHandler(apiRouter, {
+    interceptors: [
+      onError((error) => {
+        const safeError = error instanceof Error ? error : new Error("Unknown API handler error");
+        console.warn(
+          JSON.stringify({
+            event: "api_handler_error",
+            logKind: "wide_event",
+            service: "lares-web",
+            errorType: safeError.name,
+            errorMessage: safeError.message,
+          }),
+        );
+      }),
+    ],
     plugins: [
       new OpenAPIReferencePlugin({
         docsPath: "/docs",
@@ -257,6 +383,10 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.signals" });
     } else if (c.req.path.startsWith("/api/syntheses")) {
       addWideEventFields(c, { routeName: "api.syntheses" });
+    } else if (c.req.path.startsWith("/api/proposals")) {
+      addWideEventFields(c, { routeName: "api.proposals" });
+    } else if (c.req.path.startsWith("/api/reviews")) {
+      addWideEventFields(c, { routeName: "api.reviews" });
     } else if (c.req.path.startsWith("/api/events")) {
       addWideEventFields(c, { routeName: "api.events" });
     }

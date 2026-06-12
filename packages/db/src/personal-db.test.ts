@@ -143,4 +143,56 @@ describe("Db", () => {
       sourceSignalIds: [result.signal.id],
     });
   });
+
+  test("stores pending proposals and review decisions for a synthesis", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const frame = yield* db.upsertCurrentFrame({
+        userId: "user-a",
+        key: "current_state",
+        title: "What matters now?",
+        prompt: "Synthesize recent signals into current context.",
+      });
+      const synthesis = yield* db.appendSynthesis({
+        userId: "user-a",
+        frameId: frame.id,
+        summary: "User has one open question.",
+        themes: ["current-context"],
+        openQuestions: ["What needs attention next?"],
+        sourceSignalIds: [],
+      });
+
+      const proposal = yield* db.appendProposal({
+        userId: "user-a",
+        synthesisId: synthesis.id,
+        kind: "clarify",
+        title: "Clarify next attention point",
+        body: "Answer: What needs attention next?",
+        rationale: "Created from an open question in the synthesis.",
+      });
+      const pendingBeforeReview = yield* db.listPendingProposals({ userId: "user-a", limit: 10 });
+      const review = yield* db.reviewProposal({
+        userId: "user-a",
+        proposalId: proposal.id,
+        decision: "accepted",
+      });
+      const pendingAfterReview = yield* db.listPendingProposals({ userId: "user-a", limit: 10 });
+
+      return { pendingAfterReview, pendingBeforeReview, proposal, review };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.pendingBeforeReview).toEqual([result.proposal]);
+    expect(result.review).toEqual(
+      expect.objectContaining({
+        userId: "user-a",
+        proposalId: result.proposal.id,
+        decision: "accepted",
+      }),
+    );
+    expect(result.pendingAfterReview).toEqual([]);
+  });
 });

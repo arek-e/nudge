@@ -15,6 +15,7 @@ import {
   HomeDashboard,
   injectStyles,
   LaresAppShell,
+  ProposalReviewPanel,
   Surface,
   SynthesisPanel,
 } from "@lares/ui";
@@ -54,6 +55,7 @@ function TodayScreen() {
   const [isPending, startTransition] = useTransition();
   const events = useEvents();
   const latestSynthesis = useLatestSynthesis();
+  const proposals = usePendingProposals();
   const saveCheckIn = useMutation({
     mutationFn: async (value: string) => {
       await apiClient.captures.append({
@@ -81,6 +83,25 @@ function TodayScreen() {
       await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
     },
   });
+  const generateProposals = useMutation({
+    mutationFn: async () => {
+      await apiClient.proposals.generate({ frameKey: "current_state" });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+  });
+  const reviewProposal = useMutation({
+    mutationFn: async (input: {
+      readonly proposalId: string;
+      readonly decision: "accepted" | "rejected";
+    }) => {
+      await apiClient.reviews.create(input);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+  });
 
   return (
     <LaresAppShell>
@@ -106,6 +127,18 @@ function TodayScreen() {
           loading={latestSynthesis.isLoading}
           generating={generateSynthesis.isPending}
           onGenerate={() => generateSynthesis.mutate()}
+        />
+      </Surface>
+
+      <Surface id="proposals-title" eyebrow="Review" title="Proposals">
+        <ProposalReviewPanel
+          proposals={proposals.data?.proposals}
+          loading={proposals.isLoading}
+          generating={generateProposals.isPending}
+          reviewingId={reviewProposal.variables?.proposalId}
+          onGenerate={() => generateProposals.mutate()}
+          onAccept={(proposalId) => reviewProposal.mutate({ proposalId, decision: "accepted" })}
+          onReject={(proposalId) => reviewProposal.mutate({ proposalId, decision: "rejected" })}
         />
       </Surface>
 
@@ -169,6 +202,15 @@ function useLatestSynthesis() {
     queryKey: ["synthesis", "current_state"],
     queryFn: async () => {
       return apiClient.syntheses.latest({ frameKey: "current_state" });
+    },
+  });
+}
+
+function usePendingProposals() {
+  return useQuery({
+    queryKey: ["proposals"],
+    queryFn: async () => {
+      return apiClient.proposals.list({ limit: 20 });
     },
   });
 }

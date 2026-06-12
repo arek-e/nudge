@@ -86,9 +86,56 @@ export const synthesisSources = sqliteTable(
   ],
 );
 
+export const proposals = sqliteTable(
+  "proposals",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    synthesisId: text("synthesis_id")
+      .notNull()
+      .references(() => syntheses.id),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    rationale: text("rationale").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("proposals_user_status_created_idx").on(table.userId, table.status, table.createdAt),
+    index("proposals_synthesis_idx").on(table.synthesisId),
+  ],
+);
+
+export const reviews = sqliteTable(
+  "reviews",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    proposalId: text("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    decision: text("decision").notNull(),
+    editedTitle: text("edited_title"),
+    editedBody: text("edited_body"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("reviews_user_created_idx").on(table.userId, table.createdAt),
+    index("reviews_proposal_idx").on(table.proposalId),
+  ],
+);
+
 export const schema = {
   events,
   frames,
+  proposals,
+  reviews,
   syntheses,
   synthesisSources,
   users,

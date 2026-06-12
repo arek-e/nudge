@@ -1,7 +1,16 @@
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Context, Effect, Layer } from "effect";
-import { events, frames, schema, syntheses, synthesisSources, users } from "./schema";
+import {
+  events,
+  frames,
+  proposals,
+  reviews,
+  schema,
+  syntheses,
+  synthesisSources,
+  users,
+} from "./schema";
 
 export type DatabaseProvider = "memory" | "d1" | "planetscale" | "turso" | "postgres";
 
@@ -70,10 +79,49 @@ export interface SynthesisRecord extends AppendSynthesisInput {
   readonly createdAt: string;
 }
 
+export type ProposalKind = "clarify" | "follow_up" | "commit" | "ignore";
+export type ProposalStatus = "pending" | "accepted" | "edited" | "rejected";
+export type ReviewDecision = "accepted" | "edited" | "rejected";
+
+export interface AppendProposalInput {
+  readonly userId: string;
+  readonly synthesisId: string;
+  readonly kind: ProposalKind;
+  readonly title: string;
+  readonly body: string;
+  readonly rationale: string;
+}
+
+export interface ProposalRecord extends AppendProposalInput {
+  readonly id: string;
+  readonly status: ProposalStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ListPendingProposalsInput {
+  readonly userId: string;
+  readonly limit: number;
+}
+
+export interface ReviewProposalInput {
+  readonly userId: string;
+  readonly proposalId: string;
+  readonly decision: ReviewDecision;
+  readonly editedTitle?: string;
+  readonly editedBody?: string;
+}
+
+export interface ReviewRecord extends ReviewProposalInput {
+  readonly id: string;
+  readonly createdAt: string;
+}
+
 export interface DbService {
   readonly provider: DatabaseProvider;
   readonly ensureUser: (user: DbUser) => Effect.Effect<void>;
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<EventRecord>;
+  readonly appendProposal: (input: AppendProposalInput) => Effect.Effect<ProposalRecord>;
   readonly appendSynthesis: (input: AppendSynthesisInput) => Effect.Effect<SynthesisRecord>;
   readonly getCurrentFrame: (input: GetCurrentFrameInput) => Effect.Effect<FrameRecord | null>;
   readonly getLatestSynthesis: (
@@ -82,6 +130,10 @@ export interface DbService {
   readonly listRecentEvents: (
     input: RecentEventsInput,
   ) => Effect.Effect<ReadonlyArray<EventRecord>>;
+  readonly listPendingProposals: (
+    input: ListPendingProposalsInput,
+  ) => Effect.Effect<ReadonlyArray<ProposalRecord>>;
+  readonly reviewProposal: (input: ReviewProposalInput) => Effect.Effect<ReviewRecord>;
   readonly upsertCurrentFrame: (input: UpsertCurrentFrameInput) => Effect.Effect<FrameRecord>;
 }
 
@@ -94,6 +146,19 @@ const byRecentEvent = (left: EventRecord, right: EventRecord) => {
   );
 };
 
+const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  synthesisId: row.synthesisId,
+  kind: row.kind as ProposalKind,
+  status: row.status as ProposalStatus,
+  title: row.title,
+  body: row.body,
+  rationale: row.rationale,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
 export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
@@ -101,6 +166,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
       const userStore = new Map<string, DbUser>();
       const eventStore = new Map<string, EventRecord>();
       const frameStore = new Map<string, FrameRecord>();
+      const proposalStore = new Map<string, ProposalRecord>();
+      const reviewStore = new Map<string, ReviewRecord>();
       const synthesisStore = new Map<string, SynthesisRecord>();
 
       return Db.of({
@@ -123,6 +190,19 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               attributes: { provider: "memory", eventType: input.type, userId: input.userId },
             }),
           ),
+        appendProposal: (input) =>
+          Effect.sync(() => {
+            const timestamp = nowIso();
+            const record = {
+              ...input,
+              id: eventId(),
+              status: "pending",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            } satisfies ProposalRecord;
+            proposalStore.set(record.id, record);
+            return record;
+          }),
         appendSynthesis: (input) =>
           Effect.sync(() => {
             const record = {
@@ -164,6 +244,37 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               attributes: { provider: "memory", userId: input.userId, limit: input.limit },
             }),
           ),
+        listPendingProposals: (input) =>
+          Effect.sync(() => {
+            return [...proposalStore.values()]
+              .filter((proposal) => proposal.userId === input.userId)
+              .filter((proposal) => proposal.status === "pending")
+              .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+              .slice(0, input.limit);
+          }),
+        reviewProposal: (input) =>
+          Effect.sync(() => {
+            const proposal = proposalStore.get(input.proposalId);
+            if (!proposal || proposal.userId !== input.userId) {
+              throw new Error("Proposal not found");
+            }
+
+            const timestamp = nowIso();
+            proposalStore.set(proposal.id, {
+              ...proposal,
+              status: input.decision,
+              updatedAt: timestamp,
+              ...(input.editedTitle ? { title: input.editedTitle } : {}),
+              ...(input.editedBody ? { body: input.editedBody } : {}),
+            });
+            const review = {
+              ...input,
+              id: eventId(),
+              createdAt: timestamp,
+            } satisfies ReviewRecord;
+            reviewStore.set(review.id, review);
+            return review;
+          }),
         upsertCurrentFrame: (input) =>
           Effect.sync(() => {
             const key = `${input.userId}:${input.key}`;
@@ -230,6 +341,19 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 attributes: { provider: "d1", eventType: input.type, userId: input.userId },
               }),
             ),
+          appendProposal: (input) =>
+            Effect.promise(async () => {
+              const timestamp = nowIso();
+              const record = {
+                ...input,
+                id: eventId(),
+                status: "pending",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              } satisfies ProposalRecord;
+              await db.insert(proposals).values(record);
+              return record;
+            }),
           appendSynthesis: (input) =>
             Effect.promise(async () => {
               const record = {
@@ -337,6 +461,45 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 attributes: { provider: "d1", userId: input.userId, limit: input.limit },
               }),
             ),
+          listPendingProposals: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(proposals)
+                .where(and(eq(proposals.userId, input.userId), eq(proposals.status, "pending")))
+                .orderBy(desc(proposals.createdAt))
+                .limit(input.limit);
+
+              return rows.map(toProposalRecord);
+            }),
+          reviewProposal: (input) =>
+            Effect.promise(async () => {
+              const proposal = await db
+                .select()
+                .from(proposals)
+                .where(and(eq(proposals.id, input.proposalId), eq(proposals.userId, input.userId)))
+                .get();
+              if (!proposal) throw new Error("Proposal not found");
+
+              const timestamp = nowIso();
+              await db
+                .update(proposals)
+                .set({
+                  status: input.decision,
+                  updatedAt: timestamp,
+                  ...(input.editedTitle ? { title: input.editedTitle } : {}),
+                  ...(input.editedBody ? { body: input.editedBody } : {}),
+                })
+                .where(eq(proposals.id, input.proposalId));
+
+              const review = {
+                ...input,
+                id: eventId(),
+                createdAt: timestamp,
+              } satisfies ReviewRecord;
+              await db.insert(reviews).values(review);
+              return review;
+            }),
           upsertCurrentFrame: (input) =>
             Effect.promise(async () => {
               const previous = await db

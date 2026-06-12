@@ -327,6 +327,73 @@ describe("web app", () => {
     expect(latest).toEqual(synthesis);
   });
 
+  test("custom integrations can generate proposals and review one", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    await app.request(
+      "/api/captures",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "user_context_captured",
+          source: "api",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          payload: { note: "Traveling today" },
+        }),
+      },
+      env,
+    );
+    await app.request(
+      "/api/syntheses",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+
+    const generateResponse = await app.request(
+      "/api/proposals/generate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+    const listBeforeReviewResponse = await app.request("/api/proposals", {}, env);
+    const listBeforeReview = await listBeforeReviewResponse.json();
+    const proposal = listBeforeReview.proposals[0];
+    const reviewResponse = await app.request(
+      "/api/reviews",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalId: proposal.id, decision: "accepted" }),
+      },
+      env,
+    );
+    const listAfterReviewResponse = await app.request("/api/proposals", {}, env);
+
+    expect(generateResponse.status).toBe(200);
+    expect(listBeforeReviewResponse.status).toBe(200);
+    expect(listBeforeReview.proposals).toEqual([
+      expect.objectContaining({
+        kind: "clarify",
+        status: "pending",
+        title: "Clarify next attention point",
+      }),
+    ]);
+    expect(reviewResponse.status).toBe(200);
+    expect(await reviewResponse.json()).toEqual(
+      expect.objectContaining({ proposalId: proposal.id, decision: "accepted" }),
+    );
+    expect(await listAfterReviewResponse.json()).toEqual({ proposals: [] });
+  });
+
   test("custom integrations can list events by occurred-at time range", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 

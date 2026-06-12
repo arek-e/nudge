@@ -407,6 +407,54 @@ button:disabled {
   font-size: var(--font-size-13);
 }
 
+.proposal-panel,
+.proposal-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.proposal-panel-header {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.proposal-item {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.proposal-item h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-size-16);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.proposal-item p:not(.eyebrow) {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-13);
+  line-height: 1.45;
+}
+
+.proposal-rationale {
+  color: var(--text-muted) !important;
+}
+
+.proposal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.secondary-button {
+  border: 1px solid var(--border-subtle) !important;
+  background: var(--surface-control) !important;
+  color: var(--text-primary) !important;
+}
+
 .secondary {
   border: 1px solid var(--border-subtle) !important;
   background: var(--surface-control) !important;

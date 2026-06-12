@@ -54,7 +54,37 @@ export const synthesisResponseSchema = z.object({
   synthesis: synthesisRecordSchema,
 });
 
+export const proposalRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  synthesisId: z.string(),
+  kind: z.enum(["clarify", "follow_up", "commit", "ignore"]),
+  status: z.enum(["pending", "accepted", "edited", "rejected"]),
+  title: z.string(),
+  body: z.string(),
+  rationale: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const reviewRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  proposalId: z.string(),
+  decision: z.enum(["accepted", "edited", "rejected"]),
+  editedTitle: z.string().optional(),
+  editedBody: z.string().optional(),
+  createdAt: z.string(),
+});
+
 const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
+const proposalsInputSchema = z.object({ frameKey: z.string().default("current_state") });
+const reviewInputSchema = z.object({
+  proposalId: z.string(),
+  decision: z.enum(["accepted", "edited", "rejected"]),
+  editedTitle: z.string().optional(),
+  editedBody: z.string().optional(),
+});
 
 export const apiContract = {
   captures: {
@@ -78,6 +108,22 @@ export const apiContract = {
       .route({ method: "GET", path: "/signals" })
       .input(eventListInputSchema)
       .output(z.object({ signals: z.array(eventRecordSchema) })),
+  },
+  proposals: {
+    generate: oc
+      .route({ method: "POST", path: "/proposals/generate" })
+      .input(proposalsInputSchema)
+      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+    list: oc
+      .route({ method: "GET", path: "/proposals" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
+      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+  },
+  reviews: {
+    create: oc
+      .route({ method: "POST", path: "/reviews" })
+      .input(reviewInputSchema)
+      .output(reviewRecordSchema),
   },
   syntheses: {
     create: oc

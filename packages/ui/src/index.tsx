@@ -22,6 +22,14 @@ export interface SynthesisViewModel {
   readonly sourceSignalIds: ReadonlyArray<string>;
 }
 
+export interface ProposalViewModel {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly body: string;
+  readonly rationale: string;
+}
+
 export function LaresAppShell(props: { readonly children: ReactNode }) {
   return <main className="app-shell">{props.children}</main>;
 }
@@ -216,6 +224,70 @@ export function SynthesisPanel(props: {
       >
         {props.generating ? "Synthesizing..." : "Generate synthesis"}
       </motion.button>
+    </div>
+  );
+}
+
+export function ProposalReviewPanel(props: {
+  readonly proposals: ReadonlyArray<ProposalViewModel> | undefined;
+  readonly loading: boolean;
+  readonly generating: boolean;
+  readonly reviewingId: string | undefined;
+  readonly onGenerate: () => void;
+  readonly onAccept: (proposalId: string) => void;
+  readonly onReject: (proposalId: string) => void;
+}) {
+  return (
+    <div className="proposal-panel">
+      <div className="proposal-panel-header">
+        <p className="summary">
+          {props.loading
+            ? "Loading proposals..."
+            : props.proposals?.length
+              ? `${props.proposals.length} proposals waiting for review.`
+              : "No pending proposals."}
+        </p>
+        <motion.button
+          type="button"
+          disabled={props.generating}
+          whileTap={{ scale: 0.985 }}
+          onClick={props.onGenerate}
+        >
+          {props.generating ? "Generating..." : "Generate proposals"}
+        </motion.button>
+      </div>
+
+      {props.proposals?.length ? (
+        <div className="proposal-list">
+          {props.proposals.map((proposal) => (
+            <article className="proposal-item" key={proposal.id}>
+              <p className="eyebrow">{proposal.kind}</p>
+              <h3>{proposal.title}</h3>
+              <p>{proposal.body}</p>
+              <p className="proposal-rationale">{proposal.rationale}</p>
+              <div className="proposal-actions">
+                <motion.button
+                  type="button"
+                  disabled={props.reviewingId === proposal.id}
+                  whileTap={{ scale: 0.985 }}
+                  onClick={() => props.onAccept(proposal.id)}
+                >
+                  Accept
+                </motion.button>
+                <motion.button
+                  type="button"
+                  className="secondary-button"
+                  disabled={props.reviewingId === proposal.id}
+                  whileTap={{ scale: 0.985 }}
+                  onClick={() => props.onReject(proposal.id)}
+                >
+                  Reject
+                </motion.button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
