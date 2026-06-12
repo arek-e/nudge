@@ -2,7 +2,9 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Context, Effect, Layer } from "effect";
 import {
+  commitments,
   events,
+  outcomes,
   frames,
   proposals,
   reviews,
@@ -25,6 +27,7 @@ export interface AppendEventInput {
   readonly source: string;
   readonly occurredAt: string;
   readonly schemaVersion: number;
+  readonly idempotencyKey?: string;
   readonly payload: unknown;
 }
 
@@ -104,6 +107,16 @@ export interface ListPendingProposalsInput {
   readonly limit: number;
 }
 
+export interface GetProposalInput {
+  readonly userId: string;
+  readonly proposalId: string;
+}
+
+export interface GetReviewForProposalInput {
+  readonly userId: string;
+  readonly proposalId: string;
+}
+
 export interface ReviewProposalInput {
   readonly userId: string;
   readonly proposalId: string;
@@ -117,22 +130,69 @@ export interface ReviewRecord extends ReviewProposalInput {
   readonly createdAt: string;
 }
 
+export type CommitmentStatus = "active" | "completed" | "abandoned";
+
+export interface AppendCommitmentInput {
+  readonly userId: string;
+  readonly proposalId: string;
+  readonly reviewId: string;
+  readonly title: string;
+  readonly body: string;
+}
+
+export interface CommitmentRecord extends AppendCommitmentInput {
+  readonly id: string;
+  readonly status: CommitmentStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ListCommitmentsInput {
+  readonly userId: string;
+  readonly limit: number;
+  readonly status?: CommitmentStatus;
+}
+
+export type OutcomeResult = "completed" | "abandoned";
+
+export interface RecordOutcomeInput {
+  readonly userId: string;
+  readonly commitmentId: string;
+  readonly result: OutcomeResult;
+  readonly note?: string;
+}
+
+export interface OutcomeRecord extends RecordOutcomeInput {
+  readonly id: string;
+  readonly recordedAt: string;
+  readonly createdAt: string;
+}
+
 export interface DbService {
   readonly provider: DatabaseProvider;
   readonly ensureUser: (user: DbUser) => Effect.Effect<void>;
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<EventRecord>;
+  readonly appendCommitment: (input: AppendCommitmentInput) => Effect.Effect<CommitmentRecord>;
   readonly appendProposal: (input: AppendProposalInput) => Effect.Effect<ProposalRecord>;
   readonly appendSynthesis: (input: AppendSynthesisInput) => Effect.Effect<SynthesisRecord>;
   readonly getCurrentFrame: (input: GetCurrentFrameInput) => Effect.Effect<FrameRecord | null>;
   readonly getLatestSynthesis: (
     input: GetLatestSynthesisInput,
   ) => Effect.Effect<SynthesisRecord | null>;
+  readonly getProposal: (input: GetProposalInput) => Effect.Effect<ProposalRecord | null>;
+  readonly getReviewForProposal: (
+    input: GetReviewForProposalInput,
+  ) => Effect.Effect<ReviewRecord | null>;
   readonly listRecentEvents: (
     input: RecentEventsInput,
   ) => Effect.Effect<ReadonlyArray<EventRecord>>;
   readonly listPendingProposals: (
     input: ListPendingProposalsInput,
   ) => Effect.Effect<ReadonlyArray<ProposalRecord>>;
+  readonly listCommitments: (
+    input: ListCommitmentsInput,
+  ) => Effect.Effect<ReadonlyArray<CommitmentRecord>>;
+  readonly recordOutcome: (input: RecordOutcomeInput) => Effect.Effect<OutcomeRecord>;
   readonly reviewProposal: (input: ReviewProposalInput) => Effect.Effect<ReviewRecord>;
   readonly upsertCurrentFrame: (input: UpsertCurrentFrameInput) => Effect.Effect<FrameRecord>;
 }
@@ -145,6 +205,33 @@ const byRecentEvent = (left: EventRecord, right: EventRecord) => {
     right.occurredAt.localeCompare(left.occurredAt) || right.createdAt.localeCompare(left.createdAt)
   );
 };
+
+const sameReadonlyArray = <A>(left: ReadonlyArray<A>, right: ReadonlyArray<A>) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const sameSynthesisInput = (synthesis: SynthesisRecord, input: AppendSynthesisInput) =>
+  synthesis.userId === input.userId &&
+  synthesis.frameId === input.frameId &&
+  synthesis.summary === input.summary &&
+  sameReadonlyArray(synthesis.themes, input.themes) &&
+  sameReadonlyArray(synthesis.openQuestions, input.openQuestions) &&
+  sameReadonlyArray(synthesis.sourceSignalIds, input.sourceSignalIds);
+
+const sameProposalInput = (proposal: ProposalRecord, input: AppendProposalInput) =>
+  proposal.userId === input.userId &&
+  proposal.synthesisId === input.synthesisId &&
+  proposal.kind === input.kind &&
+  proposal.title === input.title &&
+  proposal.body === input.body &&
+  proposal.rationale === input.rationale;
+
+const synthesisFingerprint = (input: AppendSynthesisInput) =>
+  JSON.stringify({
+    openQuestions: input.openQuestions,
+    sourceSignalIds: input.sourceSignalIds,
+    summary: input.summary,
+    themes: input.themes,
+  });
 
 const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
   id: row.id,
@@ -159,12 +246,39 @@ const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
   updatedAt: row.updatedAt,
 });
 
+const toCommitmentRecord = (row: typeof commitments.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  proposalId: row.proposalId,
+  reviewId: row.reviewId,
+  title: row.title,
+  body: row.body,
+  status: row.status as CommitmentStatus,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toOutcomeRecord = (row: typeof outcomes.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  commitmentId: row.commitmentId,
+  result: row.result as OutcomeResult,
+  ...(row.note !== null ? { note: row.note } : {}),
+  recordedAt: row.recordedAt,
+  createdAt: row.createdAt,
+});
+
+const sameOutcomeInput = (outcome: OutcomeRecord, input: RecordOutcomeInput) =>
+  outcome.result === input.result && outcome.note === input.note;
+
 export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
     Effect.sync(() => {
       const userStore = new Map<string, DbUser>();
+      const commitmentStore = new Map<string, CommitmentRecord>();
       const eventStore = new Map<string, EventRecord>();
+      const outcomeStore = new Map<string, OutcomeRecord>();
       const frameStore = new Map<string, FrameRecord>();
       const proposalStore = new Map<string, ProposalRecord>();
       const reviewStore = new Map<string, ReviewRecord>();
@@ -178,6 +292,14 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }).pipe(Effect.withSpan("Db.ensureUser", { attributes: { provider: "memory" } })),
         appendEvent: (input) =>
           Effect.sync(() => {
+            if (input.idempotencyKey) {
+              const existing = [...eventStore.values()].find(
+                (event) =>
+                  event.userId === input.userId && event.idempotencyKey === input.idempotencyKey,
+              );
+              if (existing) return existing;
+            }
+
             const record = {
               ...input,
               id: eventId(),
@@ -190,8 +312,31 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               attributes: { provider: "memory", eventType: input.type, userId: input.userId },
             }),
           ),
+        appendCommitment: (input) =>
+          Effect.sync(() => {
+            const existing = [...commitmentStore.values()].find(
+              (commitment) => commitment.proposalId === input.proposalId,
+            );
+            if (existing) return existing;
+
+            const timestamp = nowIso();
+            const record = {
+              ...input,
+              id: eventId(),
+              status: "active",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            } satisfies CommitmentRecord;
+            commitmentStore.set(record.id, record);
+            return record;
+          }),
         appendProposal: (input) =>
           Effect.sync(() => {
+            const existing = [...proposalStore.values()].find((proposal) =>
+              sameProposalInput(proposal, input),
+            );
+            if (existing) return existing;
+
             const timestamp = nowIso();
             const record = {
               ...input,
@@ -205,6 +350,11 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }),
         appendSynthesis: (input) =>
           Effect.sync(() => {
+            const existing = [...synthesisStore.values()].find((synthesis) =>
+              sameSynthesisInput(synthesis, input),
+            );
+            if (existing) return existing;
+
             const record = {
               ...input,
               id: eventId(),
@@ -231,6 +381,20 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 )[0] ?? null
             );
           }),
+        getProposal: (input) =>
+          Effect.sync(() => {
+            const proposal = proposalStore.get(input.proposalId);
+            return proposal?.userId === input.userId ? proposal : null;
+          }),
+        getReviewForProposal: (input) =>
+          Effect.sync(() => {
+            return (
+              [...reviewStore.values()].find(
+                (review) =>
+                  review.proposalId === input.proposalId && review.userId === input.userId,
+              ) ?? null
+            );
+          }),
         listRecentEvents: (input) =>
           Effect.sync(() => {
             return [...eventStore.values()]
@@ -252,10 +416,66 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
               .slice(0, input.limit);
           }),
+        listCommitments: (input) =>
+          Effect.sync(() => {
+            return [...commitmentStore.values()]
+              .filter((commitment) => commitment.userId === input.userId)
+              .filter((commitment) => !input.status || commitment.status === input.status)
+              .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+              .slice(0, input.limit);
+          }),
+        recordOutcome: (input) =>
+          Effect.sync(() => {
+            const existingOutcome = [...outcomeStore.values()].find(
+              (outcome) => outcome.commitmentId === input.commitmentId,
+            );
+            if (existingOutcome) {
+              if (sameOutcomeInput(existingOutcome, input)) return existingOutcome;
+              throw new Error("Commitment outcome already recorded");
+            }
+
+            const commitment = commitmentStore.get(input.commitmentId);
+            if (
+              !commitment ||
+              commitment.userId !== input.userId ||
+              commitment.status !== "active"
+            ) {
+              throw new Error("Commitment not found");
+            }
+
+            const timestamp = nowIso();
+            const outcome = {
+              ...input,
+              id: eventId(),
+              recordedAt: timestamp,
+              createdAt: timestamp,
+            } satisfies OutcomeRecord;
+            outcomeStore.set(outcome.id, outcome);
+            commitmentStore.set(commitment.id, {
+              ...commitment,
+              status: input.result,
+              updatedAt: timestamp,
+            });
+            return outcome;
+          }),
         reviewProposal: (input) =>
           Effect.sync(() => {
+            const existing = [...reviewStore.values()].find(
+              (review) => review.proposalId === input.proposalId && review.userId === input.userId,
+            );
+            if (existing) {
+              if (
+                existing.decision === input.decision &&
+                existing.editedTitle === input.editedTitle &&
+                existing.editedBody === input.editedBody
+              ) {
+                return existing;
+              }
+              throw new Error("Proposal already reviewed");
+            }
+
             const proposal = proposalStore.get(input.proposalId);
-            if (!proposal || proposal.userId !== input.userId) {
+            if (!proposal || proposal.userId !== input.userId || proposal.status !== "pending") {
               throw new Error("Proposal not found");
             }
 
@@ -320,29 +540,128 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             }).pipe(Effect.withSpan("Db.ensureUser", { attributes: { provider: "d1" } })),
           appendEvent: (input) =>
             Effect.promise(async () => {
+              if (input.idempotencyKey) {
+                const existing = await db
+                  .select()
+                  .from(events)
+                  .where(
+                    and(
+                      eq(events.userId, input.userId),
+                      eq(events.idempotencyKey, input.idempotencyKey),
+                    ),
+                  )
+                  .get();
+                if (existing) {
+                  return {
+                    id: existing.id,
+                    userId: existing.userId,
+                    type: existing.type,
+                    source: existing.source,
+                    occurredAt: existing.occurredAt,
+                    schemaVersion: Number(existing.schemaVersion),
+                    ...(existing.idempotencyKey ? { idempotencyKey: existing.idempotencyKey } : {}),
+                    payload: existing.payload,
+                    createdAt: existing.createdAt,
+                  } satisfies EventRecord;
+                }
+              }
+
               const record = {
                 ...input,
                 id: eventId(),
                 createdAt: nowIso(),
               } satisfies EventRecord;
-              await db.insert(events).values({
-                id: record.id,
-                userId: record.userId,
-                type: record.type,
-                source: record.source,
-                occurredAt: record.occurredAt,
-                schemaVersion: String(record.schemaVersion),
-                payload: record.payload,
-                createdAt: record.createdAt,
-              });
+              await db
+                .insert(events)
+                .values({
+                  id: record.id,
+                  userId: record.userId,
+                  type: record.type,
+                  source: record.source,
+                  occurredAt: record.occurredAt,
+                  schemaVersion: String(record.schemaVersion),
+                  idempotencyKey: record.idempotencyKey ?? null,
+                  payload: record.payload,
+                  createdAt: record.createdAt,
+                })
+                .onConflictDoNothing({ target: [events.userId, events.idempotencyKey] });
+
+              if (record.idempotencyKey) {
+                const created = await db
+                  .select()
+                  .from(events)
+                  .where(
+                    and(
+                      eq(events.userId, input.userId),
+                      eq(events.idempotencyKey, record.idempotencyKey),
+                    ),
+                  )
+                  .get();
+                if (created) {
+                  return {
+                    id: created.id,
+                    userId: created.userId,
+                    type: created.type,
+                    source: created.source,
+                    occurredAt: created.occurredAt,
+                    schemaVersion: Number(created.schemaVersion),
+                    ...(created.idempotencyKey ? { idempotencyKey: created.idempotencyKey } : {}),
+                    payload: created.payload,
+                    createdAt: created.createdAt,
+                  } satisfies EventRecord;
+                }
+              }
               return record;
             }).pipe(
               Effect.withSpan("Db.appendEvent", {
                 attributes: { provider: "d1", eventType: input.type, userId: input.userId },
               }),
             ),
+          appendCommitment: (input) =>
+            Effect.promise(async () => {
+              const existing = await db
+                .select()
+                .from(commitments)
+                .where(eq(commitments.proposalId, input.proposalId))
+                .get();
+              if (existing) return toCommitmentRecord(existing);
+
+              const timestamp = nowIso();
+              const record = {
+                ...input,
+                id: eventId(),
+                status: "active",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              } satisfies CommitmentRecord;
+              await db.insert(commitments).values(record).onConflictDoNothing({
+                target: commitments.proposalId,
+              });
+
+              const created = await db
+                .select()
+                .from(commitments)
+                .where(eq(commitments.proposalId, input.proposalId))
+                .get();
+              if (!created) throw new Error("Commitment not created");
+              return toCommitmentRecord(created);
+            }),
           appendProposal: (input) =>
             Effect.promise(async () => {
+              const existing = await db
+                .select()
+                .from(proposals)
+                .where(
+                  and(
+                    eq(proposals.synthesisId, input.synthesisId),
+                    eq(proposals.kind, input.kind),
+                    eq(proposals.title, input.title),
+                    eq(proposals.body, input.body),
+                  ),
+                )
+                .get();
+              if (existing) return toProposalRecord(existing);
+
               const timestamp = nowIso();
               const record = {
                 ...input,
@@ -351,36 +670,130 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 createdAt: timestamp,
                 updatedAt: timestamp,
               } satisfies ProposalRecord;
-              await db.insert(proposals).values(record);
-              return record;
+              await db
+                .insert(proposals)
+                .values(record)
+                .onConflictDoNothing({
+                  target: [proposals.synthesisId, proposals.kind, proposals.title, proposals.body],
+                });
+              const created = await db
+                .select()
+                .from(proposals)
+                .where(
+                  and(
+                    eq(proposals.synthesisId, input.synthesisId),
+                    eq(proposals.kind, input.kind),
+                    eq(proposals.title, input.title),
+                    eq(proposals.body, input.body),
+                  ),
+                )
+                .get();
+              if (!created) throw new Error("Proposal not created");
+              return toProposalRecord(created);
             }),
           appendSynthesis: (input) =>
             Effect.promise(async () => {
+              const fingerprint = synthesisFingerprint(input);
+              const existing = await db
+                .select()
+                .from(syntheses)
+                .where(
+                  and(
+                    eq(syntheses.userId, input.userId),
+                    eq(syntheses.frameId, input.frameId),
+                    eq(syntheses.fingerprint, fingerprint),
+                  ),
+                )
+                .orderBy(desc(syntheses.generatedAt), desc(syntheses.createdAt));
+
+              const existingWithSources = await Promise.all(
+                existing.map(async (row) => ({
+                  row,
+                  sources: await db
+                    .select()
+                    .from(synthesisSources)
+                    .where(eq(synthesisSources.synthesisId, row.id)),
+                })),
+              );
+
+              for (const { row, sources } of existingWithSources) {
+                const candidate = {
+                  id: row.id,
+                  userId: row.userId,
+                  frameId: row.frameId,
+                  summary: row.summary,
+                  themes: row.themes,
+                  openQuestions: row.openQuestions,
+                  sourceSignalIds: sources.map((source) => source.signalId),
+                  generatedAt: row.generatedAt,
+                  createdAt: row.createdAt,
+                } satisfies SynthesisRecord;
+                if (sameSynthesisInput(candidate, input)) return candidate;
+              }
+
               const record = {
                 ...input,
                 id: eventId(),
                 generatedAt: nowIso(),
                 createdAt: nowIso(),
               } satisfies SynthesisRecord;
-              await db.insert(syntheses).values({
-                id: record.id,
-                userId: record.userId,
-                frameId: record.frameId,
-                summary: record.summary,
-                themes: record.themes,
-                openQuestions: record.openQuestions,
-                generatedAt: record.generatedAt,
-                createdAt: record.createdAt,
-              });
+              await db
+                .insert(syntheses)
+                .values({
+                  id: record.id,
+                  userId: record.userId,
+                  frameId: record.frameId,
+                  summary: record.summary,
+                  themes: record.themes,
+                  openQuestions: record.openQuestions,
+                  fingerprint,
+                  generatedAt: record.generatedAt,
+                  createdAt: record.createdAt,
+                })
+                .onConflictDoNothing({
+                  target: [syntheses.userId, syntheses.frameId, syntheses.fingerprint],
+                });
+
+              const created = await db
+                .select()
+                .from(syntheses)
+                .where(
+                  and(
+                    eq(syntheses.userId, input.userId),
+                    eq(syntheses.frameId, input.frameId),
+                    eq(syntheses.fingerprint, fingerprint),
+                  ),
+                )
+                .get();
+              if (!created) throw new Error("Synthesis not created");
+
               if (record.sourceSignalIds.length > 0) {
-                await db.insert(synthesisSources).values(
-                  record.sourceSignalIds.map((signalId) => ({
-                    synthesisId: record.id,
-                    signalId,
-                  })),
-                );
+                await db
+                  .insert(synthesisSources)
+                  .values(
+                    record.sourceSignalIds.map((signalId) => ({
+                      synthesisId: created.id,
+                      signalId,
+                    })),
+                  )
+                  .onConflictDoNothing();
               }
-              return record;
+
+              const sources = await db
+                .select()
+                .from(synthesisSources)
+                .where(eq(synthesisSources.synthesisId, created.id));
+              return {
+                id: created.id,
+                userId: created.userId,
+                frameId: created.frameId,
+                summary: created.summary,
+                themes: created.themes,
+                openQuestions: created.openQuestions,
+                sourceSignalIds: sources.map((source) => source.signalId),
+                generatedAt: created.generatedAt,
+                createdAt: created.createdAt,
+              } satisfies SynthesisRecord;
             }),
           getCurrentFrame: (input) =>
             Effect.promise(async () => {
@@ -433,6 +846,38 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 createdAt: row.createdAt,
               };
             }),
+          getProposal: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(proposals)
+                .where(and(eq(proposals.id, input.proposalId), eq(proposals.userId, input.userId)))
+                .get();
+
+              return row ? toProposalRecord(row) : null;
+            }),
+          getReviewForProposal: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(reviews)
+                .where(
+                  and(eq(reviews.proposalId, input.proposalId), eq(reviews.userId, input.userId)),
+                )
+                .get();
+
+              return row
+                ? {
+                    id: row.id,
+                    userId: row.userId,
+                    proposalId: row.proposalId,
+                    decision: row.decision as ReviewDecision,
+                    ...(row.editedTitle !== null ? { editedTitle: row.editedTitle } : {}),
+                    ...(row.editedBody !== null ? { editedBody: row.editedBody } : {}),
+                    createdAt: row.createdAt,
+                  }
+                : null;
+            }),
           listRecentEvents: (input) =>
             Effect.promise(async () => {
               const filters = [eq(events.userId, input.userId)];
@@ -453,6 +898,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 source: row.source,
                 occurredAt: row.occurredAt,
                 schemaVersion: Number(row.schemaVersion),
+                ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
                 payload: row.payload,
                 createdAt: row.createdAt,
               }));
@@ -472,33 +918,217 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
               return rows.map(toProposalRecord);
             }),
-          reviewProposal: (input) =>
+          listCommitments: (input) =>
             Effect.promise(async () => {
-              const proposal = await db
+              const filters = [eq(commitments.userId, input.userId)];
+              if (input.status) filters.push(eq(commitments.status, input.status));
+
+              const rows = await db
                 .select()
-                .from(proposals)
-                .where(and(eq(proposals.id, input.proposalId), eq(proposals.userId, input.userId)))
+                .from(commitments)
+                .where(and(...filters))
+                .orderBy(desc(commitments.createdAt))
+                .limit(input.limit);
+
+              return rows.map(toCommitmentRecord);
+            }),
+          recordOutcome: (input) =>
+            Effect.promise(async () => {
+              const existingOutcome = await db
+                .select()
+                .from(outcomes)
+                .where(eq(outcomes.commitmentId, input.commitmentId))
                 .get();
-              if (!proposal) throw new Error("Proposal not found");
+              if (existingOutcome) {
+                const outcome = toOutcomeRecord(existingOutcome);
+                if (sameOutcomeInput(outcome, input)) return outcome;
+                throw new Error("Commitment outcome already recorded");
+              }
 
               const timestamp = nowIso();
-              await db
-                .update(proposals)
-                .set({
-                  status: input.decision,
-                  updatedAt: timestamp,
-                  ...(input.editedTitle ? { title: input.editedTitle } : {}),
-                  ...(input.editedBody ? { body: input.editedBody } : {}),
-                })
-                .where(eq(proposals.id, input.proposalId));
+              const outcome = {
+                ...input,
+                id: eventId(),
+                recordedAt: timestamp,
+                createdAt: timestamp,
+              } satisfies OutcomeRecord;
 
+              await database.batch([
+                database
+                  .prepare(
+                    `INSERT OR IGNORE INTO outcomes (
+                      id,
+                      user_id,
+                      commitment_id,
+                      result,
+                      note,
+                      recorded_at,
+                      created_at
+                    )
+                    SELECT ?, ?, ?, ?, ?, ?, ?
+                    FROM commitments
+                    WHERE id = ? AND user_id = ? AND status = 'active'`,
+                  )
+                  .bind(
+                    outcome.id,
+                    outcome.userId,
+                    outcome.commitmentId,
+                    outcome.result,
+                    outcome.note ?? null,
+                    outcome.recordedAt,
+                    outcome.createdAt,
+                    input.commitmentId,
+                    input.userId,
+                  ),
+                database
+                  .prepare(
+                    `UPDATE commitments
+                    SET status = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ? AND status = 'active'`,
+                  )
+                  .bind(input.result, timestamp, input.commitmentId, input.userId),
+              ]);
+
+              const recorded = await db
+                .select()
+                .from(outcomes)
+                .where(eq(outcomes.commitmentId, input.commitmentId))
+                .get();
+              if (!recorded) throw new Error("Commitment not found");
+
+              const recordedOutcome = toOutcomeRecord(recorded);
+              if (sameOutcomeInput(recordedOutcome, input)) return recordedOutcome;
+              throw new Error("Commitment outcome already recorded");
+            }),
+          reviewProposal: (input) =>
+            Effect.promise(async () => {
+              const existingReview = await db
+                .select()
+                .from(reviews)
+                .where(
+                  and(eq(reviews.proposalId, input.proposalId), eq(reviews.userId, input.userId)),
+                )
+                .get();
+              if (existingReview) {
+                const existing = {
+                  id: existingReview.id,
+                  userId: existingReview.userId,
+                  proposalId: existingReview.proposalId,
+                  decision: existingReview.decision as ReviewDecision,
+                  ...(existingReview.editedTitle !== null
+                    ? { editedTitle: existingReview.editedTitle }
+                    : {}),
+                  ...(existingReview.editedBody !== null
+                    ? { editedBody: existingReview.editedBody }
+                    : {}),
+                  createdAt: existingReview.createdAt,
+                } satisfies ReviewRecord;
+                if (
+                  existing.decision === input.decision &&
+                  existing.editedTitle === input.editedTitle &&
+                  existing.editedBody === input.editedBody
+                ) {
+                  return existing;
+                }
+                throw new Error("Proposal already reviewed");
+              }
+
+              const timestamp = nowIso();
               const review = {
                 ...input,
                 id: eventId(),
                 createdAt: timestamp,
               } satisfies ReviewRecord;
-              await db.insert(reviews).values(review);
-              return review;
+              await database.batch([
+                database
+                  .prepare(
+                    `INSERT OR IGNORE INTO reviews (
+                      id,
+                      user_id,
+                      proposal_id,
+                      decision,
+                      edited_title,
+                      edited_body,
+                      created_at
+                    )
+                    SELECT ?, ?, ?, ?, ?, ?, ?
+                    FROM proposals
+                    WHERE id = ? AND user_id = ? AND status = 'pending'`,
+                  )
+                  .bind(
+                    review.id,
+                    review.userId,
+                    review.proposalId,
+                    review.decision,
+                    review.editedTitle ?? null,
+                    review.editedBody ?? null,
+                    review.createdAt,
+                    input.proposalId,
+                    input.userId,
+                  ),
+                database
+                  .prepare(
+                    `UPDATE proposals
+                    SET
+                      status = ?,
+                      title = COALESCE(?, title),
+                      body = COALESCE(?, body),
+                      updated_at = ?
+                    WHERE id = ?
+                      AND user_id = ?
+                      AND status = 'pending'
+                      AND EXISTS (
+                        SELECT 1 FROM reviews
+                        WHERE proposal_id = ?
+                          AND user_id = ?
+                          AND decision = ?
+                          AND (edited_title IS ? OR edited_title = ?)
+                          AND (edited_body IS ? OR edited_body = ?)
+                      )`,
+                  )
+                  .bind(
+                    input.decision,
+                    input.editedTitle ?? null,
+                    input.editedBody ?? null,
+                    timestamp,
+                    input.proposalId,
+                    input.userId,
+                    input.proposalId,
+                    input.userId,
+                    input.decision,
+                    input.editedTitle ?? null,
+                    input.editedTitle ?? null,
+                    input.editedBody ?? null,
+                    input.editedBody ?? null,
+                  ),
+              ]);
+
+              const stored = await db
+                .select()
+                .from(reviews)
+                .where(
+                  and(eq(reviews.proposalId, input.proposalId), eq(reviews.userId, input.userId)),
+                )
+                .get();
+              if (!stored) throw new Error("Proposal not found");
+
+              const storedReview = {
+                id: stored.id,
+                userId: stored.userId,
+                proposalId: stored.proposalId,
+                decision: stored.decision as ReviewDecision,
+                ...(stored.editedTitle !== null ? { editedTitle: stored.editedTitle } : {}),
+                ...(stored.editedBody !== null ? { editedBody: stored.editedBody } : {}),
+                createdAt: stored.createdAt,
+              } satisfies ReviewRecord;
+              if (
+                storedReview.decision === input.decision &&
+                storedReview.editedTitle === input.editedTitle &&
+                storedReview.editedBody === input.editedBody
+              ) {
+                return storedReview;
+              }
+              throw new Error("Proposal already reviewed");
             }),
           upsertCurrentFrame: (input) =>
             Effect.promise(async () => {

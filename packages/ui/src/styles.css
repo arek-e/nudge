@@ -408,7 +408,9 @@ button:disabled {
 }
 
 .proposal-panel,
-.proposal-list {
+.proposal-list,
+.commitment-panel,
+.commitment-list {
   display: grid;
   gap: var(--space-3);
 }
@@ -418,12 +420,14 @@ button:disabled {
   gap: var(--space-3);
 }
 
-.proposal-item {
+.proposal-item,
+.commitment-item {
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--space-3);
 }
 
-.proposal-item h3 {
+.proposal-item h3,
+.commitment-item h3 {
   margin: 0;
   color: var(--text-strong);
   font-size: var(--font-size-16);
@@ -431,7 +435,8 @@ button:disabled {
   line-height: 1.2;
 }
 
-.proposal-item p:not(.eyebrow) {
+.proposal-item p:not(.eyebrow),
+.commitment-item p:not(.eyebrow) {
   margin: var(--space-1) 0 0;
   color: var(--text-secondary);
   font-size: var(--font-size-13);
@@ -446,6 +451,10 @@ button:disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.commitment-item button {
   margin-top: var(--space-3);
 }
 

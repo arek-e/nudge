@@ -7,9 +7,11 @@ import {
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
+  isTransientBackpressureError,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
   pruneTraceCache,
+  retryAfterSecondsFor,
   safeErrorFields,
   shouldSampleWideEvent,
   statusGroup,
@@ -46,6 +48,16 @@ describe("observability", () => {
       errorType: "string",
       errorMessage: "boom",
     });
+  });
+
+  test("classifies transient backpressure errors for retry-after responses", () => {
+    const transient = new Error("D1_ERROR: database is locked");
+    const permanent = new Error("Proposal already reviewed");
+
+    expect(isTransientBackpressureError(transient)).toBe(true);
+    expect(retryAfterSecondsFor(transient)).toBe(5);
+    expect(isTransientBackpressureError(permanent)).toBe(false);
+    expect(retryAfterSecondsFor(permanent)).toBeNull();
   });
 
   test("finalizes a safe request wide event for future handlers", () => {

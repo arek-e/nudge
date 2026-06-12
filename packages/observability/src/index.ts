@@ -99,6 +99,17 @@ export const safeErrorFields = (cause: unknown) => {
   };
 };
 
+export const isTransientBackpressureError = (cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /\b(rate limit|too many requests|overloaded|temporarily unavailable|timeout|timed out|database is locked|D1_ERROR)\b/i.test(
+    message,
+  );
+};
+
+export const retryAfterSecondsFor = (cause: unknown) => {
+  return isTransientBackpressureError(cause) ? 5 : null;
+};
+
 export const shouldSampleWideEvent = (event: WideEvent): SamplingDecision => {
   const status = Number(event.status ?? 0);
   const durationMs = Number(event.durationMs ?? 0);

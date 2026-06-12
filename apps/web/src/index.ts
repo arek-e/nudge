@@ -2,7 +2,13 @@ import { Agent } from "agents";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
 import { Db } from "@lares/db";
-import { PrimitiveWorkflows } from "@lares/effect-services";
+import {
+  currentWorkflowVersion,
+  durableWorkflowStepConfig,
+  PrimitiveWorkflows,
+  workflowStepName,
+  type WorkflowVersion,
+} from "@lares/effect-services";
 import type { Env } from "./env";
 import { createApp } from "./app";
 
@@ -110,17 +116,24 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 export interface DailyDigestWorkflowParams {
   userId: string;
   requestedBy: "api" | "cron";
+  workflowVersion?: WorkflowVersion;
 }
 
 export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, DailyDigestWorkflowParams> {
   async run(event: WorkflowEvent<DailyDigestWorkflowParams>, step: WorkflowStep) {
     const input = event.payload;
+    const workflowVersion = input.workflowVersion ?? currentWorkflowVersion;
 
-    return await step.do("daily-digest-health-check", async () => ({
-      ok: true,
-      workflow: "daily-digest-workflow",
-      userId: input.userId,
-      requestedBy: input.requestedBy,
-    }));
+    return await step.do(
+      workflowStepName(workflowVersion, "daily-digest-health-check"),
+      durableWorkflowStepConfig,
+      async () => ({
+        ok: true,
+        workflow: "daily-digest-workflow",
+        workflowVersion,
+        userId: input.userId,
+        requestedBy: input.requestedBy,
+      }),
+    );
   }
 }

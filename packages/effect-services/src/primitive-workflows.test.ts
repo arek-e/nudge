@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Db } from "@lares/db";
-import { PrimitiveWorkflows } from "./index";
+import {
+  currentWorkflowVersion,
+  durableWorkflowStepConfig,
+  PrimitiveWorkflows,
+  workflowStepName,
+} from "./index";
 
 const user = { id: "workflow-user", displayName: "Workflow User" };
 
@@ -10,6 +15,22 @@ const runWithMemoryDb = <A, E>(workflow: Effect.Effect<A, E, Db>) => {
 };
 
 describe("PrimitiveWorkflows", () => {
+  test("defines a bounded exponential retry policy for durable workflow steps", () => {
+    expect(durableWorkflowStepConfig).toEqual({
+      retries: {
+        limit: 5,
+        delay: 1_000,
+        backoff: "exponential",
+      },
+      timeout: "10 minutes",
+    });
+  });
+
+  test("names durable workflow steps with an explicit workflow version", () => {
+    expect(currentWorkflowVersion).toBe(1);
+    expect(workflowStepName(1, "daily-digest-health-check")).toBe("v1.daily-digest-health-check");
+  });
+
   test("appends and lists source-linked signals for a user", async () => {
     const signal = await runWithMemoryDb(
       PrimitiveWorkflows.appendSignal({
@@ -39,6 +60,37 @@ describe("PrimitiveWorkflows", () => {
     expect(signal.userId).toBe(user.id);
     expect(signals).toHaveLength(1);
     expect(signals[0]?.payload).toEqual({ note: "Follow up on travel plans" });
+  });
+
+  test("appending a signal is idempotent with an idempotency key", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        const first = yield* PrimitiveWorkflows.appendSignal({
+          user,
+          type: "capture.note",
+          source: "test",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          idempotencyKey: "capture-retry-1",
+          payload: { note: "Follow up on travel plans" },
+        });
+        const retried = yield* PrimitiveWorkflows.appendSignal({
+          user,
+          type: "capture.note",
+          source: "test",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          idempotencyKey: "capture-retry-1",
+          payload: { note: "Follow up on travel plans" },
+        });
+        const signals = yield* PrimitiveWorkflows.listSignals({ user, limit: 10 });
+
+        return { first, retried, signals };
+      }),
+    );
+
+    expect(result.retried.id).toBe(result.first.id);
+    expect(result.signals).toHaveLength(1);
   });
 
   test("creates synthesis and proposals from recent signals", async () => {
@@ -71,6 +123,47 @@ describe("PrimitiveWorkflows", () => {
     expect(result.proposals[0]?.title).toBe("Clarify next attention point");
   });
 
+  test("synthesis and proposal generation are idempotent across retries", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.appendSignal({
+          user,
+          type: "capture.note",
+          source: "test",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          payload: { note: "Travel this week and follow up with work" },
+        });
+
+        const firstSynthesis = yield* PrimitiveWorkflows.createSynthesis({
+          user,
+          frameKey: "current_state",
+        });
+        const retriedSynthesis = yield* PrimitiveWorkflows.createSynthesis({
+          user,
+          frameKey: "current_state",
+        });
+        const firstProposals = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        const retriedProposals = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        const pending = yield* PrimitiveWorkflows.listPendingProposals({ user, limit: 10 });
+
+        return { firstProposals, firstSynthesis, pending, retriedProposals, retriedSynthesis };
+      }),
+    );
+
+    expect(result.retriedSynthesis.synthesis.id).toBe(result.firstSynthesis.synthesis.id);
+    expect(result.retriedProposals.map((proposal) => proposal.id)).toEqual(
+      result.firstProposals.map((proposal) => proposal.id),
+    );
+    expect(result.pending).toHaveLength(1);
+  });
+
   test("reviews pending proposals", async () => {
     const review = await runWithMemoryDb(
       Effect.gen(function* () {
@@ -90,5 +183,134 @@ describe("PrimitiveWorkflows", () => {
 
     expect(review.userId).toBe(user.id);
     expect(review.decision).toBe("accepted");
+  });
+
+  test("accepting a proposal creates an active commitment", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+
+        return yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+      }),
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.status).toBe("active");
+    expect(result[0]?.title).toBe("Clarify next attention point");
+    expect(result[0]?.body).toBe("Answer: What needs attention next?");
+  });
+
+  test("accepting a proposal is idempotent across retries", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        const firstReview = yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+        const retriedReview = yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+        const commitments = yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+
+        return { commitments, firstReview, retriedReview };
+      }),
+    );
+
+    expect(result.retriedReview.id).toBe(result.firstReview.id);
+    expect(result.commitments).toHaveLength(1);
+  });
+
+  test("records an outcome against a commitment", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+        const [commitment] = yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+        if (!commitment) throw new Error("Expected commitment");
+
+        const outcome = yield* PrimitiveWorkflows.recordOutcome({
+          user,
+          commitmentId: commitment.id,
+          result: "completed",
+          note: "Answered during planning.",
+        });
+        const commitments = yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+
+        return { commitments, outcome };
+      }),
+    );
+
+    expect(result.outcome.result).toBe("completed");
+    expect(result.outcome.note).toBe("Answered during planning.");
+    expect(result.commitments).toHaveLength(0);
+  });
+
+  test("recording an outcome is idempotent across retries", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+        const [commitment] = yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+        if (!commitment) throw new Error("Expected commitment");
+
+        const firstOutcome = yield* PrimitiveWorkflows.recordOutcome({
+          user,
+          commitmentId: commitment.id,
+          result: "completed",
+          note: "Answered during planning.",
+        });
+        const retriedOutcome = yield* PrimitiveWorkflows.recordOutcome({
+          user,
+          commitmentId: commitment.id,
+          result: "completed",
+          note: "Answered during planning.",
+        });
+
+        return { firstOutcome, retriedOutcome };
+      }),
+    );
+
+    expect(result.retriedOutcome.id).toBe(result.firstOutcome.id);
   });
 });

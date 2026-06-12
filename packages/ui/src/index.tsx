@@ -30,6 +30,13 @@ export interface ProposalViewModel {
   readonly rationale: string;
 }
 
+export interface CommitmentViewModel {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly status: string;
+}
+
 export function LaresAppShell(props: { readonly children: ReactNode }) {
   return <main className="app-shell">{props.children}</main>;
 }
@@ -284,6 +291,45 @@ export function ProposalReviewPanel(props: {
                   Reject
                 </motion.button>
               </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function CommitmentPanel(props: {
+  readonly commitments: ReadonlyArray<CommitmentViewModel> | undefined;
+  readonly loading: boolean;
+  readonly completingId: string | undefined;
+  readonly onComplete: (commitmentId: string) => void;
+}) {
+  return (
+    <div className="commitment-panel">
+      <p className="summary">
+        {props.loading
+          ? "Loading commitments..."
+          : props.commitments?.length
+            ? `${props.commitments.length} active commitments.`
+            : "No active commitments."}
+      </p>
+
+      {props.commitments?.length ? (
+        <div className="commitment-list">
+          {props.commitments.map((commitment) => (
+            <article className="commitment-item" key={commitment.id}>
+              <p className="eyebrow">{commitment.status}</p>
+              <h3>{commitment.title}</h3>
+              <p>{commitment.body}</p>
+              <motion.button
+                type="button"
+                disabled={props.completingId === commitment.id}
+                whileTap={{ scale: 0.985 }}
+                onClick={() => props.onComplete(commitment.id)}
+              >
+                {props.completingId === commitment.id ? "Completing..." : "Mark completed"}
+              </motion.button>
             </article>
           ))}
         </div>

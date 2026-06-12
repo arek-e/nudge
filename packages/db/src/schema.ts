@@ -26,12 +26,14 @@ export const events = sqliteTable(
     source: text("source").notNull(),
     occurredAt: text("occurred_at").notNull(),
     schemaVersion: text("schema_version").notNull(),
+    idempotencyKey: text("idempotency_key"),
     payload: text("payload", { mode: "json" }).notNull(),
     createdAt: text("created_at").notNull(),
   },
   (table) => [
     index("events_user_occurred_at_idx").on(table.userId, table.occurredAt),
     index("events_user_created_at_idx").on(table.userId, table.createdAt),
+    uniqueIndex("events_user_idempotency_key_idx").on(table.userId, table.idempotencyKey),
   ],
 );
 
@@ -70,11 +72,17 @@ export const syntheses = sqliteTable(
     openQuestions: text("open_questions", { mode: "json" })
       .$type<ReadonlyArray<string>>()
       .notNull(),
+    fingerprint: text("fingerprint"),
     generatedAt: text("generated_at").notNull(),
     createdAt: text("created_at").notNull(),
   },
   (table) => [
     index("syntheses_user_frame_generated_idx").on(table.userId, table.frameId, table.generatedAt),
+    uniqueIndex("syntheses_user_frame_fingerprint_idx").on(
+      table.userId,
+      table.frameId,
+      table.fingerprint,
+    ),
   ],
 );
 
@@ -115,6 +123,12 @@ export const proposals = sqliteTable(
   (table) => [
     index("proposals_user_status_created_idx").on(table.userId, table.status, table.createdAt),
     index("proposals_synthesis_idx").on(table.synthesisId),
+    uniqueIndex("proposals_synthesis_kind_title_body_idx").on(
+      table.synthesisId,
+      table.kind,
+      table.title,
+      table.body,
+    ),
   ],
 );
 
@@ -135,7 +149,54 @@ export const reviews = sqliteTable(
   },
   (table) => [
     index("reviews_user_created_idx").on(table.userId, table.createdAt),
-    index("reviews_proposal_idx").on(table.proposalId),
+    uniqueIndex("reviews_proposal_idx").on(table.proposalId),
+  ],
+);
+
+export const commitments = sqliteTable(
+  "commitments",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    proposalId: text("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => reviews.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("commitments_user_status_created_idx").on(table.userId, table.status, table.createdAt),
+    uniqueIndex("commitments_proposal_idx").on(table.proposalId),
+    uniqueIndex("commitments_review_idx").on(table.reviewId),
+  ],
+);
+
+export const outcomes = sqliteTable(
+  "outcomes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    result: text("result").notNull(),
+    note: text("note"),
+    recordedAt: text("recorded_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("outcomes_user_recorded_idx").on(table.userId, table.recordedAt),
+    uniqueIndex("outcomes_commitment_idx").on(table.commitmentId),
   ],
 );
 
@@ -172,7 +233,9 @@ export const traceSpans = sqliteTable(
 );
 
 export const schema = {
+  commitments,
   events,
+  outcomes,
   frames,
   proposals,
   reviews,

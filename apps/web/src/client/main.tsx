@@ -10,6 +10,7 @@ import { StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
   CheckInForm,
+  CommitmentPanel,
   DashboardHeader,
   EventTable,
   HomeDashboard,
@@ -56,6 +57,7 @@ function TodayScreen() {
   const events = useEvents();
   const latestSynthesis = useLatestSynthesis();
   const proposals = usePendingProposals();
+  const commitments = useActiveCommitments();
   const saveCheckIn = useMutation({
     mutationFn: async (value: string) => {
       await apiClient.captures.append({
@@ -89,6 +91,19 @@ function TodayScreen() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      await queryClient.invalidateQueries({ queryKey: ["commitments"] });
+    },
+  });
+  const recordOutcome = useMutation({
+    mutationFn: async (commitmentId: string) => {
+      await apiClient.outcomes.create({
+        commitmentId,
+        result: "completed",
+        note: "Marked complete from the Today loop.",
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["commitments"] });
     },
   });
   const reviewProposal = useMutation({
@@ -139,6 +154,15 @@ function TodayScreen() {
           onGenerate={() => generateProposals.mutate()}
           onAccept={(proposalId) => reviewProposal.mutate({ proposalId, decision: "accepted" })}
           onReject={(proposalId) => reviewProposal.mutate({ proposalId, decision: "rejected" })}
+        />
+      </Surface>
+
+      <Surface id="commitments-title" eyebrow="Commit" title="Active commitments">
+        <CommitmentPanel
+          commitments={commitments.data?.commitments}
+          loading={commitments.isLoading}
+          completingId={recordOutcome.variables}
+          onComplete={(commitmentId) => recordOutcome.mutate(commitmentId)}
         />
       </Surface>
 
@@ -211,6 +235,15 @@ function usePendingProposals() {
     queryKey: ["proposals"],
     queryFn: async () => {
       return apiClient.proposals.list({ limit: 20 });
+    },
+  });
+}
+
+function useActiveCommitments() {
+  return useQuery({
+    queryKey: ["commitments"],
+    queryFn: async () => {
+      return apiClient.commitments.list({ limit: 20 });
     },
   });
 }

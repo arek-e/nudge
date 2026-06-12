@@ -13,11 +13,14 @@ import {
   persistTraceCacheSpan,
   pruneTraceCache,
   recordHttpRequestTelemetry,
+  retryAfterSecondsFor,
   safeErrorFields,
 } from "@lares/observability";
 import type { Env } from "./env";
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
+
+export { retryAfterSecondsFor };
 
 type AppContext = Context<ObservabilityHonoEnv>;
 type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;

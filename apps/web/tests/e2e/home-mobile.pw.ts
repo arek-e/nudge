@@ -15,9 +15,19 @@ test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
   await expect(page.getByText(/signal[s]? captured/i)).toBeVisible();
 
   await page.getByRole("button", { name: "Generate proposals" }).tap();
-  await expect(page.getByRole("heading", { name: "Clarify next attention point" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Clarify next attention point" }).first(),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Accept" }).first().tap();
-  await expect(page.getByText("No pending proposals.")).toBeVisible();
+  const commitments = page.getByRole("region", { name: "Active commitments" });
+  await expect(commitments).toBeVisible();
+  await expect(
+    commitments.getByRole("heading", { name: "Clarify next attention point" }).first(),
+  ).toBeVisible();
+  const completionButtons = commitments.getByRole("button", { name: "Mark completed" });
+  const activeCommitmentCount = await completionButtons.count();
+  await completionButtons.first().tap();
+  await expect(completionButtons).toHaveCount(activeCommitmentCount - 1);
 
   await page.getByRole("button", { name: "Open menu" }).tap();
 

@@ -17,6 +17,7 @@ import {
   evlogWideEvents,
   type ObservabilityHonoEnv,
   requestObservability,
+  retryAfterSecondsFor,
   runWithRequestSpan,
   serverTiming,
 } from "./observability";
@@ -72,7 +73,15 @@ export const apiRouter = api.router({
     append: api.captures.append.handler(async ({ context, input }) => {
       return runWorkflow(
         context.db,
-        PrimitiveWorkflows.appendSignal({ ...input, user: context.user }),
+        PrimitiveWorkflows.appendSignal({
+          occurredAt: input.occurredAt,
+          payload: input.payload,
+          schemaVersion: input.schemaVersion,
+          source: input.source,
+          type: input.type,
+          user: context.user,
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+        }),
       );
     }),
   },
@@ -80,7 +89,15 @@ export const apiRouter = api.router({
     append: api.events.append.handler(async ({ context, input }) => {
       return runWorkflow(
         context.db,
-        PrimitiveWorkflows.appendSignal({ ...input, user: context.user }),
+        PrimitiveWorkflows.appendSignal({
+          occurredAt: input.occurredAt,
+          payload: input.payload,
+          schemaVersion: input.schemaVersion,
+          source: input.source,
+          type: input.type,
+          user: context.user,
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+        }),
       );
     }),
     list: api.events.list.handler(async ({ context, input }) => {
@@ -138,15 +155,38 @@ export const apiRouter = api.router({
       return { proposals: proposals.map(toProposalResponse) };
     }),
   },
+  commitments: {
+    list: api.commitments.list.handler(async ({ context, input }) => {
+      const commitments = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listCommitments({ limit: input.limit ?? 20, user: context.user }),
+      );
+
+      return { commitments: [...commitments] };
+    }),
+  },
   reviews: {
     create: api.reviews.create.handler(async ({ context, input }) => {
       return runWorkflow(
         context.db,
         PrimitiveWorkflows.reviewProposal({
           decision: input.decision,
-          ...(input.editedTitle ? { editedTitle: input.editedTitle } : {}),
-          ...(input.editedBody ? { editedBody: input.editedBody } : {}),
+          ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
+          ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
           proposalId: input.proposalId,
+          user: context.user,
+        }),
+      );
+    }),
+  },
+  outcomes: {
+    create: api.outcomes.create.handler(async ({ context, input }) => {
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.recordOutcome({
+          commitmentId: input.commitmentId,
+          ...(input.note !== undefined ? { note: input.note } : {}),
+          result: input.result,
           user: context.user,
         }),
       );
@@ -404,8 +444,12 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.syntheses" });
     } else if (c.req.path.startsWith("/api/proposals")) {
       addWideEventFields(c, { routeName: "api.proposals" });
+    } else if (c.req.path.startsWith("/api/commitments")) {
+      addWideEventFields(c, { routeName: "api.commitments" });
     } else if (c.req.path.startsWith("/api/reviews")) {
       addWideEventFields(c, { routeName: "api.reviews" });
+    } else if (c.req.path.startsWith("/api/outcomes")) {
+      addWideEventFields(c, { routeName: "api.outcomes" });
     } else if (c.req.path.startsWith("/api/traces")) {
       addWideEventFields(c, { routeName: "api.traces" });
     } else if (c.req.path.startsWith("/api/events")) {
@@ -452,14 +496,24 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.onError((error, c) => {
+    const retryAfterSeconds = retryAfterSecondsFor(error);
+    const status = retryAfterSeconds === null ? 500 : 503;
     addWideEventFields(c, {
-      status: 500,
+      status,
       outcome: "error",
       errorType: error.name,
       errorMessage: error.message,
+      ...(retryAfterSeconds !== null
+        ? { retryAfterSeconds, resilienceKind: "transient_backpressure" }
+        : {}),
     });
 
-    return c.json({ error: "Internal Server Error" }, 500);
+    if (retryAfterSeconds !== null) {
+      c.header("Retry-After", String(retryAfterSeconds));
+      return c.json({ error: "Service temporarily unavailable", retryAfterSeconds }, 503);
+    }
+
+    return c.json({ error: "Internal Server Error" }, status);
   });
 
   app.get("/", (c) => {
@@ -715,6 +769,9 @@ export function createApp(options: CreateAppOptions = {}) {
     }
 
     addWideEventFields(c, { routeName: "test.error" });
+    if (c.req.query("kind") === "transient") {
+      throw new Error("D1_ERROR: database is locked");
+    }
     throw new Error("test failure");
   });
 

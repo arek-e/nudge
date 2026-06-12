@@ -8,6 +8,7 @@ export const eventRecordSchema = z.object({
   source: z.string(),
   occurredAt: z.string(),
   schemaVersion: z.number().int(),
+  idempotencyKey: z.string().optional(),
   payload: z.unknown(),
   createdAt: z.string(),
 });
@@ -17,6 +18,7 @@ export const eventInputSchema = z.object({
   source: z.string().min(1),
   occurredAt: z.string().datetime(),
   schemaVersion: z.number().int().min(1),
+  idempotencyKey: z.string().min(1).max(256).optional(),
   payload: z.unknown(),
 });
 
@@ -77,6 +79,28 @@ export const reviewRecordSchema = z.object({
   createdAt: z.string(),
 });
 
+export const commitmentRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  proposalId: z.string(),
+  reviewId: z.string(),
+  title: z.string(),
+  body: z.string(),
+  status: z.enum(["active", "completed", "abandoned"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const outcomeRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  commitmentId: z.string(),
+  result: z.enum(["completed", "abandoned"]),
+  note: z.string().optional(),
+  recordedAt: z.string(),
+  createdAt: z.string(),
+});
+
 export const traceSpanSummarySchema = z.object({
   id: z.string(),
   traceId: z.string(),
@@ -120,6 +144,14 @@ const reviewInputSchema = z.object({
   decision: z.enum(["accepted", "edited", "rejected"]),
   editedTitle: z.string().optional(),
   editedBody: z.string().optional(),
+});
+const commitmentsInputSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+const outcomeInputSchema = z.object({
+  commitmentId: z.string(),
+  result: z.enum(["completed", "abandoned"]),
+  note: z.string().optional(),
 });
 const conversationInputSchema = z.object({
   conversationId: z.string().min(1).max(128),
@@ -174,11 +206,23 @@ export const apiContract = {
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
       .output(z.object({ proposals: z.array(proposalRecordSchema) })),
   },
+  commitments: {
+    list: oc
+      .route({ method: "GET", path: "/commitments" })
+      .input(commitmentsInputSchema)
+      .output(z.object({ commitments: z.array(commitmentRecordSchema) })),
+  },
   reviews: {
     create: oc
       .route({ method: "POST", path: "/reviews" })
       .input(reviewInputSchema)
       .output(reviewRecordSchema),
+  },
+  outcomes: {
+    create: oc
+      .route({ method: "POST", path: "/outcomes" })
+      .input(outcomeInputSchema)
+      .output(outcomeRecordSchema),
   },
   syntheses: {
     create: oc

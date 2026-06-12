@@ -340,6 +340,37 @@ describe("web app", () => {
     }
   });
 
+  test("transient pressure errors return retry-after instead of generic failure", async () => {
+    const app = createApp();
+    const consoleLog = spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const response = await app.request(
+        "/__test/error?kind=transient",
+        { headers: { "cf-ray": "pressure-ray" } },
+        { ...env, LOG_HTTP_REQUESTS: "true" },
+      );
+
+      const log = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]));
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Retry-After")).toBe("5");
+      expect(await response.json()).toEqual({
+        error: "Service temporarily unavailable",
+        retryAfterSeconds: 5,
+      });
+      expect(log.event).toMatchObject({
+        status: 503,
+        statusGroup: "5xx",
+        outcome: "error",
+        resilienceKind: "transient_backpressure",
+        retryAfterSeconds: 5,
+      });
+    } finally {
+      consoleLog.mockRestore();
+    }
+  });
+
   test("GET /api/version reports service version", async () => {
     const app = createApp();
     const response = await app.request("/api/version", {}, env);
@@ -567,6 +598,23 @@ describe("web app", () => {
           source: "api",
           occurredAt: "2026-06-12T10:00:00.000Z",
           schemaVersion: 1,
+          idempotencyKey: "capture-api-retry-1",
+          payload: { note: "primitive route" },
+        }),
+      },
+      env,
+    );
+    const retriedCaptureResponse = await app.request(
+      "/api/captures",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "user_context_captured",
+          source: "api",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          idempotencyKey: "capture-api-retry-1",
           payload: { note: "primitive route" },
         }),
       },
@@ -575,8 +623,11 @@ describe("web app", () => {
 
     const signalsResponse = await app.request("/api/signals", {}, env);
     const body = await signalsResponse.json();
+    const capture = await captureResponse.json();
+    const retriedCapture = await retriedCaptureResponse.json();
 
     expect(captureResponse.status).toBe(200);
+    expect(retriedCapture.id).toBe(capture.id);
     expect(signalsResponse.status).toBe(200);
     expect(body.signals).toEqual([
       expect.objectContaining({
@@ -674,8 +725,18 @@ describe("web app", () => {
       },
       env,
     );
+    const retriedGenerateResponse = await app.request(
+      "/api/proposals/generate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
     const listBeforeReviewResponse = await app.request("/api/proposals", {}, env);
     const listBeforeReview = await listBeforeReviewResponse.json();
+    const retriedGenerate = await retriedGenerateResponse.json();
     const proposal = listBeforeReview.proposals[0];
     const reviewResponse = await app.request(
       "/api/reviews",
@@ -689,6 +750,9 @@ describe("web app", () => {
     const listAfterReviewResponse = await app.request("/api/proposals", {}, env);
 
     expect(generateResponse.status).toBe(200);
+    expect(retriedGenerate.proposals.map((item: { id: string }) => item.id)).toEqual(
+      listBeforeReview.proposals.map((item: { id: string }) => item.id),
+    );
     expect(listBeforeReviewResponse.status).toBe(200);
     expect(listBeforeReview.proposals).toEqual([
       expect.objectContaining({
@@ -702,6 +766,98 @@ describe("web app", () => {
       expect.objectContaining({ proposalId: proposal.id, decision: "accepted" }),
     );
     expect(await listAfterReviewResponse.json()).toEqual({ proposals: [] });
+  });
+
+  test("custom integrations can list commitments and record outcomes", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    await app.request(
+      "/api/syntheses",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+    const generateResponse = await app.request(
+      "/api/proposals/generate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+    const { proposals } = await generateResponse.json();
+
+    await app.request(
+      "/api/reviews",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
+      },
+      env,
+    );
+    const retriedReviewResponse = await app.request(
+      "/api/reviews",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
+      },
+      env,
+    );
+    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+    const { commitments } = await commitmentsResponse.json();
+    const outcomeResponse = await app.request(
+      "/api/outcomes",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          commitmentId: commitments[0].id,
+          result: "completed",
+          note: "Handled in planning.",
+        }),
+      },
+      env,
+    );
+    const retriedOutcomeResponse = await app.request(
+      "/api/outcomes",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          commitmentId: commitments[0].id,
+          result: "completed",
+          note: "Handled in planning.",
+        }),
+      },
+      env,
+    );
+    const activeAfterOutcomeResponse = await app.request("/api/commitments", {}, env);
+
+    expect(retriedReviewResponse.status).toBe(200);
+    expect(commitmentsResponse.status).toBe(200);
+    expect(commitments).toEqual([
+      expect.objectContaining({
+        status: "active",
+        title: "Clarify next attention point",
+      }),
+    ]);
+    expect(outcomeResponse.status).toBe(200);
+    const outcome = await outcomeResponse.json();
+    expect(outcome).toEqual(
+      expect.objectContaining({
+        commitmentId: commitments[0].id,
+        result: "completed",
+        note: "Handled in planning.",
+      }),
+    );
+    expect(await retriedOutcomeResponse.json()).toEqual(outcome);
+    expect(await activeAfterOutcomeResponse.json()).toEqual({ commitments: [] });
   });
 
   test("custom integrations can list events by occurred-at time range", async () => {
@@ -768,6 +924,12 @@ describe("web app", () => {
     });
     expect(spec.paths["/signals"].get).toMatchObject({
       operationId: "signals.list",
+    });
+    expect(spec.paths["/commitments"].get).toMatchObject({
+      operationId: "commitments.list",
+    });
+    expect(spec.paths["/outcomes"].post).toMatchObject({
+      operationId: "outcomes.create",
     });
     expect(spec.paths["/conversations/{conversationId}"].get).toMatchObject({
       operationId: "conversations.get",

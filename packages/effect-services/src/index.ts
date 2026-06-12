@@ -7,6 +7,21 @@ import {
   type DevUser,
 } from "@lares/domain";
 
+export const durableWorkflowStepConfig = {
+  retries: {
+    limit: 5,
+    delay: 1_000,
+    backoff: "exponential",
+  },
+  timeout: "10 minutes",
+} as const;
+
+export const currentWorkflowVersion = 1;
+
+export type WorkflowVersion = typeof currentWorkflowVersion;
+
+export const workflowStepName = (version: WorkflowVersion, name: string) => `v${version}.${name}`;
+
 export class AuthService extends Context.Service<
   AuthService,
   {
@@ -36,6 +51,7 @@ export const PrimitiveWorkflows = {
     readonly source: string;
     readonly occurredAt: string;
     readonly schemaVersion: number;
+    readonly idempotencyKey?: string;
     readonly payload: unknown;
   }) =>
     Effect.gen(function* () {
@@ -48,6 +64,7 @@ export const PrimitiveWorkflows = {
         source: input.source,
         type: input.type,
         userId: input.user.id,
+        ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
       });
     }),
 
@@ -133,11 +150,72 @@ export const PrimitiveWorkflows = {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.ensureUser(input.user);
-      return yield* db.reviewProposal({
-        decision: input.decision,
-        ...(input.editedTitle ? { editedTitle: input.editedTitle } : {}),
-        ...(input.editedBody ? { editedBody: input.editedBody } : {}),
+      const proposal = yield* db.getProposal({
         proposalId: input.proposalId,
+        userId: input.user.id,
+      });
+      if (!proposal) return yield* Effect.fail(new Error("Proposal not found"));
+
+      if (proposal.status !== "pending") {
+        const existingReview = yield* db.getReviewForProposal({
+          proposalId: input.proposalId,
+          userId: input.user.id,
+        });
+        if (
+          existingReview?.decision === input.decision &&
+          existingReview.editedTitle === input.editedTitle &&
+          existingReview.editedBody === input.editedBody
+        ) {
+          return existingReview;
+        }
+        return yield* Effect.fail(new Error("Proposal already reviewed"));
+      }
+
+      const review = yield* db.reviewProposal({
+        decision: input.decision,
+        ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
+        ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+        proposalId: input.proposalId,
+        userId: input.user.id,
+      });
+
+      if (input.decision !== "rejected") {
+        yield* db.appendCommitment({
+          body: input.editedBody ?? proposal.body,
+          proposalId: proposal.id,
+          reviewId: review.id,
+          title: input.editedTitle ?? proposal.title,
+          userId: input.user.id,
+        });
+      }
+
+      return review;
+    }),
+
+  listCommitments: (input: { readonly user: DbUser; readonly limit: number }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser(input.user);
+      return yield* db.listCommitments({
+        limit: input.limit,
+        status: "active",
+        userId: input.user.id,
+      });
+    }),
+
+  recordOutcome: (input: {
+    readonly user: DbUser;
+    readonly commitmentId: string;
+    readonly result: "completed" | "abandoned";
+    readonly note?: string;
+  }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser(input.user);
+      return yield* db.recordOutcome({
+        commitmentId: input.commitmentId,
+        ...(input.note !== undefined ? { note: input.note } : {}),
+        result: input.result,
         userId: input.user.id,
       });
     }),
