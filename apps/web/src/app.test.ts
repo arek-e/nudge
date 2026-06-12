@@ -408,6 +408,72 @@ describe("web app", () => {
     });
   });
 
+  test("GET /api/agent-sessions/:sessionId/tools/list-recent-signals forwards to the agent session", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => ({ name }),
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          return Response.json({
+            sessionId: "focus",
+            tool: "listRecentSignals",
+            signals: [
+              {
+                id: "signal-1",
+                type: "capture.note",
+                source: "test",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "Read-only context" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+            ],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp();
+    const consoleLog = spyOn(console, "log").mockImplementation(() => {});
+
+    let response: Response;
+    let loggedEvent: unknown;
+    try {
+      response = await app.request(
+        "/api/agent-sessions/focus/tools/list-recent-signals?limit=5",
+        {},
+        { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
+      );
+      loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
+    } finally {
+      consoleLog.mockRestore();
+    }
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
+    expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
+    expect(loggedEvent).toMatchObject({
+      agentTool: "listRecentSignals",
+      routeName: "api.agentSessions",
+    });
+    expect(await response.json()).toEqual({
+      sessionId: "focus",
+      tool: "listRecentSignals",
+      signals: [
+        {
+          id: "signal-1",
+          type: "capture.note",
+          source: "test",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          payload: { note: "Read-only context" },
+          createdAt: "2026-06-12T10:00:00.000Z",
+        },
+      ],
+    });
+  });
+
   test("custom integrations can append and list current user's events", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 

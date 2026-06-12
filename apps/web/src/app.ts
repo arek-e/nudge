@@ -329,6 +329,29 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
+  app.get("/api/agent-sessions/:sessionId/tools/list-recent-signals", async (c) => {
+    addWideEventFields(c, {
+      routeName: "api.agentSessions",
+      agentTool: "listRecentSignals",
+    });
+    const sessionId = c.req.param("sessionId");
+    const agentId = c.env.USER_AGENT_SESSION.idFromName(sessionId);
+    const agent = c.env.USER_AGENT_SESSION.get(agentId);
+    const url = new URL(c.req.url);
+    url.pathname = "/tools/list-recent-signals";
+
+    const response = await agent.fetch(
+      new Request(url, {
+        headers: {
+          "x-lares-session-id": sessionId,
+        },
+        method: "GET",
+      }),
+    );
+
+    return c.newResponse(response.body, response);
+  });
+
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
