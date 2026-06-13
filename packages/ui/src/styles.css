@@ -314,10 +314,9 @@ label {
   font-weight: 500;
 }
 
+input,
 textarea {
   width: 100%;
-  min-height: 9rem;
-  resize: vertical;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: var(--space-3);
@@ -330,9 +329,53 @@ textarea {
   box-shadow: var(--shadow-inset);
 }
 
+input:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+textarea {
+  min-height: 9rem;
+  resize: vertical;
+}
+
+.rich-text-editor {
+  width: 100%;
+}
+
+.rich-text-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.rich-text-toolbar button {
+  min-height: 2.5rem;
+}
+
+.rich-text-content {
+  min-height: 9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--surface-control);
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-13);
+  line-height: 1.45;
+  outline: none;
+  box-shadow: var(--shadow-inset);
+}
+
+.rich-text-content:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+.rich-text-content p {
+  margin: 0;
 }
 
 button:not(.menu-button),
@@ -410,7 +453,9 @@ button:disabled {
 .proposal-panel,
 .proposal-list,
 .commitment-panel,
-.commitment-list {
+.commitment-list,
+.outcome-panel,
+.outcome-list {
   display: grid;
   gap: var(--space-3);
 }
@@ -421,13 +466,15 @@ button:disabled {
 }
 
 .proposal-item,
-.commitment-item {
+.commitment-item,
+.outcome-item {
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--space-3);
 }
 
 .proposal-item h3,
-.commitment-item h3 {
+.commitment-item h3,
+.outcome-item h3 {
   margin: 0;
   color: var(--text-strong);
   font-size: var(--font-size-16);
@@ -436,7 +483,8 @@ button:disabled {
 }
 
 .proposal-item p:not(.eyebrow),
-.commitment-item p:not(.eyebrow) {
+.commitment-item p:not(.eyebrow),
+.outcome-item p:not(.eyebrow) {
   margin: var(--space-1) 0 0;
   color: var(--text-secondary);
   font-size: var(--font-size-13);
@@ -449,9 +497,93 @@ button:disabled {
 
 .proposal-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: var(--space-2);
   margin-top: var(--space-3);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  min-height: 100dvh;
+  background: rgba(0, 0, 0, 0.46);
+  opacity: calc(0.46 * (1 - var(--drawer-swipe-progress, 0)));
+  transition: opacity 450ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.drawer-backdrop[data-starting-style],
+.drawer-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+.drawer-viewport {
+  position: fixed;
+  z-index: 21;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.writing-drawer {
+  --bleed: 3rem;
+  position: relative;
+  width: min(100%, 44rem);
+  max-height: calc(86dvh + var(--bleed));
+  margin-bottom: calc(-1 * var(--bleed));
+  margin: 0 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 1.25rem 1.25rem 0 0;
+  outline: 0;
+  padding: var(--space-3) var(--space-3)
+    calc(max(var(--space-4), env(safe-area-inset-bottom)) + var(--bleed));
+  transform: translateY(var(--drawer-swipe-movement-y, 0));
+  transition: transform 450ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.writing-drawer[data-starting-style],
+.writing-drawer[data-ending-style] {
+  transform: translateY(calc(100% - var(--bleed) + 2px));
+}
+
+.writing-drawer[data-swiping] {
+  user-select: none;
+  transition-duration: 0ms;
+}
+
+.drawer-handle {
+  width: 2.25rem;
+  height: 0.25rem;
+  margin: 0 auto var(--space-3);
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.writing-drawer-header h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-size-18);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.writing-drawer-header p:not(.eyebrow) {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-13);
+  line-height: 1.4;
+}
+
+.drawer-actions {
+  position: sticky;
+  bottom: calc(-1 * max(var(--space-4), env(safe-area-inset-bottom)));
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  background: linear-gradient(180deg, rgba(24, 24, 24, 0), var(--surface-2) 28%);
 }
 
 .commitment-item button {

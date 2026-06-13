@@ -7,6 +7,7 @@
       "packages/*"
     ],
     "catalog": {
+      "@base-ui/react": "1.5.0",
       "@cloudflare/workers-types": "4.20260612.1",
       "@orpc/client": "1.14.6",
       "@orpc/contract": "1.14.6",
@@ -15,6 +16,7 @@
       "@orpc/server": "1.14.6",
       "@orpc/zod": "1.14.6",
       "@playwright/test": "1.60.0",
+      "@platejs/basic-nodes": "53.0.0",
       "@tanstack/react-query": "5.101.0",
       "@tanstack/react-table": "8.21.3",
       "@tanstack/react-router": "1.170.15",
@@ -32,6 +34,7 @@
       "motion": "12.40.0",
       "oxfmt": "0.54.0",
       "oxlint": "1.69.0",
+      "platejs": "53.0.7",
       "react": "19.2.7",
       "react-dom": "19.2.7",
       "typescript": "6.0.3",

@@ -837,6 +837,7 @@ describe("web app", () => {
       },
       env,
     );
+    const outcomesResponse = await app.request("/api/outcomes", {}, env);
     const activeAfterOutcomeResponse = await app.request("/api/commitments", {}, env);
 
     expect(retriedReviewResponse.status).toBe(200);
@@ -857,7 +858,60 @@ describe("web app", () => {
       }),
     );
     expect(await retriedOutcomeResponse.json()).toEqual(outcome);
+    expect(await outcomesResponse.json()).toEqual({ outcomes: [outcome] });
     expect(await activeAfterOutcomeResponse.json()).toEqual({ commitments: [] });
+  });
+
+  test("custom integrations can persist rich edited commitment documents", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const editedBodyDocument = [{ type: "p", children: [{ text: "Send the travel follow-up." }] }];
+
+    await app.request(
+      "/api/syntheses",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+    const generateResponse = await app.request(
+      "/api/proposals/generate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      env,
+    );
+    const { proposals } = await generateResponse.json();
+
+    await app.request(
+      "/api/reviews",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          proposalId: proposals[0].id,
+          decision: "edited",
+          editedTitle: "Confirm travel follow-up",
+          editedBody: "Send the travel follow-up.",
+          editedBodyDocument,
+        }),
+      },
+      env,
+    );
+    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+
+    expect(await commitmentsResponse.json()).toEqual({
+      commitments: [
+        expect.objectContaining({
+          title: "Confirm travel follow-up",
+          body: "Send the travel follow-up.",
+          bodyDocument: editedBodyDocument,
+        }),
+      ],
+    });
   });
 
   test("custom integrations can list events by occurred-at time range", async () => {
@@ -927,6 +981,9 @@ describe("web app", () => {
     });
     expect(spec.paths["/commitments"].get).toMatchObject({
       operationId: "commitments.list",
+    });
+    expect(spec.paths["/outcomes"].get).toMatchObject({
+      operationId: "outcomes.list",
     });
     expect(spec.paths["/outcomes"].post).toMatchObject({
       operationId: "outcomes.create",

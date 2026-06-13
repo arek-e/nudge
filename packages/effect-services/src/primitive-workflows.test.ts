@@ -241,6 +241,39 @@ describe("PrimitiveWorkflows", () => {
     expect(result.commitments).toHaveLength(1);
   });
 
+  test("edited proposals preserve rich commitment body documents", async () => {
+    const document = [{ type: "p", children: [{ text: "Send the travel follow-up." }] }];
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "edited",
+          editedTitle: "Confirm travel follow-up",
+          editedBody: "Send the travel follow-up.",
+          editedBodyDocument: document,
+        });
+
+        return yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+      }),
+    );
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        title: "Confirm travel follow-up",
+        body: "Send the travel follow-up.",
+        bodyDocument: document,
+      }),
+    );
+  });
+
   test("records an outcome against a commitment", async () => {
     const result = await runWithMemoryDb(
       Effect.gen(function* () {
@@ -312,5 +345,40 @@ describe("PrimitiveWorkflows", () => {
     );
 
     expect(result.retriedOutcome.id).toBe(result.firstOutcome.id);
+  });
+
+  test("lists recent outcomes for closed-loop review", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        yield* PrimitiveWorkflows.createSynthesis({ user, frameKey: "current_state" });
+        const [proposal] = yield* PrimitiveWorkflows.generateProposals({
+          user,
+          frameKey: "current_state",
+        });
+        if (!proposal) throw new Error("Expected proposal");
+
+        yield* PrimitiveWorkflows.reviewProposal({
+          user,
+          proposalId: proposal.id,
+          decision: "accepted",
+        });
+        const [commitment] = yield* PrimitiveWorkflows.listCommitments({ user, limit: 10 });
+        if (!commitment) throw new Error("Expected commitment");
+
+        const outcome = yield* PrimitiveWorkflows.recordOutcome({
+          user,
+          commitmentId: commitment.id,
+          result: "completed",
+          note: "Answered during planning.",
+        });
+
+        return {
+          outcome,
+          outcomes: yield* PrimitiveWorkflows.listOutcomes({ user, limit: 10 }),
+        };
+      }),
+    );
+
+    expect(result.outcomes).toEqual([result.outcome]);
   });
 });

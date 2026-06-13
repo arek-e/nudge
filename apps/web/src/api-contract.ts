@@ -76,6 +76,7 @@ export const reviewRecordSchema = z.object({
   decision: z.enum(["accepted", "edited", "rejected"]),
   editedTitle: z.string().optional(),
   editedBody: z.string().optional(),
+  editedBodyDocument: z.unknown().optional(),
   createdAt: z.string(),
 });
 
@@ -86,6 +87,7 @@ export const commitmentRecordSchema = z.object({
   reviewId: z.string(),
   title: z.string(),
   body: z.string(),
+  bodyDocument: z.unknown().optional(),
   status: z.enum(["active", "completed", "abandoned"]),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -144,6 +146,7 @@ const reviewInputSchema = z.object({
   decision: z.enum(["accepted", "edited", "rejected"]),
   editedTitle: z.string().optional(),
   editedBody: z.string().optional(),
+  editedBodyDocument: z.unknown().optional(),
 });
 const commitmentsInputSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -152,6 +155,9 @@ const outcomeInputSchema = z.object({
   commitmentId: z.string(),
   result: z.enum(["completed", "abandoned"]),
   note: z.string().optional(),
+});
+const outcomesInputSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 const conversationInputSchema = z.object({
   conversationId: z.string().min(1).max(128),
@@ -219,6 +225,10 @@ export const apiContract = {
       .output(reviewRecordSchema),
   },
   outcomes: {
+    list: oc
+      .route({ method: "GET", path: "/outcomes" })
+      .input(outcomesInputSchema)
+      .output(z.object({ outcomes: z.array(outcomeRecordSchema) })),
     create: oc
       .route({ method: "POST", path: "/outcomes" })
       .input(outcomeInputSchema)

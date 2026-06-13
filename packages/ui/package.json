@@ -7,8 +7,11 @@
     "./styles.css": "./src/styles.css"
   },
   "dependencies": {
+    "@base-ui/react": "catalog:",
+    "@platejs/basic-nodes": "catalog:",
     "@tanstack/react-table": "catalog:",
     "motion": "catalog:",
+    "platejs": "catalog:",
     "react": "catalog:"
   },
   "devDependencies": {

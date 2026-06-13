@@ -146,6 +146,7 @@ export const PrimitiveWorkflows = {
     readonly decision: ReviewDecision;
     readonly editedTitle?: string;
     readonly editedBody?: string;
+    readonly editedBodyDocument?: unknown;
   }) =>
     Effect.gen(function* () {
       const db = yield* Db;
@@ -164,7 +165,9 @@ export const PrimitiveWorkflows = {
         if (
           existingReview?.decision === input.decision &&
           existingReview.editedTitle === input.editedTitle &&
-          existingReview.editedBody === input.editedBody
+          existingReview.editedBody === input.editedBody &&
+          JSON.stringify(existingReview.editedBodyDocument) ===
+            JSON.stringify(input.editedBodyDocument)
         ) {
           return existingReview;
         }
@@ -175,6 +178,9 @@ export const PrimitiveWorkflows = {
         decision: input.decision,
         ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
         ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+        ...(input.editedBodyDocument !== undefined
+          ? { editedBodyDocument: input.editedBodyDocument }
+          : {}),
         proposalId: input.proposalId,
         userId: input.user.id,
       });
@@ -182,6 +188,9 @@ export const PrimitiveWorkflows = {
       if (input.decision !== "rejected") {
         yield* db.appendCommitment({
           body: input.editedBody ?? proposal.body,
+          ...(input.editedBodyDocument !== undefined
+            ? { bodyDocument: input.editedBodyDocument }
+            : {}),
           proposalId: proposal.id,
           reviewId: review.id,
           title: input.editedTitle ?? proposal.title,
@@ -216,6 +225,16 @@ export const PrimitiveWorkflows = {
         commitmentId: input.commitmentId,
         ...(input.note !== undefined ? { note: input.note } : {}),
         result: input.result,
+        userId: input.user.id,
+      });
+    }),
+
+  listOutcomes: (input: { readonly user: DbUser; readonly limit: number }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser(input.user);
+      return yield* db.listOutcomes({
+        limit: input.limit,
         userId: input.user.id,
       });
     }),

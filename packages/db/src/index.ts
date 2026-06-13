@@ -123,6 +123,7 @@ export interface ReviewProposalInput {
   readonly decision: ReviewDecision;
   readonly editedTitle?: string;
   readonly editedBody?: string;
+  readonly editedBodyDocument?: unknown;
 }
 
 export interface ReviewRecord extends ReviewProposalInput {
@@ -138,6 +139,7 @@ export interface AppendCommitmentInput {
   readonly reviewId: string;
   readonly title: string;
   readonly body: string;
+  readonly bodyDocument?: unknown;
 }
 
 export interface CommitmentRecord extends AppendCommitmentInput {
@@ -168,6 +170,11 @@ export interface OutcomeRecord extends RecordOutcomeInput {
   readonly createdAt: string;
 }
 
+export interface ListOutcomesInput {
+  readonly userId: string;
+  readonly limit: number;
+}
+
 export interface DbService {
   readonly provider: DatabaseProvider;
   readonly ensureUser: (user: DbUser) => Effect.Effect<void>;
@@ -192,6 +199,7 @@ export interface DbService {
   readonly listCommitments: (
     input: ListCommitmentsInput,
   ) => Effect.Effect<ReadonlyArray<CommitmentRecord>>;
+  readonly listOutcomes: (input: ListOutcomesInput) => Effect.Effect<ReadonlyArray<OutcomeRecord>>;
   readonly recordOutcome: (input: RecordOutcomeInput) => Effect.Effect<OutcomeRecord>;
   readonly reviewProposal: (input: ReviewProposalInput) => Effect.Effect<ReviewRecord>;
   readonly upsertCurrentFrame: (input: UpsertCurrentFrameInput) => Effect.Effect<FrameRecord>;
@@ -253,6 +261,7 @@ const toCommitmentRecord = (row: typeof commitments.$inferSelect) => ({
   reviewId: row.reviewId,
   title: row.title,
   body: row.body,
+  ...(row.bodyDocument !== null ? { bodyDocument: row.bodyDocument } : {}),
   status: row.status as CommitmentStatus,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -270,6 +279,10 @@ const toOutcomeRecord = (row: typeof outcomes.$inferSelect) => ({
 
 const sameOutcomeInput = (outcome: OutcomeRecord, input: RecordOutcomeInput) =>
   outcome.result === input.result && outcome.note === input.note;
+
+const sameJson = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+
+const optionalJsonText = (value: unknown) => (value === undefined ? null : JSON.stringify(value));
 
 export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
   static readonly layerMemory = Layer.effect(
@@ -424,6 +437,13 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
               .slice(0, input.limit);
           }),
+        listOutcomes: (input) =>
+          Effect.sync(() => {
+            return [...outcomeStore.values()]
+              .filter((outcome) => outcome.userId === input.userId)
+              .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+              .slice(0, input.limit);
+          }),
         recordOutcome: (input) =>
           Effect.sync(() => {
             const existingOutcome = [...outcomeStore.values()].find(
@@ -467,7 +487,9 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               if (
                 existing.decision === input.decision &&
                 existing.editedTitle === input.editedTitle &&
-                existing.editedBody === input.editedBody
+                existing.editedBody === input.editedBody &&
+                JSON.stringify(existing.editedBodyDocument) ===
+                  JSON.stringify(input.editedBodyDocument)
               ) {
                 return existing;
               }
@@ -484,8 +506,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               ...proposal,
               status: input.decision,
               updatedAt: timestamp,
-              ...(input.editedTitle ? { title: input.editedTitle } : {}),
-              ...(input.editedBody ? { body: input.editedBody } : {}),
+              ...(input.editedTitle !== undefined ? { title: input.editedTitle } : {}),
+              ...(input.editedBody !== undefined ? { body: input.editedBody } : {}),
             });
             const review = {
               ...input,
@@ -874,6 +896,9 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     decision: row.decision as ReviewDecision,
                     ...(row.editedTitle !== null ? { editedTitle: row.editedTitle } : {}),
                     ...(row.editedBody !== null ? { editedBody: row.editedBody } : {}),
+                    ...(row.editedBodyDocument !== null
+                      ? { editedBodyDocument: row.editedBodyDocument }
+                      : {}),
                     createdAt: row.createdAt,
                   }
                 : null;
@@ -931,6 +956,17 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 .limit(input.limit);
 
               return rows.map(toCommitmentRecord);
+            }),
+          listOutcomes: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(outcomes)
+                .where(eq(outcomes.userId, input.userId))
+                .orderBy(desc(outcomes.recordedAt), desc(outcomes.createdAt))
+                .limit(input.limit);
+
+              return rows.map(toOutcomeRecord);
             }),
           recordOutcome: (input) =>
             Effect.promise(async () => {
@@ -1021,12 +1057,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   ...(existingReview.editedBody !== null
                     ? { editedBody: existingReview.editedBody }
                     : {}),
+                  ...(existingReview.editedBodyDocument !== null
+                    ? { editedBodyDocument: existingReview.editedBodyDocument }
+                    : {}),
                   createdAt: existingReview.createdAt,
                 } satisfies ReviewRecord;
                 if (
                   existing.decision === input.decision &&
                   existing.editedTitle === input.editedTitle &&
-                  existing.editedBody === input.editedBody
+                  existing.editedBody === input.editedBody &&
+                  sameJson(existing.editedBodyDocument, input.editedBodyDocument)
                 ) {
                   return existing;
                 }
@@ -1049,9 +1089,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                       decision,
                       edited_title,
                       edited_body,
+                      edited_body_document,
                       created_at
                     )
-                    SELECT ?, ?, ?, ?, ?, ?, ?
+                    SELECT ?, ?, ?, ?, ?, ?, ?, ?
                     FROM proposals
                     WHERE id = ? AND user_id = ? AND status = 'pending'`,
                   )
@@ -1062,6 +1103,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     review.decision,
                     review.editedTitle ?? null,
                     review.editedBody ?? null,
+                    optionalJsonText(review.editedBodyDocument),
                     review.createdAt,
                     input.proposalId,
                     input.userId,
@@ -1084,6 +1126,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                           AND decision = ?
                           AND (edited_title IS ? OR edited_title = ?)
                           AND (edited_body IS ? OR edited_body = ?)
+                          AND (edited_body_document IS ? OR edited_body_document = ?)
                       )`,
                   )
                   .bind(
@@ -1100,6 +1143,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     input.editedTitle ?? null,
                     input.editedBody ?? null,
                     input.editedBody ?? null,
+                    optionalJsonText(input.editedBodyDocument),
+                    optionalJsonText(input.editedBodyDocument),
                   ),
               ]);
 
@@ -1119,12 +1164,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 decision: stored.decision as ReviewDecision,
                 ...(stored.editedTitle !== null ? { editedTitle: stored.editedTitle } : {}),
                 ...(stored.editedBody !== null ? { editedBody: stored.editedBody } : {}),
+                ...(stored.editedBodyDocument !== null
+                  ? { editedBodyDocument: stored.editedBodyDocument }
+                  : {}),
                 createdAt: stored.createdAt,
               } satisfies ReviewRecord;
               if (
                 storedReview.decision === input.decision &&
                 storedReview.editedTitle === input.editedTitle &&
-                storedReview.editedBody === input.editedBody
+                storedReview.editedBody === input.editedBody &&
+                sameJson(storedReview.editedBodyDocument, input.editedBodyDocument)
               ) {
                 return storedReview;
               }

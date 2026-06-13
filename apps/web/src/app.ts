@@ -173,6 +173,9 @@ export const apiRouter = api.router({
           decision: input.decision,
           ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
           ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+          ...(input.editedBodyDocument !== undefined
+            ? { editedBodyDocument: input.editedBodyDocument }
+            : {}),
           proposalId: input.proposalId,
           user: context.user,
         }),
@@ -180,6 +183,14 @@ export const apiRouter = api.router({
     }),
   },
   outcomes: {
+    list: api.outcomes.list.handler(async ({ context, input }) => {
+      const outcomes = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listOutcomes({ limit: input.limit ?? 20, user: context.user }),
+      );
+
+      return { outcomes: [...outcomes] };
+    }),
     create: api.outcomes.create.handler(async ({ context, input }) => {
       return runWorkflow(
         context.db,

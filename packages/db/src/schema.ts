@@ -145,6 +145,7 @@ export const reviews = sqliteTable(
     decision: text("decision").notNull(),
     editedTitle: text("edited_title"),
     editedBody: text("edited_body"),
+    editedBodyDocument: text("edited_body_document", { mode: "json" }),
     createdAt: text("created_at").notNull(),
   },
   (table) => [
@@ -168,6 +169,7 @@ export const commitments = sqliteTable(
       .references(() => reviews.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     body: text("body").notNull(),
+    bodyDocument: text("body_document", { mode: "json" }),
     status: text("status").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),

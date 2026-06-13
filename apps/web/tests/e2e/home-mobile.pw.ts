@@ -18,16 +18,28 @@ test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Clarify next attention point" }).first(),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Accept" }).first().tap();
+  await page.getByRole("button", { name: "Edit & commit" }).first().tap();
+  await expect(page.getByRole("button", { name: "Bold" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Italic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Underline" })).toBeVisible();
+  await page.getByRole("button", { name: "AI draft" }).tap();
+  await page.getByLabel("Commitment title").fill("Confirm travel follow-up");
+  await page
+    .getByRole("textbox", { name: "Commitment body" })
+    .fill("Send the travel follow-up before lunch.");
+  await page.getByRole("button", { name: "Commit edited proposal" }).tap();
   const commitments = page.getByRole("region", { name: "Active commitments" });
   await expect(commitments).toBeVisible();
   await expect(
-    commitments.getByRole("heading", { name: "Clarify next attention point" }).first(),
+    commitments.getByRole("heading", { name: "Confirm travel follow-up" }),
   ).toBeVisible();
   const completionButtons = commitments.getByRole("button", { name: "Mark completed" });
-  const activeCommitmentCount = await completionButtons.count();
   await completionButtons.first().tap();
-  await expect(completionButtons).toHaveCount(activeCommitmentCount - 1);
+  const closedLoop = page.getByRole("region", { name: "Closed loop" });
+  await expect(closedLoop).toBeVisible();
+  await expect(
+    closedLoop.getByRole("heading", { name: /Marked complete from the Today loop at/ }).first(),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Open menu" }).tap();
 

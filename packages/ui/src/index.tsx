@@ -1,4 +1,7 @@
+import type { Value } from "platejs";
 import type { FormEvent, ReactNode } from "react";
+import { Drawer } from "@base-ui/react/drawer";
+import { BoldPlugin, ItalicPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import {
   createColumnHelper,
   flexRender,
@@ -6,6 +9,9 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { AnimatePresence, motion } from "motion/react";
+import { Plate, PlateContent, usePlateEditor } from "platejs/react";
+
+export type RichTextDocument = Value;
 
 export interface EventListItem {
   readonly id: string;
@@ -36,6 +42,32 @@ export interface CommitmentViewModel {
   readonly body: string;
   readonly status: string;
 }
+
+export interface OutcomeViewModel {
+  readonly id: string;
+  readonly result: string;
+  readonly note?: string | undefined;
+  readonly recordedAt: string;
+}
+
+export const plainTextToRichTextDocument = (text: string): RichTextDocument => [
+  {
+    type: "p",
+    children: [{ text }],
+  },
+];
+
+const plateValueToPlainText = (value: Value) => {
+  return value
+    .map((node) => {
+      if (!Array.isArray(node.children)) return "";
+      return node.children
+        .map((child) => ("text" in child && typeof child.text === "string" ? child.text : ""))
+        .join("");
+    })
+    .join("\n")
+    .trim();
+};
 
 export function LaresAppShell(props: { readonly children: ReactNode }) {
   return <main className="app-shell">{props.children}</main>;
@@ -240,9 +272,17 @@ export function ProposalReviewPanel(props: {
   readonly loading: boolean;
   readonly generating: boolean;
   readonly reviewingId: string | undefined;
+  readonly editingProposalId?: string | undefined;
+  readonly editedTitle: string;
+  readonly editedBody: string;
   readonly onGenerate: () => void;
   readonly onAccept: (proposalId: string) => void;
   readonly onReject: (proposalId: string) => void;
+  readonly onStartEdit: (proposal: ProposalViewModel) => void;
+  readonly onEditTitle: (title: string) => void;
+  readonly onEditBody: (body: string) => void;
+  readonly onCancelEdit: () => void;
+  readonly onCommitEdit: () => void;
 }) {
   return (
     <div className="proposal-panel">
@@ -290,11 +330,151 @@ export function ProposalReviewPanel(props: {
                 >
                   Reject
                 </motion.button>
+                <motion.button
+                  type="button"
+                  className="secondary-button"
+                  disabled={props.reviewingId === proposal.id}
+                  whileTap={{ scale: 0.985 }}
+                  onClick={() => props.onStartEdit(proposal)}
+                >
+                  Edit & commit
+                </motion.button>
               </div>
             </article>
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+export function ProposalEditorDrawer(props: {
+  readonly open: boolean;
+  readonly title: string;
+  readonly body: string;
+  readonly bodyDocument: RichTextDocument | undefined;
+  readonly onTitleChange: (title: string) => void;
+  readonly onBodyChange: (body: string) => void;
+  readonly onBodyDocumentChange: (document: RichTextDocument) => void;
+  readonly onAiDraft: () => void;
+  readonly onCancel: () => void;
+  readonly onCommit: () => void;
+}) {
+  return (
+    <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onCancel() : undefined)}>
+      <Drawer.Portal>
+        <Drawer.Backdrop className="drawer-backdrop" />
+        <Drawer.Viewport className="drawer-viewport">
+          <Drawer.Popup className="writing-drawer glass-surface">
+            <Drawer.Content>
+              <form
+                aria-label="Edit proposal"
+                onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                  event.preventDefault();
+                  props.onCommit();
+                }}
+              >
+                <div className="drawer-handle" aria-hidden="true" />
+                <div className="writing-drawer-header">
+                  <p className="eyebrow">Edit proposal</p>
+                  <Drawer.Title>Commit this as your own</Drawer.Title>
+                  <Drawer.Description>
+                    Shape the generated proposal into language you would actually stand behind.
+                  </Drawer.Description>
+                </div>
+                <label htmlFor="commitment-title">Commitment title</label>
+                <input
+                  id="commitment-title"
+                  value={props.title}
+                  onChange={(event) => props.onTitleChange(event.target.value)}
+                />
+                <label htmlFor="commitment-body">Commitment body</label>
+                <RichTextEditor
+                  document={props.bodyDocument}
+                  label="Commitment body"
+                  value={props.body}
+                  onAiDraft={props.onAiDraft}
+                  onChange={props.onBodyChange}
+                  onDocumentChange={props.onBodyDocumentChange}
+                />
+                <div className="drawer-actions">
+                  <motion.button type="submit" whileTap={{ scale: 0.985 }}>
+                    Commit edited proposal
+                  </motion.button>
+                  <Drawer.Close className="secondary-button">Cancel</Drawer.Close>
+                </div>
+              </form>
+            </Drawer.Content>
+          </Drawer.Popup>
+        </Drawer.Viewport>
+      </Drawer.Portal>
+    </Drawer.Root>
+  );
+}
+
+export function RichTextEditor(props: {
+  readonly value: string;
+  readonly document: RichTextDocument | undefined;
+  readonly label: string;
+  readonly onChange: (value: string) => void;
+  readonly onDocumentChange: (document: RichTextDocument) => void;
+  readonly onAiDraft: () => void;
+}) {
+  const editor = usePlateEditor({
+    plugins: [BoldPlugin, ItalicPlugin, UnderlinePlugin],
+    value: props.document ?? plainTextToRichTextDocument(props.value),
+  });
+
+  return (
+    <div className="rich-text-editor" data-base-ui-swipe-ignore="true">
+      <Plate
+        editor={editor}
+        onChange={({ value }) => {
+          props.onDocumentChange(value);
+          props.onChange(plateValueToPlainText(value));
+        }}
+      >
+        <div className="rich-text-toolbar" aria-label="Editor formatting">
+          <button
+            type="button"
+            className="secondary-button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              editor.tf.bold.toggle();
+            }}
+          >
+            Bold
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              editor.tf.italic.toggle();
+            }}
+          >
+            Italic
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              editor.tf.underline.toggle();
+            }}
+          >
+            Underline
+          </button>
+          <button type="button" className="secondary-button" onClick={props.onAiDraft}>
+            AI draft
+          </button>
+        </div>
+        <PlateContent
+          aria-label={props.label}
+          className="rich-text-content"
+          placeholder="Write the commitment in your own words..."
+        />
+      </Plate>
     </div>
   );
 }
@@ -330,6 +510,35 @@ export function CommitmentPanel(props: {
               >
                 {props.completingId === commitment.id ? "Completing..." : "Mark completed"}
               </motion.button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function OutcomePanel(props: {
+  readonly outcomes: ReadonlyArray<OutcomeViewModel> | undefined;
+  readonly loading: boolean;
+}) {
+  return (
+    <div className="outcome-panel">
+      <p className="summary">
+        {props.loading
+          ? "Loading outcomes..."
+          : props.outcomes?.length
+            ? `${props.outcomes.length} recently closed loops.`
+            : "No closed loops yet."}
+      </p>
+
+      {props.outcomes?.length ? (
+        <div className="outcome-list">
+          {props.outcomes.map((outcome) => (
+            <article className="outcome-item" key={outcome.id}>
+              <p className="eyebrow">{outcome.result}</p>
+              <h3>{outcome.note ?? "Closed without note"}</h3>
+              <p>{formatEventTime(outcome.recordedAt)}</p>
             </article>
           ))}
         </div>
