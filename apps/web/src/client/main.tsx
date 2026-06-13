@@ -9,25 +9,42 @@ import {
 import { StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  BottomNav,
   CheckInForm,
   CommitmentPanel,
   DashboardHeader,
   EventTable,
   HomeDashboard,
-  injectStyles,
   LaresAppShell,
   OutcomePanel,
   plainTextToRichTextDocument,
-  ProposalEditorDrawer,
   ProposalReviewPanel,
   type RichTextDocument,
   Surface,
   SynthesisPanel,
+  WritingDrawer,
 } from "@lares/ui";
-import styles from "@lares/ui/styles.css?inline";
 import { apiClient } from "./api-client";
+// oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
+import "./styles.css";
 
 const queryClient = new QueryClient();
+
+const titleFromEditorText = (text: string, fallback: string) => {
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? fallback
+  );
+};
+
+const bodyFromEditorText = (text: string) => {
+  const lines = text.split("\n");
+  const [, ...rest] = lines;
+  const body = rest.join("\n").trim();
+  return body || text.trim();
+};
 
 const rootRoute = createRootRoute({ component: AppShell });
 const indexRoute = createRoute({
@@ -55,11 +72,14 @@ function AppShell() {
 
 function TodayScreen() {
   const [note, setNote] = useState("");
+  const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
+    plainTextToRichTextDocument(""),
+  );
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [proposalEditor, setProposalEditor] = useState<{
     readonly proposalId: string;
-    readonly title: string;
     readonly body: string;
     readonly bodyDocument: RichTextDocument;
   } | null>(null);
@@ -81,6 +101,8 @@ function TodayScreen() {
     },
     onSuccess: async () => {
       setNote("");
+      setNoteDocument(plainTextToRichTextDocument(""));
+      setCaptureOpen(false);
       setStatus("Saved. This is now in the user-owned event log.");
       await queryClient.invalidateQueries({ queryKey: ["events"] });
     },
@@ -169,35 +191,16 @@ function TodayScreen() {
           generating={generateProposals.isPending}
           reviewingId={reviewProposal.variables?.proposalId}
           editingProposalId={proposalEditor?.proposalId}
-          editedTitle={proposalEditor?.title ?? ""}
-          editedBody={proposalEditor?.body ?? ""}
           onGenerate={() => generateProposals.mutate()}
           onAccept={(proposalId) => reviewProposal.mutate({ proposalId, decision: "accepted" })}
           onReject={(proposalId) => reviewProposal.mutate({ proposalId, decision: "rejected" })}
           onStartEdit={(proposal) =>
             setProposalEditor({
               proposalId: proposal.id,
-              title: proposal.title,
-              body: proposal.body,
-              bodyDocument: plainTextToRichTextDocument(proposal.body),
+              body: `${proposal.title}\n${proposal.body}`,
+              bodyDocument: plainTextToRichTextDocument(`${proposal.title}\n${proposal.body}`),
             })
           }
-          onEditTitle={(title) =>
-            setProposalEditor((editor) => (editor ? { ...editor, title } : editor))
-          }
-          onEditBody={(body) =>
-            setProposalEditor((editor) => (editor ? { ...editor, body } : editor))
-          }
-          onCancelEdit={() => setProposalEditor(null)}
-          onCommitEdit={() => {
-            if (!proposalEditor) return;
-            reviewProposal.mutate({
-              proposalId: proposalEditor.proposalId,
-              decision: "edited",
-              editedTitle: proposalEditor.title,
-              editedBody: proposalEditor.body,
-            });
-          }}
         />
       </Surface>
 
@@ -214,14 +217,43 @@ function TodayScreen() {
         <OutcomePanel outcomes={outcomes.data?.outcomes} loading={outcomes.isLoading} />
       </Surface>
 
-      <ProposalEditorDrawer
+      <WritingDrawer
+        eyebrow="Capture"
+        drawerTitle="Write capture"
+        description="Capture the raw note first. Lares will turn it into context after you save."
+        bodyLabel="Capture body"
+        submitLabel="Save capture"
+        open={captureOpen}
+        body={note}
+        bodyDocument={noteDocument}
+        onBodyChange={setNote}
+        onBodyDocumentChange={setNoteDocument}
+        onAiDraft={() => {
+          const draft = "Today I need to clarify priorities, constraints, and the next follow-up.";
+          setNote(draft);
+          setNoteDocument(plainTextToRichTextDocument(draft));
+        }}
+        onCancel={() => setCaptureOpen(false)}
+        onCommit={() => {
+          const value = note.trim();
+          if (!value) {
+            setStatus("Write a short check-in first.");
+            return;
+          }
+          setStatus("Saving...");
+          startTransition(() => saveCheckIn.mutate(value));
+        }}
+      />
+
+      <WritingDrawer
+        eyebrow="Edit proposal"
+        drawerTitle="Commit this as your own"
+        description="Use the first line as the Commitment title, then write the body below it. Type /ai for a draft."
+        bodyLabel="Commitment body"
+        submitLabel="Commit edited proposal"
         open={proposalEditor !== null}
-        title={proposalEditor?.title ?? ""}
         body={proposalEditor?.body ?? ""}
         bodyDocument={proposalEditor?.bodyDocument}
-        onTitleChange={(title) =>
-          setProposalEditor((editor) => (editor ? { ...editor, title } : editor))
-        }
         onBodyChange={(body) =>
           setProposalEditor((editor) => (editor ? { ...editor, body } : editor))
         }
@@ -229,7 +261,8 @@ function TodayScreen() {
           setProposalEditor((editor) => (editor ? { ...editor, bodyDocument } : editor))
         }
         onAiDraft={() => {
-          const draft = "I will send the follow-up and confirm the next concrete step today.";
+          const draft =
+            "Confirm travel follow-up\nI will send the follow-up and confirm the next concrete step today.";
           setProposalEditor((editor) =>
             editor
               ? { ...editor, body: draft, bodyDocument: plainTextToRichTextDocument(draft) }
@@ -242,8 +275,8 @@ function TodayScreen() {
           reviewProposal.mutate({
             proposalId: proposalEditor.proposalId,
             decision: "edited",
-            editedTitle: proposalEditor.title,
-            editedBody: proposalEditor.body,
+            editedTitle: titleFromEditorText(proposalEditor.body, "Edited commitment"),
+            editedBody: bodyFromEditorText(proposalEditor.body),
             editedBodyDocument: proposalEditor.bodyDocument,
           });
         }}
@@ -251,21 +284,12 @@ function TodayScreen() {
 
       <Surface id="check-in-title" title="Capture" primary>
         <CheckInForm
-          note={note}
           status={status}
           saving={saveCheckIn.isPending || isPending}
-          onNoteChange={setNote}
-          onSubmit={() => {
-            const value = note.trim();
-            if (!value) {
-              setStatus("Write a short check-in first.");
-              return;
-            }
-            setStatus("Saving...");
-            startTransition(() => saveCheckIn.mutate(value));
-          }}
+          onOpen={() => setCaptureOpen(true)}
         />
       </Surface>
+      <BottomNav onCapture={() => setCaptureOpen(true)} />
     </LaresAppShell>
   );
 }
@@ -339,8 +363,6 @@ function useRecentOutcomes() {
     },
   });
 }
-
-injectStyles(styles);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -3,11 +3,14 @@ import { expect, test } from "@playwright/test";
 test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "good afternoon." })).toBeVisible();
   await expect(page.getByLabel("Home dashboard")).toBeVisible();
 
   const note = `Playwright typed client ${Date.now()}`;
-  await page.getByLabel("What should Lares capture?").fill(note);
+  await page.getByRole("button", { name: "Write capture" }).first().tap();
+  await expect(page.getByRole("button", { name: "Heading" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Capture body" }).fill(note);
   await page.getByRole("button", { name: "Save capture" }).tap();
   await expect(page.getByRole("status")).toContainText("Saved");
 
@@ -19,14 +22,12 @@ test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
     page.getByRole("heading", { name: "Clarify next attention point" }).first(),
   ).toBeVisible();
   await page.getByRole("button", { name: "Edit & commit" }).first().tap();
-  await expect(page.getByRole("button", { name: "Bold" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Italic" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Underline" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Heading" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
   await page.getByRole("button", { name: "AI draft" }).tap();
-  await page.getByLabel("Commitment title").fill("Confirm travel follow-up");
   await page
     .getByRole("textbox", { name: "Commitment body" })
-    .fill("Send the travel follow-up before lunch.");
+    .fill("Confirm travel follow-up\nSend the travel follow-up before lunch.");
   await page.getByRole("button", { name: "Commit edited proposal" }).tap();
   const commitments = page.getByRole("region", { name: "Active commitments" });
   await expect(commitments).toBeVisible();
@@ -41,11 +42,9 @@ test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
     closedLoop.getByRole("heading", { name: /Marked complete from the Today loop at/ }).first(),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Open menu" }).tap();
-
-  await expect(page.getByRole("navigation", { name: "Mobile menu" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Capture" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Loop" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Events" })).toBeVisible();
 
   await page.getByRole("link", { name: "Events" }).tap();
