@@ -90,6 +90,29 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
   });
 
+  test("GET /api/auth/sign-up/email does not expose public sign-up by default", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/api/auth/sign-up/email",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "test@example.com",
+          name: "Test User",
+          password: "password1234",
+        }),
+      },
+      {
+        ...env,
+        BETTER_AUTH_SECRET: "test-secret",
+      },
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   test("GET /health exposes request observability headers", async () => {
     const app = createApp();
     const response = await app.request("/health", { headers: { "cf-ray": "test-ray" } }, env);

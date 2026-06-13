@@ -38,6 +38,7 @@ export function createBetterAuth(env: Env) {
       },
     }),
     emailAndPassword: {
+      disableSignUp: env.BETTER_AUTH_ALLOW_SIGN_UP !== "true",
       enabled: true,
     },
     secret: env.BETTER_AUTH_SECRET,

@@ -8,4 +8,5 @@ export interface Env {
   LOG_HTTP_REQUESTS?: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  BETTER_AUTH_ALLOW_SIGN_UP?: string;
 }
