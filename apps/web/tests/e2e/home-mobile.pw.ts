@@ -5,6 +5,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "good afternoon." })).toBeVisible();
   await expect(page.getByLabel("Home dashboard")).toBeVisible();
+  await expect(page.getByText(/Next: (Capture|Synthesis|Proposal|Review|Outcome)/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
   const dashboardBottom = await page.getByLabel("Home dashboard").evaluate((element) => {
     return element.getBoundingClientRect().bottom;

@@ -83,6 +83,65 @@ export interface InsightViewModel {
   readonly detail: string;
 }
 
+export interface TodayLoopState {
+  readonly activeCommitmentCount: number;
+  readonly hasSynthesis: boolean;
+  readonly pendingProposalCount: number;
+  readonly signalCount: number;
+}
+
+export interface TodayNextActionViewModel {
+  readonly stage: "Capture" | "Synthesis" | "Proposal" | "Review" | "Outcome";
+  readonly label: string;
+  readonly detail: string;
+  readonly href: string;
+}
+
+export function deriveTodayNextAction(state: TodayLoopState): TodayNextActionViewModel {
+  if (state.pendingProposalCount > 0) {
+    return {
+      stage: "Review",
+      label: "Review proposal",
+      detail: `${state.pendingProposalCount} proposal${state.pendingProposalCount === 1 ? "" : "s"} waiting for your decision.`,
+      href: "#proposals-title",
+    };
+  }
+
+  if (state.activeCommitmentCount > 0) {
+    return {
+      stage: "Outcome",
+      label: "Close commitment",
+      detail: `${state.activeCommitmentCount} active commitment${state.activeCommitmentCount === 1 ? "" : "s"} ready for an outcome check.`,
+      href: "#commitments-title",
+    };
+  }
+
+  if (state.hasSynthesis) {
+    return {
+      stage: "Proposal",
+      label: "Generate proposals",
+      detail: "Turn the current synthesis into reviewable next steps.",
+      href: "#proposals-title",
+    };
+  }
+
+  if (state.signalCount > 0) {
+    return {
+      stage: "Synthesis",
+      label: "Synthesize signals",
+      detail: `${state.signalCount} signal${state.signalCount === 1 ? "" : "s"} captured and ready to interpret.`,
+      href: "#synthesis-title",
+    };
+  }
+
+  return {
+    stage: "Capture",
+    label: "Capture current state",
+    detail: "Start by adding priorities, constraints, energy, or follow-ups.",
+    href: "#check-in-title",
+  };
+}
+
 export const plainTextToRichTextDocument = (text: string): RichTextDocument => [
   {
     type: "p",
@@ -129,7 +188,11 @@ export function DashboardHeader(props: { readonly title?: string }) {
   );
 }
 
-export function HomeDashboard(props: { readonly eventCount: number; readonly loading: boolean }) {
+export function HomeDashboard(props: {
+  readonly eventCount: number;
+  readonly loading: boolean;
+  readonly nextAction: TodayNextActionViewModel;
+}) {
   const days = [
     ["Su", "13"],
     ["Mo", "14"],
@@ -191,15 +254,21 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
           <span>Close the loop before rest.</span>
         </DashboardCard>
       </div>
-      <DashboardCard label="on glowing reviews." wide>
-        <strong>What deserves attention next?</strong>
-        <span>Capture the current state, then let Lares synthesize it.</span>
-        <span className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808]">
-          <span className="inline-flex items-center gap-1.5">
-            <Lightbulb className="size-3.5" aria-hidden="true" strokeWidth={2.3} />
-            Reflect
-          </span>
+      <DashboardCard label="Daily operating loop" wide>
+        <span className="text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-400 uppercase">
+          Next: {props.nextAction.stage}
         </span>
+        <strong>{props.nextAction.label}</strong>
+        <span>{props.nextAction.detail}</span>
+        <a
+          className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808] no-underline"
+          href={props.nextAction.href}
+        >
+          <span className="inline-flex items-center gap-1.5 text-[#080808]">
+            <Lightbulb className="size-3.5" aria-hidden="true" strokeWidth={2.3} />
+            Open loop
+          </span>
+        </a>
       </DashboardCard>
     </motion.section>
   );

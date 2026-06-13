@@ -15,6 +15,7 @@ import {
   CheckInForm,
   CommitmentPanel,
   DashboardHeader,
+  deriveTodayNextAction,
   EventTable,
   HomeDashboard,
   InsightsPanel,
@@ -236,12 +237,22 @@ function TodayScreen() {
       await queryClient.invalidateQueries({ queryKey: ["commitments"] });
     },
   });
+  const nextAction = deriveTodayNextAction({
+    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
+    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
+    pendingProposalCount: proposals.data?.proposals.length ?? 0,
+    signalCount: events.data?.events.length ?? 0,
+  });
 
   return (
     <LaresAppShell>
       <DashboardHeader title="Home" />
 
-      <HomeDashboard eventCount={events.data?.events.length ?? 0} loading={events.isLoading} />
+      <HomeDashboard
+        eventCount={events.data?.events.length ?? 0}
+        loading={events.isLoading}
+        nextAction={nextAction}
+      />
 
       <Surface id="today-title" eyebrow="Today" title="Start with the current state">
         <p className="summary">
