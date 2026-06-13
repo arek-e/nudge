@@ -8,7 +8,10 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
 
   const note = `Playwright typed client ${Date.now()}`;
-  await page.getByRole("button", { name: "Write capture" }).first().tap();
+  await page
+    .getByRole("region", { name: "Capture" })
+    .getByRole("button", { name: "Write capture" })
+    .tap();
   await expect(page.getByRole("button", { name: "Heading" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
   await page.getByRole("textbox", { name: "Capture body" }).fill(note);
@@ -44,21 +47,32 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   ).toBeVisible();
 
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Loop" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Events" })).toBeVisible();
+  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(primaryNav.getByRole("link", { name: "Today" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Loop" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Journey" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Insights" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Docs" })).toHaveCount(0);
+  await expect(primaryNav.getByRole("link", { name: "Prompts" })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "Events" }).tap();
-  await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
+  await page.getByRole("link", { name: "Journey" }).tap();
+  await expect(page.getByRole("heading", { name: "Journey" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Events" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Journey" })).toBeVisible();
   await page.getByRole("button", { name: "Write capture" }).tap();
+  await expect(page.getByRole("dialog", { name: "Add to Lares" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Capture note" })).toBeVisible();
+  await page.getByRole("button", { name: "Capture note" }).tap();
   await expect(page.getByRole("textbox", { name: "Capture body" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).tap();
   await expect(page.getByRole("heading", { name: "Signal log" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Event" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Detail" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Insights" }).tap();
+  await expect(page.getByRole("heading", { name: "Insights" })).toBeVisible();
+  await expect(page.getByText("Completion trend")).toBeVisible();
 
   await page.screenshot({ path: "test-results/mobile-home-menu.png", fullPage: true });
 });

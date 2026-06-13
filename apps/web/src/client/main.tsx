@@ -10,12 +10,14 @@ import {
 import { createContext, StrictMode, useContext, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AddActionSheet,
   BottomNav,
   CheckInForm,
   CommitmentPanel,
   DashboardHeader,
   EventTable,
   HomeDashboard,
+  InsightsPanel,
   LaresAppShell,
   OutcomePanel,
   plainTextToRichTextDocument,
@@ -69,11 +71,18 @@ const indexRoute = createRoute({
 });
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/events",
-  component: EventsScreen,
+  path: "/journey",
+  component: JourneyScreen,
+});
+const insightsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/insights",
+  component: InsightsScreen,
 });
 
-const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, eventsRoute]) });
+const router = createRouter({
+  routeTree: rootRoute.addChildren([indexRoute, eventsRoute, insightsRoute]),
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -87,6 +96,7 @@ function AppShell() {
   const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
     plainTextToRichTextDocument(""),
   );
+  const [addOpen, setAddOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -121,6 +131,14 @@ function AppShell() {
       }}
     >
       <Outlet />
+      <AddActionSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCaptureNote={() => {
+          setAddOpen(false);
+          setCaptureOpen(true);
+        }}
+      />
       <WritingDrawer
         eyebrow="Capture"
         drawerTitle="Write capture"
@@ -149,8 +167,10 @@ function AppShell() {
         }}
       />
       <BottomNav
-        active={pathname === "/events" ? "events" : "today"}
-        onCapture={() => setCaptureOpen(true)}
+        active={
+          pathname === "/journey" ? "journey" : pathname === "/insights" ? "insights" : "today"
+        }
+        onCapture={() => setAddOpen(true)}
       />
     </CaptureContext.Provider>
   );
@@ -314,18 +334,59 @@ function TodayScreen() {
   );
 }
 
-function EventsScreen() {
+function JourneyScreen() {
   const events = useEvents();
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Events" />
+      <DashboardHeader title="Journey" />
 
       <Surface id="events-title" eyebrow="Signals" title="Signal log">
         <EventTable
           events={events.data?.events}
           loading={events.isLoading}
           error={events.isError}
+        />
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function InsightsScreen() {
+  const commitments = useActiveCommitments();
+  const outcomes = useRecentOutcomes();
+  const activeCount = commitments.data?.commitments.length ?? 0;
+  const completedCount =
+    outcomes.data?.outcomes.filter((outcome) => outcome.result === "completed").length ?? 0;
+  const totalClosed = outcomes.data?.outcomes.length ?? 0;
+
+  return (
+    <LaresAppShell>
+      <DashboardHeader title="Insights" />
+
+      <Surface id="insights-title" eyebrow="Loop intelligence" title="Completion trend">
+        <InsightsPanel
+          insights={[
+            {
+              label: "Active commitments",
+              value: `${activeCount}`,
+              detail: activeCount
+                ? "These are still open in the operating loop."
+                : "No active commitments are waiting right now.",
+            },
+            {
+              label: "Closed loops",
+              value: `${totalClosed}`,
+              detail: completedCount
+                ? `${completedCount} completed outcomes in recent history.`
+                : "Complete a commitment to start building trend history.",
+            },
+            {
+              label: "Next signal",
+              value: "Capture",
+              detail: "Use the center action to add context before Lares synthesizes what matters.",
+            },
+          ]}
         />
       </Surface>
     </LaresAppShell>

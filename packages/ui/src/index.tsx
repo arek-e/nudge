@@ -61,6 +61,12 @@ export interface OutcomeViewModel {
   readonly recordedAt: string;
 }
 
+export interface InsightViewModel {
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+}
+
 export const plainTextToRichTextDocument = (text: string): RichTextDocument => [
   {
     type: "p",
@@ -274,11 +280,12 @@ export function CheckInForm(props: {
 }
 
 export function BottomNav(props: {
-  readonly active: "today" | "events";
+  readonly active: "today" | "journey" | "insights";
   readonly onCapture: () => void;
 }) {
   const todayActive = props.active === "today";
-  const eventsActive = props.active === "events";
+  const journeyActive = props.active === "journey";
+  const insightsActive = props.active === "insights";
 
   return (
     <nav
@@ -314,25 +321,80 @@ export function BottomNav(props: {
         +
       </motion.button>
       <a
-        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${eventsActive ? "text-white" : "text-neutral-500"}`}
-        aria-current={eventsActive ? "page" : undefined}
-        href="/events"
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${journeyActive ? "text-white" : "text-neutral-500"}`}
+        aria-current={journeyActive ? "page" : undefined}
+        href="/journey"
       >
         <span className="text-base leading-none" aria-hidden="true">
-          {eventsActive ? "●" : "◌"}
+          {journeyActive ? "●" : "◌"}
         </span>
-        Events
+        Journey
       </a>
       <a
-        className="grid min-h-12 place-items-center text-[0.68rem] text-neutral-500 no-underline"
-        href="/api/docs"
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${insightsActive ? "text-white" : "text-neutral-500"}`}
+        aria-current={insightsActive ? "page" : undefined}
+        href="/insights"
       >
         <span className="text-base leading-none" aria-hidden="true">
-          □
+          {insightsActive ? "●" : "□"}
         </span>
-        Docs
+        Insights
       </a>
     </nav>
+  );
+}
+
+export function AddActionSheet(props: {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly onCaptureNote: () => void;
+}) {
+  return (
+    <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onClose() : undefined)}>
+      <Drawer.Portal>
+        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-black/55 transition-opacity" />
+        <Drawer.Viewport className="fixed inset-0 z-21">
+          <Drawer.Popup
+            className={`${surfaceClass} fixed inset-x-0 bottom-0 mx-auto w-full max-w-[44rem] rounded-t-[2rem] rounded-b-none p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] outline-0`}
+          >
+            <Drawer.Content>
+              <div className="mx-auto mb-5 h-1 w-9 rounded-full bg-white/10" aria-hidden="true" />
+              <Drawer.Title className="m-0 text-center text-2xl font-semibold tracking-[-0.03em] text-white">
+                Add to Lares
+              </Drawer.Title>
+              <Drawer.Description className="mx-auto mt-2 max-w-[18rem] text-center text-[0.8125rem] leading-relaxed text-neutral-400">
+                Start with the smallest useful signal. Lares can synthesize it after you save.
+              </Drawer.Description>
+              <div className="mt-6 grid gap-3">
+                <motion.button
+                  className={`${buttonClass} justify-start gap-3 px-5`}
+                  type="button"
+                  whileTap={{ scale: 0.985 }}
+                  onClick={props.onCaptureNote}
+                >
+                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                    +
+                  </span>
+                  <span className="grid text-left">
+                    <strong className="text-sm font-semibold">Capture note</strong>
+                    <span className="text-xs text-neutral-600">
+                      Write raw context, thought, or follow-up.
+                    </span>
+                  </span>
+                </motion.button>
+                <button className={secondaryButtonClass} type="button" disabled>
+                  Start reflection soon
+                </button>
+                <button className={secondaryButtonClass} type="button" disabled>
+                  Log outcome soon
+                </button>
+              </div>
+              <Drawer.Close className={`${secondaryButtonClass} mt-4 w-full`}>Cancel</Drawer.Close>
+            </Drawer.Content>
+          </Drawer.Popup>
+        </Drawer.Viewport>
+      </Drawer.Portal>
+    </Drawer.Root>
   );
 }
 
@@ -772,6 +834,22 @@ export function EventTable(props: {
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+export function InsightsPanel(props: { readonly insights: ReadonlyArray<InsightViewModel> }) {
+  return (
+    <div className="grid gap-4">
+      {props.insights.map((insight) => (
+        <article className="rounded-2xl border border-white/5 bg-white/4 p-4" key={insight.label}>
+          <p className={eyebrowClass}>{insight.label}</p>
+          <h3 className="m-0 text-2xl leading-tight font-semibold tracking-[-0.03em] text-white">
+            {insight.value}
+          </h3>
+          <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">{insight.detail}</p>
+        </article>
+      ))}
     </div>
   );
 }
