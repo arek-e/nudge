@@ -11,6 +11,7 @@ const env = {
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
+  BETTER_AUTH_URL: "http://localhost:8787",
   LOG_HTTP_REQUESTS: "false",
 } satisfies Env;
 
@@ -79,6 +80,14 @@ describe("web app", () => {
       theme_color: "#111111",
       icons: [expect.objectContaining({ src: "/icons/icon.svg" })],
     });
+  });
+
+  test("GET /api/auth/session is unavailable until Better Auth is configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/api/auth/session", {}, env);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
   });
 
   test("GET /health exposes request observability headers", async () => {
@@ -610,6 +619,28 @@ describe("web app", () => {
       authMode: "dev",
       user: { id: "dev-user", displayName: "Dev User" },
       workspace: { id: "dev-user", label: "Dev User's workspace" },
+    });
+  });
+
+  test("custom integrations resolve workspace from a Better Auth session", async () => {
+    const app = createApp({
+      authSessionResolver: async () => ({
+        user: {
+          email: "lana@example.com",
+          id: "auth-user-1",
+          name: "Lana",
+        },
+      }),
+      dbLayer: Db.layerMemory,
+    });
+
+    const response = await app.request("/api/session", {}, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "better-auth",
+      user: { id: "auth-user-1", displayName: "Lana" },
+      workspace: { id: "auth-user-1", label: "Lana's workspace" },
     });
   });
 

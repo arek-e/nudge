@@ -24,6 +24,7 @@
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
+    "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
     "LOG_HTTP_REQUESTS": "true",
   },
   "d1_databases": [

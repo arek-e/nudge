@@ -7,11 +7,18 @@ import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
 import { AuthService, PrimitiveWorkflows } from "@lares/effect-services";
+import type { Env } from "./env";
 import {
   apiContract,
   conversationMetadataSchema,
   listRecentSignalsToolResponseSchema,
 } from "./api-contract";
+import {
+  createBetterAuth,
+  isBetterAuthConfigured,
+  resolveBetterAuthSession,
+  type AuthSessionResolver,
+} from "./auth";
 import {
   addWideEventFields,
   evlogWideEvents,
@@ -40,9 +47,11 @@ interface ApiContext {
     readonly id: string;
     readonly displayName: string;
   };
+  readonly authMode: "better-auth" | "dev";
 }
 
 interface CreateAppOptions {
+  readonly authSessionResolver?: AuthSessionResolver;
   readonly dbLayer?: AppDbLayer;
 }
 
@@ -155,7 +164,7 @@ export const apiRouter = api.router({
   },
   session: api.session.handler(({ context }) => {
     return {
-      authMode: "dev",
+      authMode: context.authMode,
       user: context.user,
       workspace: {
         id: context.user.id,
@@ -449,8 +458,26 @@ function resolveDb(layer: AppDbLayer) {
   );
 }
 
-function resolveCurrentUser() {
-  return Effect.runPromise(Effect.provide(currentUser, AuthService.layerDev));
+async function resolveCurrentUser(input: {
+  readonly env: Env;
+  readonly headers: Headers;
+  readonly resolveSession: AuthSessionResolver;
+}) {
+  const session = await input.resolveSession({ env: input.env, headers: input.headers });
+  if (session) {
+    return {
+      authMode: "better-auth" as const,
+      user: {
+        displayName: session.user.name ?? session.user.email ?? "Lares User",
+        id: session.user.id,
+      },
+    };
+  }
+
+  return {
+    authMode: "dev" as const,
+    user: await Effect.runPromise(Effect.provide(currentUser, AuthService.layerDev)),
+  };
 }
 
 const currentUser = Effect.gen(function* () {
@@ -462,6 +489,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<ObservabilityHonoEnv>();
   const apiHandler = makeApiHandler();
   const sharedDb = options.dbLayer ? resolveDb(options.dbLayer) : undefined;
+  const resolveSession = options.authSessionResolver ?? resolveBetterAuthSession;
 
   app.use("*", evlogWideEvents());
   app.use("*", requestObservability());
@@ -505,6 +533,15 @@ export function createApp(options: CreateAppOptions = {}) {
     );
   });
 
+  app.on(["GET", "POST"], "/api/auth/*", (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    return createBetterAuth(c.env).handler(c.req.raw);
+  });
+
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
@@ -546,10 +583,10 @@ export function createApp(options: CreateAppOptions = {}) {
       },
       () => (sharedDb ? sharedDb : resolveDb(Db.layerD1(c.env.DB))),
     );
-    const user = await runWithRequestSpan(
+    const auth = await runWithRequestSpan(
       c,
-      { attributes: { "lares.auth.mode": "dev" }, name: "auth.current_user" },
-      () => resolveCurrentUser(),
+      { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
+      () => resolveCurrentUser({ env: c.env, headers: c.req.raw.headers, resolveSession }),
     );
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
@@ -563,7 +600,8 @@ export function createApp(options: CreateAppOptions = {}) {
             db,
             recordSpan,
             traceDb: c.env.DB,
-            user,
+            authMode: auth.authMode,
+            user: auth.user,
           },
           prefix: "/api",
         }),

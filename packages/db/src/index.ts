@@ -16,6 +16,8 @@ import {
 
 export type DatabaseProvider = "memory" | "d1" | "planetscale" | "turso" | "postgres";
 
+export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database, { schema });
+
 export interface DbUser {
   readonly id: string;
   readonly displayName: string;
