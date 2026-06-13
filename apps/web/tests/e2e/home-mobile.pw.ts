@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
+test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "good afternoon." })).toBeVisible();
   await expect(page.getByLabel("Home dashboard")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
 
   const note = `Playwright typed client ${Date.now()}`;
   await page.getByRole("button", { name: "Write capture" }).first().tap();
@@ -49,6 +50,12 @@ test("mobile home dashboard menu exposes app navigation", async ({ page }) => {
 
   await page.getByRole("link", { name: "Events" }).tap();
   await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Events" })).toBeVisible();
+  await page.getByRole("button", { name: "Write capture" }).tap();
+  await expect(page.getByRole("textbox", { name: "Capture body" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).tap();
   await expect(page.getByRole("heading", { name: "Signal log" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Event" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Detail" })).toBeVisible();

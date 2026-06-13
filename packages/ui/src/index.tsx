@@ -8,7 +8,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
 
 export type RichTextDocument = Value;
@@ -84,38 +84,22 @@ export function LaresAppShell(props: { readonly children: ReactNode }) {
   return <main className={shellClass}>{props.children}</main>;
 }
 
-export function DashboardHeader(props: {
-  readonly title?: string;
-  readonly menuOpen: boolean;
-  readonly onMenuToggle: () => void;
-  readonly onMenuClose: () => void;
-}) {
+export function DashboardHeader(props: { readonly title?: string }) {
   return (
-    <>
-      <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[#191919] to-[#19191900] py-3">
-        <div>
-          <p className={eyebrowClass}>Lares</p>
-          <h1 className="m-0 max-w-[14ch] text-2xl leading-[1.04] font-medium tracking-[-0.035em] text-balance">
-            {props.title ?? "Home"}
-          </h1>
-        </div>
-        <motion.button
-          type="button"
-          className="grid min-h-11 w-11 place-content-center gap-1 rounded-2xl border border-white/5 bg-[#272727] p-0 text-neutral-100"
-          aria-label={props.menuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={props.menuOpen}
-          onClick={props.onMenuToggle}
-          whileTap={{ scale: 0.96 }}
-        >
-          <span className="block h-px w-4 bg-neutral-100" />
-          <span className="block h-px w-4 bg-neutral-100" />
-        </motion.button>
-      </header>
-
-      <AnimatePresence>
-        {props.menuOpen ? <MobileMenu onClose={props.onMenuClose} /> : null}
-      </AnimatePresence>
-    </>
+    <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[#191919] to-[#19191900] py-3">
+      <div>
+        <p className={eyebrowClass}>Lares</p>
+        <h1 className="m-0 max-w-[14ch] text-2xl leading-[1.04] font-medium tracking-[-0.035em] text-balance">
+          {props.title ?? "Home"}
+        </h1>
+      </div>
+      <span
+        className="grid size-11 place-content-center rounded-full border border-white/5 bg-[#272727] text-sm font-semibold text-white"
+        aria-label="Account"
+      >
+        L
+      </span>
+    </header>
   );
 }
 
@@ -289,19 +273,25 @@ export function CheckInForm(props: {
   );
 }
 
-export function BottomNav(props: { readonly onCapture: () => void }) {
+export function BottomNav(props: {
+  readonly active: "today" | "events";
+  readonly onCapture: () => void;
+}) {
+  const todayActive = props.active === "today";
+  const eventsActive = props.active === "events";
+
   return (
     <nav
-      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-gradient-to-b from-[#11111100] to-[#111111] px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-gradient-to-b from-[#11111100] via-[#111111]/92 to-[#111111] px-4 pt-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
       aria-label="Primary navigation"
     >
       <a
-        className="grid min-h-12 place-items-center text-[0.68rem] text-white no-underline"
-        aria-current="page"
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${todayActive ? "text-white" : "text-neutral-500"}`}
+        aria-current={todayActive ? "page" : undefined}
         href="/"
       >
         <span className="text-base leading-none" aria-hidden="true">
-          ●
+          {todayActive ? "●" : "○"}
         </span>
         Today
       </a>
@@ -324,11 +314,12 @@ export function BottomNav(props: { readonly onCapture: () => void }) {
         +
       </motion.button>
       <a
-        className="grid min-h-12 place-items-center text-[0.68rem] text-neutral-500 no-underline"
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${eventsActive ? "text-white" : "text-neutral-500"}`}
+        aria-current={eventsActive ? "page" : undefined}
         href="/events"
       >
         <span className="text-base leading-none" aria-hidden="true">
-          ◌
+          {eventsActive ? "●" : "◌"}
         </span>
         Events
       </a>
@@ -782,69 +773,6 @@ export function EventTable(props: {
         </tbody>
       </table>
     </div>
-  );
-}
-
-export function injectStyles(styles: string) {
-  const style = document.createElement("style");
-  style.textContent = styles;
-  document.head.appendChild(style);
-}
-
-function MobileMenu(props: { readonly onClose: () => void }) {
-  return (
-    <motion.div
-      className="fixed inset-0 z-4 bg-black/40 p-[max(1rem,env(safe-area-inset-top))_1rem]"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.16 }}
-      onClick={props.onClose}
-    >
-      <motion.nav
-        className={`${surfaceClass} ml-auto grid w-full max-w-[22rem] gap-2 p-3`}
-        initial={{ opacity: 0, y: -8, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -8, scale: 0.98 }}
-        transition={{ duration: 0.18, ease: "easeOut" }}
-        aria-label="Mobile menu"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="grid gap-0.5 px-3 pt-2 pb-3">
-          <span className="text-xs font-medium tracking-[0.12em] text-neutral-400 uppercase">
-            Navigate
-          </span>
-          <strong className="text-lg font-medium text-white">Lares</strong>
-        </div>
-        <a
-          className="rounded-2xl bg-[#272727] p-4 text-sm text-neutral-100 no-underline"
-          href="/"
-          onClick={props.onClose}
-        >
-          Home
-        </a>
-        <a
-          className="rounded-2xl p-4 text-sm text-neutral-100 no-underline"
-          href="/#today-title"
-          onClick={props.onClose}
-        >
-          Today
-        </a>
-        <a
-          className="rounded-2xl p-4 text-sm text-neutral-100 no-underline"
-          href="/#check-in-title"
-          onClick={props.onClose}
-        >
-          Capture
-        </a>
-        <a className="rounded-2xl p-4 text-sm text-neutral-100 no-underline" href="/events">
-          Events
-        </a>
-        <a className="rounded-2xl p-4 text-sm text-neutral-100 no-underline" href="/api/docs">
-          API docs
-        </a>
-      </motion.nav>
-    </motion.div>
   );
 }
 

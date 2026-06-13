@@ -5,8 +5,9 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
-import { StrictMode, useState, useTransition } from "react";
+import { createContext, StrictMode, useContext, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BottomNav,
@@ -29,6 +30,20 @@ import { apiClient } from "./api-client";
 import "./styles.css";
 
 const queryClient = new QueryClient();
+
+interface CaptureContextValue {
+  readonly status: string;
+  readonly saving: boolean;
+  readonly openCapture: () => void;
+}
+
+const CaptureContext = createContext<CaptureContextValue | null>(null);
+
+function useCapture() {
+  const context = useContext(CaptureContext);
+  if (!context) throw new Error("useCapture must be used inside AppShell");
+  return context;
+}
 
 const titleFromEditorText = (text: string, fallback: string) => {
   return (
@@ -67,28 +82,14 @@ declare module "@tanstack/react-router" {
 }
 
 function AppShell() {
-  return <Outlet />;
-}
-
-function TodayScreen() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [note, setNote] = useState("");
   const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
     plainTextToRichTextDocument(""),
   );
   const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [proposalEditor, setProposalEditor] = useState<{
-    readonly proposalId: string;
-    readonly body: string;
-    readonly bodyDocument: RichTextDocument;
-  } | null>(null);
   const [isPending, startTransition] = useTransition();
-  const events = useEvents();
-  const latestSynthesis = useLatestSynthesis();
-  const proposals = usePendingProposals();
-  const commitments = useActiveCommitments();
-  const outcomes = useRecentOutcomes();
   const saveCheckIn = useMutation({
     mutationFn: async (value: string) => {
       await apiClient.captures.append({
@@ -110,6 +111,63 @@ function TodayScreen() {
       setStatus("Could not save. Check the deployment logs.");
     },
   });
+
+  return (
+    <CaptureContext.Provider
+      value={{
+        status,
+        saving: saveCheckIn.isPending || isPending,
+        openCapture: () => setCaptureOpen(true),
+      }}
+    >
+      <Outlet />
+      <WritingDrawer
+        eyebrow="Capture"
+        drawerTitle="Write capture"
+        description="Capture the raw note first. Lares will turn it into context after you save."
+        bodyLabel="Capture body"
+        submitLabel="Save capture"
+        open={captureOpen}
+        body={note}
+        bodyDocument={noteDocument}
+        onBodyChange={setNote}
+        onBodyDocumentChange={setNoteDocument}
+        onAiDraft={() => {
+          const draft = "Today I need to clarify priorities, constraints, and the next follow-up.";
+          setNote(draft);
+          setNoteDocument(plainTextToRichTextDocument(draft));
+        }}
+        onCancel={() => setCaptureOpen(false)}
+        onCommit={() => {
+          const value = note.trim();
+          if (!value) {
+            setStatus("Write a short check-in first.");
+            return;
+          }
+          setStatus("Saving...");
+          startTransition(() => saveCheckIn.mutate(value));
+        }}
+      />
+      <BottomNav
+        active={pathname === "/events" ? "events" : "today"}
+        onCapture={() => setCaptureOpen(true)}
+      />
+    </CaptureContext.Provider>
+  );
+}
+
+function TodayScreen() {
+  const capture = useCapture();
+  const [proposalEditor, setProposalEditor] = useState<{
+    readonly proposalId: string;
+    readonly body: string;
+    readonly bodyDocument: RichTextDocument;
+  } | null>(null);
+  const events = useEvents();
+  const latestSynthesis = useLatestSynthesis();
+  const proposals = usePendingProposals();
+  const commitments = useActiveCommitments();
+  const outcomes = useRecentOutcomes();
   const generateSynthesis = useMutation({
     mutationFn: async () => {
       await apiClient.syntheses.create({ frameKey: "current_state" });
@@ -159,12 +217,7 @@ function TodayScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader
-        title="Home"
-        menuOpen={menuOpen}
-        onMenuToggle={() => setMenuOpen((open) => !open)}
-        onMenuClose={() => setMenuOpen(false)}
-      />
+      <DashboardHeader title="Home" />
 
       <HomeDashboard eventCount={events.data?.events.length ?? 0} loading={events.isLoading} />
 
@@ -218,34 +271,6 @@ function TodayScreen() {
       </Surface>
 
       <WritingDrawer
-        eyebrow="Capture"
-        drawerTitle="Write capture"
-        description="Capture the raw note first. Lares will turn it into context after you save."
-        bodyLabel="Capture body"
-        submitLabel="Save capture"
-        open={captureOpen}
-        body={note}
-        bodyDocument={noteDocument}
-        onBodyChange={setNote}
-        onBodyDocumentChange={setNoteDocument}
-        onAiDraft={() => {
-          const draft = "Today I need to clarify priorities, constraints, and the next follow-up.";
-          setNote(draft);
-          setNoteDocument(plainTextToRichTextDocument(draft));
-        }}
-        onCancel={() => setCaptureOpen(false)}
-        onCommit={() => {
-          const value = note.trim();
-          if (!value) {
-            setStatus("Write a short check-in first.");
-            return;
-          }
-          setStatus("Saving...");
-          startTransition(() => saveCheckIn.mutate(value));
-        }}
-      />
-
-      <WritingDrawer
         eyebrow="Edit proposal"
         drawerTitle="Commit this as your own"
         description="Use the first line as the Commitment title, then write the body below it. Type /ai for a draft."
@@ -283,29 +308,18 @@ function TodayScreen() {
       />
 
       <Surface id="check-in-title" title="Capture" primary>
-        <CheckInForm
-          status={status}
-          saving={saveCheckIn.isPending || isPending}
-          onOpen={() => setCaptureOpen(true)}
-        />
+        <CheckInForm status={capture.status} saving={capture.saving} onOpen={capture.openCapture} />
       </Surface>
-      <BottomNav onCapture={() => setCaptureOpen(true)} />
     </LaresAppShell>
   );
 }
 
 function EventsScreen() {
-  const [menuOpen, setMenuOpen] = useState(false);
   const events = useEvents();
 
   return (
     <LaresAppShell>
-      <DashboardHeader
-        title="Events"
-        menuOpen={menuOpen}
-        onMenuToggle={() => setMenuOpen((open) => !open)}
-        onMenuClose={() => setMenuOpen(false)}
-      />
+      <DashboardHeader title="Events" />
 
       <Surface id="events-title" eyebrow="Signals" title="Signal log">
         <EventTable
