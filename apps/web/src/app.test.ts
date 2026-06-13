@@ -39,6 +39,8 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
+    expect(body).toContain('rel="manifest"');
+    expect(body).toContain('name="theme-color"');
     expect(body).toContain("Today");
     expect(body).toContain("Daily Operating Loop");
     expect(body).toContain("Capture");
@@ -63,6 +65,19 @@ describe("web app", () => {
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
+    });
+  });
+
+  test("GET /manifest.webmanifest exposes PWA install metadata", async () => {
+    const app = createApp();
+    const response = await app.request("/manifest.webmanifest", {}, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      name: "Lares",
+      display: "standalone",
+      theme_color: "#111111",
+      icons: [expect.objectContaining({ src: "/icons/icon.svg" })],
     });
   });
 
@@ -582,6 +597,60 @@ describe("web app", () => {
           payload: { mood: "focused" },
         }),
       ],
+    });
+  });
+
+  test("custom integrations can inspect the current session workspace", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request("/api/session", {}, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "dev",
+      user: { id: "dev-user", displayName: "Dev User" },
+      workspace: { id: "dev-user", label: "Dev User's workspace" },
+    });
+  });
+
+  test("custom integrations can export and delete the current user's data", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    await app.request(
+      "/api/captures",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "user_context_captured",
+          source: "api",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          payload: { note: "export this" },
+        }),
+      },
+      env,
+    );
+
+    const exportResponse = await app.request("/api/export", {}, env);
+    const exported = await exportResponse.json();
+    const deleteResponse = await app.request("/api/account/delete", { method: "POST" }, env);
+    const afterDeleteResponse = await app.request("/api/export", {}, env);
+
+    expect(exportResponse.status).toBe(200);
+    expect(exported).toMatchObject({
+      user: { id: "dev-user", displayName: "Dev User" },
+      events: [expect.objectContaining({ payload: { note: "export this" } })],
+    });
+    expect(deleteResponse.status).toBe(200);
+    expect(await deleteResponse.json()).toEqual({ deleted: true });
+    expect(await afterDeleteResponse.json()).toMatchObject({
+      user: { id: "dev-user", displayName: "Dev User" },
+      events: [],
+      commitments: [],
+      outcomes: [],
+      proposals: [],
+      syntheses: [],
     });
   });
 

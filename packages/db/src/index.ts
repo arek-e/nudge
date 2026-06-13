@@ -175,9 +175,22 @@ export interface ListOutcomesInput {
   readonly limit: number;
 }
 
+export interface UserDataExport {
+  readonly user: DbUser;
+  readonly commitments: ReadonlyArray<CommitmentRecord>;
+  readonly events: ReadonlyArray<EventRecord>;
+  readonly frames: ReadonlyArray<FrameRecord>;
+  readonly outcomes: ReadonlyArray<OutcomeRecord>;
+  readonly proposals: ReadonlyArray<ProposalRecord>;
+  readonly reviews: ReadonlyArray<ReviewRecord>;
+  readonly syntheses: ReadonlyArray<SynthesisRecord>;
+}
+
 export interface DbService {
   readonly provider: DatabaseProvider;
+  readonly deleteUserData: (input: { readonly userId: string }) => Effect.Effect<void>;
   readonly ensureUser: (user: DbUser) => Effect.Effect<void>;
+  readonly exportUserData: (user: DbUser) => Effect.Effect<UserDataExport>;
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<EventRecord>;
   readonly appendCommitment: (input: AppendCommitmentInput) => Effect.Effect<CommitmentRecord>;
   readonly appendProposal: (input: AppendProposalInput) => Effect.Effect<ProposalRecord>;
@@ -254,6 +267,40 @@ const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
   updatedAt: row.updatedAt,
 });
 
+const toFrameRecord = (row: typeof frames.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  key: row.key,
+  title: row.title,
+  prompt: row.prompt,
+  status: "active" as const,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toReviewRecord = (row: typeof reviews.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  proposalId: row.proposalId,
+  decision: row.decision as ReviewDecision,
+  ...(row.editedTitle !== null ? { editedTitle: row.editedTitle } : {}),
+  ...(row.editedBody !== null ? { editedBody: row.editedBody } : {}),
+  ...(row.editedBodyDocument !== null ? { editedBodyDocument: row.editedBodyDocument } : {}),
+  createdAt: row.createdAt,
+});
+
+const toEventRecord = (row: typeof events.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  type: row.type,
+  source: row.source,
+  occurredAt: row.occurredAt,
+  schemaVersion: Number(row.schemaVersion),
+  ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
+  payload: row.payload,
+  createdAt: row.createdAt,
+});
+
 const toCommitmentRecord = (row: typeof commitments.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
@@ -299,10 +346,40 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
       return Db.of({
         provider: "memory",
+        deleteUserData: (input) =>
+          Effect.sync(() => {
+            for (const store of [
+              commitmentStore,
+              eventStore,
+              outcomeStore,
+              frameStore,
+              proposalStore,
+              reviewStore,
+              synthesisStore,
+            ]) {
+              for (const record of store.values()) {
+                if (record.userId === input.userId) store.delete(record.id);
+              }
+            }
+            userStore.delete(input.userId);
+          }),
         ensureUser: (user) =>
           Effect.sync(() => {
             userStore.set(user.id, user);
           }).pipe(Effect.withSpan("Db.ensureUser", { attributes: { provider: "memory" } })),
+        exportUserData: (user) =>
+          Effect.sync(() => ({
+            user,
+            commitments: [...commitmentStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            events: [...eventStore.values()].filter((record) => record.userId === user.id),
+            frames: [...frameStore.values()].filter((record) => record.userId === user.id),
+            outcomes: [...outcomeStore.values()].filter((record) => record.userId === user.id),
+            proposals: [...proposalStore.values()].filter((record) => record.userId === user.id),
+            reviews: [...reviewStore.values()].filter((record) => record.userId === user.id),
+            syntheses: [...synthesisStore.values()].filter((record) => record.userId === user.id),
+          })),
         appendEvent: (input) =>
           Effect.sync(() => {
             if (input.idempotencyKey) {
@@ -544,6 +621,24 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
         return Db.of({
           provider: "d1",
+          deleteUserData: (input) =>
+            Effect.promise(async () => {
+              await database.batch([
+                database
+                  .prepare(
+                    "DELETE FROM synthesis_sources WHERE synthesis_id IN (SELECT id FROM syntheses WHERE user_id = ?)",
+                  )
+                  .bind(input.userId),
+                database.prepare("DELETE FROM outcomes WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM commitments WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM reviews WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM proposals WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM syntheses WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM frames WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM events WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM users WHERE id = ?").bind(input.userId),
+              ]);
+            }),
           ensureUser: (user) =>
             Effect.promise(async () => {
               const timestamp = nowIso();
@@ -560,6 +655,56 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   set: { displayName: user.displayName, updatedAt: timestamp },
                 });
             }).pipe(Effect.withSpan("Db.ensureUser", { attributes: { provider: "d1" } })),
+          exportUserData: (user) =>
+            Effect.promise(async () => {
+              const [
+                eventRows,
+                frameRows,
+                synthesisRows,
+                proposalRows,
+                reviewRows,
+                commitmentRows,
+                outcomeRows,
+              ] = await Promise.all([
+                db.select().from(events).where(eq(events.userId, user.id)),
+                db.select().from(frames).where(eq(frames.userId, user.id)),
+                db.select().from(syntheses).where(eq(syntheses.userId, user.id)),
+                db.select().from(proposals).where(eq(proposals.userId, user.id)),
+                db.select().from(reviews).where(eq(reviews.userId, user.id)),
+                db.select().from(commitments).where(eq(commitments.userId, user.id)),
+                db.select().from(outcomes).where(eq(outcomes.userId, user.id)),
+              ]);
+              const synthesisRecords = await Promise.all(
+                synthesisRows.map(async (row) => {
+                  const sources = await db
+                    .select()
+                    .from(synthesisSources)
+                    .where(eq(synthesisSources.synthesisId, row.id));
+                  return {
+                    id: row.id,
+                    userId: row.userId,
+                    frameId: row.frameId,
+                    summary: row.summary,
+                    themes: row.themes,
+                    openQuestions: row.openQuestions,
+                    sourceSignalIds: sources.map((source) => source.signalId),
+                    generatedAt: row.generatedAt,
+                    createdAt: row.createdAt,
+                  } satisfies SynthesisRecord;
+                }),
+              );
+
+              return {
+                user,
+                commitments: commitmentRows.map(toCommitmentRecord),
+                events: eventRows.map(toEventRecord),
+                frames: frameRows.map(toFrameRecord),
+                outcomes: outcomeRows.map(toOutcomeRecord),
+                proposals: proposalRows.map(toProposalRecord),
+                reviews: reviewRows.map(toReviewRecord),
+                syntheses: synthesisRecords,
+              } satisfies UserDataExport;
+            }),
           appendEvent: (input) =>
             Effect.promise(async () => {
               if (input.idempotencyKey) {

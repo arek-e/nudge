@@ -66,6 +66,21 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(primaryNav.getByRole("link", { name: "Docs" })).toHaveCount(0);
   await expect(primaryNav.getByRole("link", { name: "Prompts" })).toHaveCount(0);
 
+  await page.getByRole("link", { name: "Loop" }).tap();
+  await expect(page.getByRole("heading", { name: "Loop", exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome",
+    ),
+  ).toBeVisible();
+
+  await page.getByRole("link", { name: "Today" }).tap();
+  await page.getByLabel("Settings").tap();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByText("Dev User's workspace")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export data" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete local data" })).toBeVisible();
+
   await page.getByRole("link", { name: "Journey" }).tap();
   await expect(page.getByRole("heading", { name: "Journey", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();

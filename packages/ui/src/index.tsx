@@ -250,12 +250,13 @@ export function DashboardHeader(props: { readonly title?: string }) {
           {props.title ?? "Home"}
         </h1>
       </div>
-      <span
-        className="grid size-11 place-content-center rounded-full border border-white/5 bg-[#272727] text-sm font-semibold text-white"
-        aria-label="Account"
+      <a
+        className="grid size-11 place-content-center rounded-full border border-white/5 bg-[#272727] text-sm font-semibold text-white no-underline"
+        aria-label="Settings"
+        href="/settings"
       >
         <UserRound className="size-5" aria-hidden="true" strokeWidth={2.2} />
-      </span>
+      </a>
     </header>
   );
 }
@@ -452,10 +453,11 @@ export function CheckInForm(props: {
 }
 
 export function BottomNav(props: {
-  readonly active: "today" | "journey" | "insights";
+  readonly active: "today" | "loop" | "journey" | "insights";
   readonly onCapture: () => void;
 }) {
   const todayActive = props.active === "today";
+  const loopActive = props.active === "loop";
   const journeyActive = props.active === "journey";
   const insightsActive = props.active === "insights";
 
@@ -473,10 +475,11 @@ export function BottomNav(props: {
         Today
       </a>
       <a
-        className="grid min-h-12 place-items-center text-[0.68rem] text-neutral-500 no-underline"
-        href="/#proposals-title"
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${loopActive ? "text-white" : "text-neutral-500"}`}
+        aria-current={loopActive ? "page" : undefined}
+        href="/loop"
       >
-        <ClipboardList className="size-5" aria-hidden="true" strokeWidth={2} />
+        <ClipboardList className="size-5" aria-hidden="true" strokeWidth={loopActive ? 2.8 : 2} />
         Loop
       </a>
       <motion.button

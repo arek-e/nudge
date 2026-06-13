@@ -139,6 +139,25 @@ export const listRecentSignalsToolResponseSchema = z.object({
   signals: z.array(eventRecordSchema),
 });
 
+export const sessionResponseSchema = z.object({
+  authMode: z.literal("dev"),
+  user: z.object({ id: z.string(), displayName: z.string() }),
+  workspace: z.object({ id: z.string(), label: z.string() }),
+});
+
+export const dataExportResponseSchema = z.object({
+  user: z.object({ id: z.string(), displayName: z.string() }),
+  commitments: z.array(commitmentRecordSchema),
+  events: z.array(eventRecordSchema),
+  frames: z.array(frameRecordSchema),
+  outcomes: z.array(outcomeRecordSchema),
+  proposals: z.array(proposalRecordSchema),
+  reviews: z.array(reviewRecordSchema),
+  syntheses: z.array(synthesisRecordSchema),
+});
+
+export const accountDeleteResponseSchema = z.object({ deleted: z.literal(true) });
+
 const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const proposalsInputSchema = z.object({ frameKey: z.string().default("current_state") });
 const reviewInputSchema = z.object({
@@ -167,6 +186,11 @@ const conversationSignalsInputSchema = conversationInputSchema.extend({
 });
 
 export const apiContract = {
+  account: {
+    delete: oc
+      .route({ method: "POST", path: "/account/delete" })
+      .output(accountDeleteResponseSchema),
+  },
   conversations: {
     get: oc
       .route({ method: "GET", path: "/conversations/{conversationId}" })
@@ -186,6 +210,7 @@ export const apiContract = {
       .input(eventInputSchema)
       .output(eventRecordSchema),
   },
+  dataExport: oc.route({ method: "GET", path: "/export" }).output(dataExportResponseSchema),
   events: {
     append: oc
       .route({ method: "POST", path: "/events" })
@@ -202,6 +227,7 @@ export const apiContract = {
       .input(eventListInputSchema)
       .output(z.object({ signals: z.array(eventRecordSchema) })),
   },
+  session: oc.route({ method: "GET", path: "/session" }).output(sessionResponseSchema),
   proposals: {
     generate: oc
       .route({ method: "POST", path: "/proposals/generate" })

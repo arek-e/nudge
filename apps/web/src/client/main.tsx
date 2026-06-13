@@ -81,14 +81,30 @@ const eventsRoute = createRoute({
   path: "/journey",
   component: JourneyScreen,
 });
+const loopRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/loop",
+  component: LoopScreen,
+});
 const insightsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/insights",
   component: InsightsScreen,
 });
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsScreen,
+});
 
 const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, eventsRoute, insightsRoute]),
+  routeTree: rootRoute.addChildren([
+    indexRoute,
+    eventsRoute,
+    loopRoute,
+    insightsRoute,
+    settingsRoute,
+  ]),
 });
 
 declare module "@tanstack/react-router" {
@@ -176,12 +192,117 @@ function AppShell() {
       {addOpen || captureOpen ? null : (
         <BottomNav
           active={
-            pathname === "/journey" ? "journey" : pathname === "/insights" ? "insights" : "today"
+            pathname === "/loop"
+              ? "loop"
+              : pathname === "/journey"
+                ? "journey"
+                : pathname === "/insights"
+                  ? "insights"
+                  : "today"
           }
           onCapture={() => setAddOpen(true)}
         />
       )}
     </CaptureContext.Provider>
+  );
+}
+
+function LoopScreen() {
+  const events = useEvents();
+  const latestSynthesis = useLatestSynthesis();
+  const proposals = usePendingProposals();
+  const commitments = useActiveCommitments();
+  const outcomes = useRecentOutcomes();
+  const nextAction = deriveTodayNextAction({
+    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
+    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
+    pendingProposalCount: proposals.data?.proposals.length ?? 0,
+    signalCount: events.data?.events.length ?? 0,
+  });
+
+  return (
+    <LaresAppShell>
+      <DashboardHeader title="Loop" />
+      <Surface eyebrow="Current state" title="Daily Operating Loop">
+        <p className="summary">
+          Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome
+        </p>
+        <div className="mt-4 grid gap-3">
+          {[
+            ["Signals", events.data?.events.length ?? 0],
+            ["Pending proposals", proposals.data?.proposals.length ?? 0],
+            ["Active commitments", commitments.data?.commitments.length ?? 0],
+            ["Closed outcomes", outcomes.data?.outcomes.length ?? 0],
+          ].map(([label, value]) => (
+            <div className="rounded-2xl bg-white/4 p-4" key={label}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+                {label}
+              </p>
+              <strong className="mt-1 block text-2xl text-white">{value}</strong>
+            </div>
+          ))}
+        </div>
+      </Surface>
+      <Surface eyebrow="Next" title={nextAction.label} primary>
+        <p className="summary">{nextAction.detail}</p>
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function SettingsScreen() {
+  const session = useSession();
+  const exportData = useMutation({
+    mutationFn: async () => apiClient.dataExport(),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `lares-export-${new Date().toISOString()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+  const deleteData = useMutation({
+    mutationFn: async () => apiClient.account.delete(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
+
+  return (
+    <LaresAppShell>
+      <DashboardHeader title="Settings" />
+      <Surface eyebrow="Workspace" title={session.data?.workspace.label ?? "Workspace"}>
+        <p className="summary">
+          {session.data
+            ? `Signed in as ${session.data.user.displayName}. Auth mode: ${session.data.authMode}.`
+            : "Loading workspace..."}
+        </p>
+      </Surface>
+      <Surface eyebrow="Data controls" title="Your data">
+        <p className="summary">
+          Export a JSON copy of your current workspace or delete the local MVP data for this user.
+        </p>
+        <div className="mt-4 grid gap-2">
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
+            type="button"
+            onClick={() => exportData.mutate()}
+          >
+            Export data
+          </button>
+          <button
+            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
+            type="button"
+            onClick={() => deleteData.mutate()}
+          >
+            Delete local data
+          </button>
+        </div>
+      </Surface>
+    </LaresAppShell>
   );
 }
 
@@ -417,6 +538,13 @@ function useEvents() {
       const body = await apiClient.signals.list({ limit: 50 });
       return { events: body.signals };
     },
+  });
+}
+
+function useSession() {
+  return useQuery({
+    queryKey: ["session"],
+    queryFn: async () => apiClient.session(),
   });
 }
 

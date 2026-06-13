@@ -49,6 +49,12 @@ interface CreateAppOptions {
 const api = implement(apiContract).$context<ApiContext>();
 
 export const apiRouter = api.router({
+  account: {
+    delete: api.account.delete.handler(async ({ context }) => {
+      await Effect.runPromise(context.db.deleteUserData({ userId: context.user.id }));
+      return { deleted: true };
+    }),
+  },
   conversations: {
     get: api.conversations.get.handler(async ({ context, input }) => {
       return proxyConversationRequest(
@@ -85,6 +91,24 @@ export const apiRouter = api.router({
       );
     }),
   },
+  dataExport: api.dataExport.handler(async ({ context }) => {
+    const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+    return {
+      user: exported.user,
+      commitments: [...exported.commitments],
+      events: [...exported.events],
+      frames: [...exported.frames],
+      outcomes: [...exported.outcomes],
+      proposals: [...exported.proposals],
+      reviews: [...exported.reviews],
+      syntheses: exported.syntheses.map((synthesis) => ({
+        ...synthesis,
+        openQuestions: [...synthesis.openQuestions],
+        sourceSignalIds: [...synthesis.sourceSignalIds],
+        themes: [...synthesis.themes],
+      })),
+    };
+  }),
   events: {
     append: api.events.append.handler(async ({ context, input }) => {
       return runWorkflow(
@@ -129,6 +153,16 @@ export const apiRouter = api.router({
       return { signals: [...signals] };
     }),
   },
+  session: api.session.handler(({ context }) => {
+    return {
+      authMode: "dev",
+      user: context.user,
+      workspace: {
+        id: context.user.id,
+        label: `${context.user.displayName}'s workspace`,
+      },
+    };
+  }),
   proposals: {
     generate: api.proposals.generate.handler(async ({ context, input }) => {
       const proposals = await context.recordSpan(
@@ -441,6 +475,36 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
+  app.get("/manifest.webmanifest", (c) => {
+    addWideEventFields(c, { routeName: "manifest" });
+    return c.json({
+      name: "Lares",
+      short_name: "Lares",
+      description: "A private daily operating loop for personal context and follow-through.",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      background_color: "#111111",
+      theme_color: "#111111",
+      icons: [
+        {
+          src: "/icons/icon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "any maskable",
+        },
+      ],
+    });
+  });
+
+  app.get("/icons/icon.svg", (c) => {
+    addWideEventFields(c, { routeName: "pwa.icon" });
+    c.header("content-type", "image/svg+xml; charset=utf-8");
+    return c.body(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111111"/><path d="M256 96c70.7 0 128 57.3 128 128 0 96-128 192-128 192S128 320 128 224c0-70.7 57.3-128 128-128Z" fill="#f4f1eb"/><circle cx="256" cy="224" r="56" fill="#111111"/></svg>`,
+    );
+  });
+
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
@@ -465,6 +529,12 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.traces" });
     } else if (c.req.path.startsWith("/api/events")) {
       addWideEventFields(c, { routeName: "api.events" });
+    } else if (c.req.path.startsWith("/api/session")) {
+      addWideEventFields(c, { routeName: "api.session" });
+    } else if (c.req.path.startsWith("/api/export")) {
+      addWideEventFields(c, { routeName: "api.export" });
+    } else if (c.req.path.startsWith("/api/account")) {
+      addWideEventFields(c, { routeName: "api.account" });
     }
 
     const db = await runWithRequestSpan(
@@ -535,6 +605,11 @@ export function createApp(options: CreateAppOptions = {}) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lares" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" />
     <title>Lares Daily Operating Loop</title>
     <style>
       :root {
