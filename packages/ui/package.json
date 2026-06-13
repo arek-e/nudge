@@ -9,6 +9,7 @@
     "@base-ui/react": "catalog:",
     "@platejs/basic-nodes": "catalog:",
     "@tanstack/react-table": "catalog:",
+    "lucide-react": "catalog:",
     "motion": "catalog:",
     "platejs": "catalog:",
     "react": "catalog:"

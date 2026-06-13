@@ -8,13 +8,28 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import {
+  BarChart3,
+  BookOpen,
+  CheckCircle2,
+  ClipboardList,
+  Home,
+  Lightbulb,
+  Moon,
+  PenLine,
+  Plus,
+  Sparkles,
+  Sun,
+  UserRound,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
 
 export type RichTextDocument = Value;
 
-const shellClass =
-  "mx-auto w-full max-w-[44rem] px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-neutral-100";
+const shellClass = "mx-auto grid h-dvh w-full max-w-[44rem] grid-rows-[1fr] text-neutral-100";
+const contentViewportClass =
+  "min-h-0 overflow-y-auto overscroll-contain px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(5.75rem+env(safe-area-inset-bottom))]";
 const surfaceClass =
   "relative overflow-hidden rounded-[1.45rem] border border-white/6 bg-[#1f1f1f]/95 p-5 shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl";
 const buttonClass =
@@ -87,7 +102,11 @@ const plateValueToPlainText = (value: Value) => {
 };
 
 export function LaresAppShell(props: { readonly children: ReactNode }) {
-  return <main className={shellClass}>{props.children}</main>;
+  return (
+    <main className={shellClass}>
+      <div className={contentViewportClass}>{props.children}</div>
+    </main>
+  );
 }
 
 export function DashboardHeader(props: { readonly title?: string }) {
@@ -103,7 +122,7 @@ export function DashboardHeader(props: { readonly title?: string }) {
         className="grid size-11 place-content-center rounded-full border border-white/5 bg-[#272727] text-sm font-semibold text-white"
         aria-label="Account"
       >
-        L
+        <UserRound className="size-5" aria-hidden="true" strokeWidth={2.2} />
       </span>
     </header>
   );
@@ -129,14 +148,21 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
       aria-label="Home dashboard"
     >
       <div className="grid grid-cols-[2.25rem_1fr_2.25rem] items-center gap-3">
-        <span className="block size-8 rounded-full bg-[#232323]" aria-hidden="true" />
+        <span
+          className="grid size-8 place-content-center rounded-full bg-[#232323]"
+          aria-hidden="true"
+        >
+          <Sparkles className="size-4 text-neutral-400" strokeWidth={2.1} />
+        </span>
         <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
           good afternoon.
         </h1>
         <span
-          className="block size-8 justify-self-end rounded-full bg-[radial-gradient(circle_at_50%_35%,#f4f1eb_0_18%,transparent_19%),radial-gradient(circle_at_50%_78%,#f4f1eb_0_30%,transparent_31%),#232323]"
+          className="grid size-8 place-content-center justify-self-end rounded-full bg-[#232323]"
           aria-hidden="true"
-        />
+        >
+          <UserRound className="size-4 text-[#f4f1eb]" strokeWidth={2.2} />
+        </span>
       </div>
       <div
         className="grid grid-cols-7 items-center gap-1 text-center text-neutral-500"
@@ -154,10 +180,12 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
       </div>
       <div className="grid grid-cols-2 gap-3">
         <DashboardCard label="Morning Preparation">
+          <Sun className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
           <strong>Ready to take on the day?</strong>
           <span>{props.loading ? "..." : `${props.eventCount} signals in context`}</span>
         </DashboardCard>
         <DashboardCard label="Evening Reflection">
+          <Moon className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
           <strong>Time to clear your mind.</strong>
           <span>Close the loop before rest.</span>
         </DashboardCard>
@@ -166,7 +194,10 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
         <strong>What deserves attention next?</strong>
         <span>Capture the current state, then let Lares synthesize it.</span>
         <span className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808]">
-          Reflect
+          <span className="inline-flex items-center gap-1.5">
+            <Lightbulb className="size-3.5" aria-hidden="true" strokeWidth={2.3} />
+            Reflect
+          </span>
         </span>
       </DashboardCard>
     </motion.section>
@@ -294,18 +325,14 @@ export function BottomNav(props: {
         aria-current={todayActive ? "page" : undefined}
         href="/"
       >
-        <span className="text-base leading-none" aria-hidden="true">
-          {todayActive ? "●" : "○"}
-        </span>
+        <Home className="size-5" aria-hidden="true" strokeWidth={todayActive ? 2.8 : 2} />
         Today
       </a>
       <a
         className="grid min-h-12 place-items-center text-[0.68rem] text-neutral-500 no-underline"
         href="/#proposals-title"
       >
-        <span className="text-base leading-none" aria-hidden="true">
-          ○
-        </span>
+        <ClipboardList className="size-5" aria-hidden="true" strokeWidth={2} />
         Loop
       </a>
       <motion.button
@@ -315,16 +342,14 @@ export function BottomNav(props: {
         whileTap={{ scale: 0.95 }}
         onClick={props.onCapture}
       >
-        +
+        <Plus className="m-auto size-7" aria-hidden="true" strokeWidth={2.4} />
       </motion.button>
       <a
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${journeyActive ? "text-white" : "text-neutral-500"}`}
         aria-current={journeyActive ? "page" : undefined}
         href="/journey"
       >
-        <span className="text-base leading-none" aria-hidden="true">
-          {journeyActive ? "●" : "◌"}
-        </span>
+        <BookOpen className="size-5" aria-hidden="true" strokeWidth={journeyActive ? 2.8 : 2} />
         Journey
       </a>
       <a
@@ -332,9 +357,7 @@ export function BottomNav(props: {
         aria-current={insightsActive ? "page" : undefined}
         href="/insights"
       >
-        <span className="text-base leading-none" aria-hidden="true">
-          {insightsActive ? "●" : "□"}
-        </span>
+        <BarChart3 className="size-5" aria-hidden="true" strokeWidth={insightsActive ? 2.8 : 2} />
         Insights
       </a>
     </nav>
@@ -370,7 +393,7 @@ export function AddActionSheet(props: {
                   onClick={props.onCaptureNote}
                 >
                   <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
-                    +
+                    <PenLine className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
                     <strong className="text-sm font-semibold">Capture note</strong>
@@ -379,10 +402,12 @@ export function AddActionSheet(props: {
                     </span>
                   </span>
                 </motion.button>
-                <button className={secondaryButtonClass} type="button" disabled>
+                <button className={`${secondaryButtonClass} gap-2`} type="button" disabled>
+                  <Sparkles className="size-4" aria-hidden="true" strokeWidth={2} />
                   Start reflection soon
                 </button>
-                <button className={secondaryButtonClass} type="button" disabled>
+                <button className={`${secondaryButtonClass} gap-2`} type="button" disabled>
+                  <CheckCircle2 className="size-4" aria-hidden="true" strokeWidth={2} />
                   Log outcome soon
                 </button>
               </div>
@@ -568,7 +593,12 @@ export function WritingDrawer(props: {
                   </Drawer.Description>
                 </div>
                 <div className="sticky top-0 z-1 mt-4 grid gap-2 bg-gradient-to-b from-[#1f1f1f] to-[#1f1f1f00] pb-4">
-                  <motion.button className={buttonClass} type="submit" whileTap={{ scale: 0.985 }}>
+                  <motion.button
+                    className={buttonClass}
+                    type="button"
+                    whileTap={{ scale: 0.985 }}
+                    onClick={props.onCommit}
+                  >
                     {props.submitLabel}
                   </motion.button>
                   <Drawer.Close className={secondaryButtonClass}>Cancel</Drawer.Close>
@@ -670,6 +700,7 @@ export function RichTextEditor(props: {
         <PlateContent
           aria-label={props.label}
           className="min-h-60 bg-transparent py-4 text-lg leading-relaxed text-neutral-100 outline-none"
+          onInput={(event) => props.onChange(event.currentTarget.textContent ?? "")}
           placeholder="Write the commitment in your own words..."
         />
       </Plate>
