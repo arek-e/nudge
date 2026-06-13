@@ -166,12 +166,14 @@ function AppShell() {
           startTransition(() => saveCheckIn.mutate(value));
         }}
       />
-      <BottomNav
-        active={
-          pathname === "/journey" ? "journey" : pathname === "/insights" ? "insights" : "today"
-        }
-        onCapture={() => setAddOpen(true)}
-      />
+      {addOpen || captureOpen ? null : (
+        <BottomNav
+          active={
+            pathname === "/journey" ? "journey" : pathname === "/insights" ? "insights" : "today"
+          }
+          onCapture={() => setAddOpen(true)}
+        />
+      )}
     </CaptureContext.Provider>
   );
 }

@@ -17,6 +17,10 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     .getByRole("region", { name: "Capture" })
     .getByRole("button", { name: "Write capture" })
     .tap();
+  const captureDialogBox = await page.getByRole("dialog", { name: "Write capture" }).boundingBox();
+  expect(captureDialogBox?.y).toBeLessThanOrEqual(2);
+  expect(captureDialogBox?.height ?? 0).toBeGreaterThanOrEqual(viewportHeight - 2);
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Heading" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
   await page.getByRole("textbox", { name: "Capture body" }).fill(note);

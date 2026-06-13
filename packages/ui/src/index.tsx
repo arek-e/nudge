@@ -1,5 +1,5 @@
 import type { Value } from "platejs";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Drawer } from "@base-ui/react/drawer";
 import { BoldPlugin, ItalicPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import {
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
+import { useEffect, useState } from "react";
 
 export type RichTextDocument = Value;
 
@@ -566,64 +567,81 @@ export function WritingDrawer(props: {
   readonly onCancel: () => void;
   readonly onCommit: () => void;
 }) {
+  const visualViewportHeight = useVisualViewportHeight();
+
   return (
     <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onCancel() : undefined)}>
       <Drawer.Portal>
-        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-black/55 transition-opacity" />
+        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[#111111] transition-opacity" />
         <Drawer.Viewport className="fixed inset-0 z-21">
           <Drawer.Popup
-            className={`${surfaceClass} fixed inset-x-0 bottom-0 mx-auto max-h-[92dvh] min-h-[78dvh] w-full max-w-[44rem] overflow-auto overscroll-contain rounded-t-[1.65rem] rounded-b-none p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] outline-0`}
+            className="fixed inset-0 mx-auto grid w-full max-w-[44rem] grid-rows-[auto_1fr] overflow-hidden bg-[#1f1f1f] px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-neutral-100 outline-0"
+            style={visualViewportHeight ? { height: `${visualViewportHeight}px` } : undefined}
           >
             <Drawer.Content>
-              <form
-                aria-label="Edit proposal"
-                onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                  event.preventDefault();
-                  props.onCommit();
-                }}
-              >
-                <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-white/10" aria-hidden="true" />
-                <div>
+              <div className="grid h-full min-h-0 grid-rows-[auto_1fr]" aria-label="Edit proposal">
+                <div className="bg-[#1f1f1f] pb-3">
                   <p className={eyebrowClass}>{props.eyebrow}</p>
-                  <Drawer.Title className="m-0 text-2xl font-semibold tracking-[-0.02em] text-white">
-                    {props.drawerTitle}
-                  </Drawer.Title>
-                  <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-400">
-                    {props.description}
-                  </Drawer.Description>
-                </div>
-                <div className="sticky top-0 z-1 mt-4 grid gap-2 bg-gradient-to-b from-[#1f1f1f] to-[#1f1f1f00] pb-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Drawer.Title className="m-0 text-2xl font-semibold tracking-[-0.02em] text-white">
+                        {props.drawerTitle}
+                      </Drawer.Title>
+                      <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-400">
+                        {props.description}
+                      </Drawer.Description>
+                    </div>
+                    <Drawer.Close className="min-h-10 rounded-full border-0 bg-white/5 px-3 text-xs font-medium text-neutral-200 shadow-none">
+                      Cancel
+                    </Drawer.Close>
+                  </div>
                   <motion.button
-                    className={buttonClass}
+                    className={`${buttonClass} mt-3 w-full`}
                     type="button"
                     whileTap={{ scale: 0.985 }}
                     onClick={props.onCommit}
                   >
                     {props.submitLabel}
                   </motion.button>
-                  <Drawer.Close className={secondaryButtonClass}>Cancel</Drawer.Close>
                 </div>
-                <label
-                  className="mb-2 block text-[0.8125rem] font-medium text-neutral-200"
-                  htmlFor="writing-body"
-                >
-                  {props.bodyLabel}
-                </label>
-                <RichTextEditor
-                  document={props.bodyDocument}
-                  label={props.bodyLabel}
-                  value={props.body}
-                  onAiDraft={props.onAiDraft}
-                  onChange={props.onBodyChange}
-                  onDocumentChange={props.onBodyDocumentChange}
-                />
-              </form>
+                <div className="min-h-0 overflow-y-auto overscroll-contain pt-3">
+                  <label className="mb-2 block text-[0.8125rem] font-medium text-neutral-200">
+                    {props.bodyLabel}
+                  </label>
+                  <RichTextEditor
+                    document={props.bodyDocument}
+                    label={props.bodyLabel}
+                    value={props.body}
+                    onAiDraft={props.onAiDraft}
+                    onChange={props.onBodyChange}
+                    onDocumentChange={props.onBodyDocumentChange}
+                  />
+                </div>
+              </div>
             </Drawer.Content>
           </Drawer.Popup>
         </Drawer.Viewport>
       </Drawer.Portal>
     </Drawer.Root>
   );
+}
+
+function useVisualViewportHeight() {
+  const [height, setHeight] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const update = () => setHeight(window.visualViewport?.height);
+    update();
+    window.visualViewport.addEventListener("resize", update);
+    window.visualViewport.addEventListener("scroll", update);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  return height;
 }
 
 export function RichTextEditor(props: {
@@ -701,7 +719,11 @@ export function RichTextEditor(props: {
           aria-label={props.label}
           className="min-h-60 bg-transparent py-4 text-lg leading-relaxed text-neutral-100 outline-none"
           onInput={(event) => props.onChange(event.currentTarget.textContent ?? "")}
-          placeholder="Write the commitment in your own words..."
+          placeholder={
+            props.label.toLowerCase().includes("capture")
+              ? "Write the capture in your own words..."
+              : "Write the commitment in your own words..."
+          }
         />
       </Plate>
     </div>
