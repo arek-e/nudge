@@ -122,19 +122,19 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
 
   return (
     <motion.section
-      className="mb-10 grid min-h-[calc(100dvh-6rem)] content-start gap-4"
+      className="mb-6 grid content-start gap-2.5"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
       aria-label="Home dashboard"
     >
-      <div className="grid grid-cols-[2.75rem_1fr_2.75rem] items-center gap-3">
-        <span className="block size-9 rounded-full bg-[#232323]" aria-hidden="true" />
-        <h1 className="m-0 max-w-none text-center text-lg font-semibold tracking-[-0.03em] text-white lowercase">
+      <div className="grid grid-cols-[2.25rem_1fr_2.25rem] items-center gap-3">
+        <span className="block size-8 rounded-full bg-[#232323]" aria-hidden="true" />
+        <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
           good afternoon.
         </h1>
         <span
-          className="block size-9 justify-self-end rounded-full bg-[radial-gradient(circle_at_50%_35%,#f4f1eb_0_18%,transparent_19%),radial-gradient(circle_at_50%_78%,#f4f1eb_0_30%,transparent_31%),#232323]"
+          className="block size-8 justify-self-end rounded-full bg-[radial-gradient(circle_at_50%_35%,#f4f1eb_0_18%,transparent_19%),radial-gradient(circle_at_50%_78%,#f4f1eb_0_30%,transparent_31%),#232323]"
           aria-hidden="true"
         />
       </div>
@@ -144,11 +144,11 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
       >
         {days.map(([weekday, day]) => (
           <span
-            className={`grid min-h-12 place-content-center gap-0.5 rounded-2xl ${weekday === "Fr" ? "border border-white/10 bg-[#232323] text-white" : ""}`}
+            className={`grid min-h-9 place-content-center gap-0.5 rounded-xl ${weekday === "Fr" ? "bg-[#232323] text-white" : ""}`}
             key={weekday}
           >
-            <small className="text-[0.62rem]">{weekday}</small>
-            <strong className="text-xs font-semibold">{day}</strong>
+            <small className="text-[0.58rem]">{weekday}</small>
+            <strong className="text-[0.7rem] font-semibold">{day}</strong>
           </span>
         ))}
       </div>
@@ -165,13 +165,10 @@ export function HomeDashboard(props: { readonly eventCount: number; readonly loa
       <DashboardCard label="on glowing reviews." wide>
         <strong>What deserves attention next?</strong>
         <span>Capture the current state, then let Lares synthesize it.</span>
-        <span className="justify-self-center rounded-full bg-[#f4f1eb] px-6 py-3 text-[0.8125rem] font-semibold text-[#080808]">
+        <span className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808]">
           Reflect
         </span>
       </DashboardCard>
-      <p className="my-3 mb-14 text-center text-[0.68rem] font-semibold tracking-[0.42em] text-neutral-500 uppercase">
-        get inspired
-      </p>
     </motion.section>
   );
 }
@@ -183,12 +180,12 @@ export function DashboardCard(props: {
 }) {
   return (
     <motion.article
-      className={`${surfaceClass} ${props.wide ? "min-h-48 text-center" : "min-h-58"}`}
+      className={`${surfaceClass} ${props.wide ? "min-h-32 p-4 text-center" : "min-h-38 p-4"}`}
       whileTap={{ scale: 0.985 }}
       transition={{ duration: 0.14 }}
     >
       <p className={eyebrowClass}>{props.label}</p>
-      <div className="grid h-full content-center gap-3 text-center [&>span]:text-[0.8125rem] [&>span]:text-neutral-300 [&>strong]:text-lg [&>strong]:leading-tight [&>strong]:font-semibold [&>strong]:tracking-[-0.025em] [&>strong]:text-white">
+      <div className="grid h-full content-center gap-2 text-center [&>span]:text-[0.75rem] [&>span]:leading-snug [&>span]:text-neutral-300 [&>strong]:text-base [&>strong]:leading-tight [&>strong]:font-semibold [&>strong]:tracking-[-0.025em] [&>strong]:text-white">
         {props.children}
       </div>
     </motion.article>
@@ -289,7 +286,7 @@ export function BottomNav(props: {
 
   return (
     <nav
-      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 border-t border-white/8 bg-[#111111]/96 px-4 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-18px_42px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl"
+      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-[#111111]/96 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
       aria-label="Primary navigation"
     >
       <a
