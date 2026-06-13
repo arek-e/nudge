@@ -6,6 +6,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "good afternoon." })).toBeVisible();
   await expect(page.getByLabel("Home dashboard")).toBeVisible();
   await expect(page.getByText(/Next: (Capture|Synthesis|Proposal|Review|Outcome)/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open loop" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
   const dashboardBottom = await page.getByLabel("Home dashboard").evaluate((element) => {
     return element.getBoundingClientRect().bottom;
@@ -66,7 +67,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(primaryNav.getByRole("link", { name: "Prompts" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Journey" }).tap();
-  await expect(page.getByRole("heading", { name: "Journey" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Journey", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Journey" })).toBeVisible();
@@ -76,13 +77,13 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.getByRole("button", { name: "Capture note" }).tap();
   await expect(page.getByRole("textbox", { name: "Capture body" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).tap();
-  await expect(page.getByRole("heading", { name: "Signal log" })).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Event" })).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Detail" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Journey timeline" })).toBeVisible();
+  await expect(page.getByText("Manual check in submitted").first()).toBeVisible();
 
   await page.getByRole("link", { name: "Insights" }).tap();
   await expect(page.getByRole("heading", { name: "Insights" })).toBeVisible();
   await expect(page.getByText("Completion trend")).toBeVisible();
+  await expect(page.getByText("Completion rate")).toBeVisible();
 
   await page.screenshot({ path: "test-results/mobile-home-menu.png", fullPage: true });
 });

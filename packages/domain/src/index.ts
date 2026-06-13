@@ -60,6 +60,7 @@ export const buildDeterministicSynthesis = (input: {
 }): SynthesisInput => {
   const latestNote = noteFromPayload(input.signals[0]?.payload);
   const themes = [...new Set(input.signals.flatMap((signal) => themesFromSignal(signal)))];
+  const openQuestions = openQuestionsFromNote(latestNote);
 
   return {
     userId: input.userId,
@@ -69,7 +70,7 @@ export const buildDeterministicSynthesis = (input: {
         ? "No recent signals captured."
         : `${input.signals.length} signal${input.signals.length === 1 ? "" : "s"} captured. Latest: ${latestNote}`,
     themes: themes.length > 0 ? themes : ["current-context"],
-    openQuestions: ["What needs attention next?"],
+    openQuestions,
     sourceSignalIds: input.signals.map((signal) => signal.id),
   };
 };
@@ -81,6 +82,20 @@ export const buildDeterministicProposals = (input: {
   readonly themes: ReadonlyArray<string>;
 }): ReadonlyArray<ProposalInput> => {
   const [firstQuestion] = input.openQuestions;
+  const followUp = firstQuestion ? followUpFromQuestion(firstQuestion) : undefined;
+  if (followUp) {
+    return [
+      {
+        userId: input.userId,
+        synthesisId: input.synthesisId,
+        kind: "follow_up",
+        title: followUp.title,
+        body: followUp.body,
+        rationale: "Created from follow-up language in the captured signal.",
+      },
+    ];
+  }
+
   if (firstQuestion) {
     return [
       {
@@ -139,4 +154,28 @@ const themesFromSignal = (signal: SignalLike) => {
   if (note.includes("follow up") || note.includes("follow-up")) themes.push("follow-up");
   if (note.includes("work") || signal.type.includes("work")) themes.push("work");
   return themes;
+};
+
+const openQuestionsFromNote = (note: string) => {
+  if (note === "No note available") return ["What needs attention next?"];
+  if (note.toLowerCase().includes("follow up") || note.toLowerCase().includes("follow-up")) {
+    return [note];
+  }
+  return ["What needs attention next?"];
+};
+
+const followUpFromQuestion = (question: string) => {
+  const match =
+    /follow[- ]up with (?<person>[^.]+?) about (?<topic>[^.]+?)(?: before| by| today| tomorrow|\.|$)/i.exec(
+      question,
+    );
+  const personMatch = match?.groups?.person;
+  const topicMatch = match?.groups?.topic;
+  if (!personMatch || !topicMatch) return undefined;
+  const person = personMatch.trim();
+  const topic = topicMatch.trim().replace(/^the\s+/i, "");
+  return {
+    title: `Follow up on ${topic}`,
+    body: `Follow up with ${person} about ${topic}.`,
+  };
 };

@@ -83,6 +83,15 @@ export interface InsightViewModel {
   readonly detail: string;
 }
 
+export interface JourneyDayGroupViewModel {
+  readonly dateLabel: string;
+  readonly items: ReadonlyArray<{
+    readonly detail: string;
+    readonly id: string;
+    readonly title: string;
+  }>;
+}
+
 export interface TodayLoopState {
   readonly activeCommitmentCount: number;
   readonly hasSynthesis: boolean;
@@ -142,6 +151,69 @@ export function deriveTodayNextAction(state: TodayLoopState): TodayNextActionVie
   };
 }
 
+export function deriveJourneyDayGroups(
+  events: ReadonlyArray<EventListItem>,
+): ReadonlyArray<JourneyDayGroupViewModel> {
+  const groups = new Map<string, JourneyDayGroupViewModel["items"]>();
+  const sorted = [...events].sort((a, b) => {
+    return Date.parse(b.occurredAt ?? "") - Date.parse(a.occurredAt ?? "");
+  });
+
+  for (const event of sorted) {
+    const date = event.occurredAt ? new Date(event.occurredAt) : new Date(0);
+    const dateLabel = new Intl.DateTimeFormat("en-US", {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+      year: "numeric",
+    }).format(date);
+    const items = groups.get(dateLabel) ?? [];
+    groups.set(dateLabel, [
+      ...items,
+      {
+        detail: eventText(event.payload),
+        id: event.id,
+        title: titleFromEventType(event.type),
+      },
+    ]);
+  }
+
+  return [...groups.entries()].map(([dateLabel, items]) => ({ dateLabel, items }));
+}
+
+export function deriveLoopInsights(input: {
+  readonly activeCommitmentCount: number;
+  readonly outcomes: ReadonlyArray<OutcomeViewModel>;
+}): ReadonlyArray<InsightViewModel> {
+  const totalClosed = input.outcomes.length;
+  const completed = input.outcomes.filter((outcome) => outcome.result === "completed").length;
+  const completionRate = totalClosed === 0 ? 0 : Math.round((completed / totalClosed) * 100);
+
+  return [
+    {
+      label: "Completion rate",
+      value: totalClosed === 0 ? "No data" : `${completionRate}%`,
+      detail:
+        totalClosed === 0
+          ? "Close a commitment to start building trend history."
+          : `${completed} of ${totalClosed} closed loop${totalClosed === 1 ? "" : "s"} completed recently.`,
+    },
+    {
+      label: "Open loop load",
+      value: `${input.activeCommitmentCount}`,
+      detail:
+        input.activeCommitmentCount === 0
+          ? "No commitments are waiting for an outcome."
+          : `${input.activeCommitmentCount} commitment${input.activeCommitmentCount === 1 ? "" : "s"} still need an outcome.`,
+    },
+    {
+      label: "Closed loops",
+      value: `${totalClosed}`,
+      detail: `${totalClosed} outcome${totalClosed === 1 ? "" : "s"} recorded in recent history.`,
+    },
+  ];
+}
+
 export const plainTextToRichTextDocument = (text: string): RichTextDocument => [
   {
     type: "p",
@@ -192,6 +264,7 @@ export function HomeDashboard(props: {
   readonly eventCount: number;
   readonly loading: boolean;
   readonly nextAction: TodayNextActionViewModel;
+  readonly onOpenLoop: () => void;
 }) {
   const days = [
     ["Su", "13"],
@@ -260,15 +333,16 @@ export function HomeDashboard(props: {
         </span>
         <strong>{props.nextAction.label}</strong>
         <span>{props.nextAction.detail}</span>
-        <a
+        <button
           className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808] no-underline"
-          href={props.nextAction.href}
+          type="button"
+          onClick={props.onOpenLoop}
         >
           <span className="inline-flex items-center gap-1.5 text-[#080808]">
             <Lightbulb className="size-3.5" aria-hidden="true" strokeWidth={2.3} />
             Open loop
           </span>
-        </a>
+        </button>
       </DashboardCard>
     </motion.section>
   );
@@ -957,6 +1031,36 @@ export function EventTable(props: {
   );
 }
 
+export function JourneyTimeline(props: {
+  readonly groups: ReadonlyArray<JourneyDayGroupViewModel> | undefined;
+  readonly loading: boolean;
+  readonly error: boolean;
+}) {
+  if (props.loading) return <p className={summaryClass}>Loading Journey...</p>;
+  if (props.error) return <p className={summaryClass}>Could not load Journey.</p>;
+  if (!props.groups?.length) return <p className={summaryClass}>No loop history yet.</p>;
+
+  return (
+    <div className="mt-4 grid gap-5">
+      {props.groups.map((group) => (
+        <section className="grid gap-3" key={group.dateLabel} aria-label={group.dateLabel}>
+          <h3 className="m-0 text-sm font-semibold tracking-[0.12em] text-neutral-400 uppercase">
+            {group.dateLabel}
+          </h3>
+          <div className="grid gap-2">
+            {group.items.map((item) => (
+              <article className="rounded-2xl bg-white/4 p-4" key={item.id}>
+                <h4 className="m-0 text-base font-semibold text-white">{item.title}</h4>
+                <p className="mt-2 text-sm leading-relaxed text-neutral-300">{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function InsightsPanel(props: { readonly insights: ReadonlyArray<InsightViewModel> }) {
   return (
     <div className="grid gap-4">
@@ -984,6 +1088,12 @@ function eventText(payload: unknown) {
   }
 
   return JSON.stringify(payload);
+}
+
+function titleFromEventType(type: string) {
+  const [first, ...rest] = type.split("_").filter(Boolean);
+  if (!first) return "Signal";
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(" ");
 }
 
 function formatEventType(value: string) {

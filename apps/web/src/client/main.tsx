@@ -15,10 +15,12 @@ import {
   CheckInForm,
   CommitmentPanel,
   DashboardHeader,
+  deriveJourneyDayGroups,
+  deriveLoopInsights,
   deriveTodayNextAction,
-  EventTable,
   HomeDashboard,
   InsightsPanel,
+  JourneyTimeline,
   LaresAppShell,
   OutcomePanel,
   plainTextToRichTextDocument,
@@ -62,6 +64,10 @@ const bodyFromEditorText = (text: string) => {
   const [, ...rest] = lines;
   const body = rest.join("\n").trim();
   return body || text.trim();
+};
+
+const scrollToLoopSection = (id: string) => {
+  document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
 };
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -243,6 +249,27 @@ function TodayScreen() {
     pendingProposalCount: proposals.data?.proposals.length ?? 0,
     signalCount: events.data?.events.length ?? 0,
   });
+  const openNextAction = () => {
+    switch (nextAction.stage) {
+      case "Capture":
+        capture.openCapture();
+        return;
+      case "Synthesis":
+        generateSynthesis.mutate();
+        scrollToLoopSection("synthesis-title");
+        return;
+      case "Proposal":
+        generateProposals.mutate();
+        scrollToLoopSection("proposals-title");
+        return;
+      case "Review":
+        scrollToLoopSection("proposals-title");
+        return;
+      case "Outcome":
+        scrollToLoopSection("commitments-title");
+        return;
+    }
+  };
 
   return (
     <LaresAppShell>
@@ -252,6 +279,7 @@ function TodayScreen() {
         eventCount={events.data?.events.length ?? 0}
         loading={events.isLoading}
         nextAction={nextAction}
+        onOpenLoop={openNextAction}
       />
 
       <Surface id="today-title" eyebrow="Today" title="Start with the current state">
@@ -349,17 +377,14 @@ function TodayScreen() {
 
 function JourneyScreen() {
   const events = useEvents();
+  const groups = events.data ? deriveJourneyDayGroups(events.data.events) : undefined;
 
   return (
     <LaresAppShell>
       <DashboardHeader title="Journey" />
 
-      <Surface id="events-title" eyebrow="Signals" title="Signal log">
-        <EventTable
-          events={events.data?.events}
-          loading={events.isLoading}
-          error={events.isError}
-        />
+      <Surface id="events-title" eyebrow="Loop history" title="Journey timeline">
+        <JourneyTimeline groups={groups} loading={events.isLoading} error={events.isError} />
       </Surface>
     </LaresAppShell>
   );
@@ -369,38 +394,17 @@ function InsightsScreen() {
   const commitments = useActiveCommitments();
   const outcomes = useRecentOutcomes();
   const activeCount = commitments.data?.commitments.length ?? 0;
-  const completedCount =
-    outcomes.data?.outcomes.filter((outcome) => outcome.result === "completed").length ?? 0;
-  const totalClosed = outcomes.data?.outcomes.length ?? 0;
+  const insights = deriveLoopInsights({
+    activeCommitmentCount: activeCount,
+    outcomes: outcomes.data?.outcomes ?? [],
+  });
 
   return (
     <LaresAppShell>
       <DashboardHeader title="Insights" />
 
       <Surface id="insights-title" eyebrow="Loop intelligence" title="Completion trend">
-        <InsightsPanel
-          insights={[
-            {
-              label: "Active commitments",
-              value: `${activeCount}`,
-              detail: activeCount
-                ? "These are still open in the operating loop."
-                : "No active commitments are waiting right now.",
-            },
-            {
-              label: "Closed loops",
-              value: `${totalClosed}`,
-              detail: completedCount
-                ? `${completedCount} completed outcomes in recent history.`
-                : "Complete a commitment to start building trend history.",
-            },
-            {
-              label: "Next signal",
-              value: "Capture",
-              detail: "Use the center action to add context before Lares synthesizes what matters.",
-            },
-          ]}
-        />
+        <InsightsPanel insights={insights} />
       </Surface>
     </LaresAppShell>
   );
