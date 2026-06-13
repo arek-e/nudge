@@ -282,7 +282,7 @@ export function BottomNav(props: {
 
   return (
     <nav
-      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-gradient-to-b from-[#11111100] via-[#111111]/92 to-[#111111] px-4 pt-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 border-t border-white/8 bg-[#111111]/96 px-4 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-18px_42px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl"
       aria-label="Primary navigation"
     >
       <a
