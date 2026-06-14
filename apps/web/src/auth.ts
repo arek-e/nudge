@@ -18,7 +18,10 @@ export type AuthSessionResolver = (input: {
   readonly headers: Headers;
 }) => Promise<AuthSession | null>;
 
-export function createBetterAuth(env: Env) {
+export function createBetterAuth(
+  env: Env,
+  options: { readonly allowSignUpForSeed?: boolean } = {},
+) {
   if (!env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is required to enable Better Auth");
   }
@@ -38,7 +41,7 @@ export function createBetterAuth(env: Env) {
       },
     }),
     emailAndPassword: {
-      disableSignUp: env.BETTER_AUTH_ALLOW_SIGN_UP !== "true",
+      disableSignUp: !options.allowSignUpForSeed && env.BETTER_AUTH_ALLOW_SIGN_UP !== "true",
       enabled: true,
     },
     secret: env.BETTER_AUTH_SECRET,

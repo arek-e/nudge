@@ -533,6 +533,34 @@ export function createApp(options: CreateAppOptions = {}) {
     );
   });
 
+  app.post("/__internal/auth/test-account", async (c) => {
+    addWideEventFields(c, { routeName: "internal.auth.seed" });
+    const configuredSecret = c.env.AUTH_SEED_SECRET;
+    const providedSecret = c.req.header("x-lares-seed-secret");
+    if (!configuredSecret || providedSecret !== configuredSecret) {
+      return c.notFound();
+    }
+
+    const body = await c.req.json<{
+      readonly email?: string;
+      readonly name?: string;
+      readonly password?: string;
+    }>();
+    if (!body.email || !body.name || !body.password) {
+      return c.json({ error: "email, name, and password are required" }, 400);
+    }
+
+    await createBetterAuth(c.env, { allowSignUpForSeed: true }).api.signUpEmail({
+      body: {
+        email: body.email,
+        name: body.name,
+        password: body.password,
+      },
+    });
+
+    return c.json({ created: true });
+  });
+
   app.on(["GET", "POST"], "/api/auth/*", (c) => {
     addWideEventFields(c, { routeName: "api.auth" });
     if (!isBetterAuthConfigured(c.env)) {

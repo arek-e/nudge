@@ -113,6 +113,25 @@ describe("web app", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
+  test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/__internal/auth/test-account",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "alek@teampitch.app",
+          name: "Alek",
+          password: "Demo1234",
+        }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   test("GET /health exposes request observability headers", async () => {
     const app = createApp();
     const response = await app.request("/health", { headers: { "cf-ray": "test-ray" } }, env);
