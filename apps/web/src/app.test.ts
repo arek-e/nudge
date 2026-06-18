@@ -619,7 +619,12 @@ describe("web app", () => {
       response = await app.request(
         "/api/conversations/focus/tools/retrieve-memory?query=michael%20launch&limit=3",
         {},
-        { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
+        {
+          ...env,
+          AGENT_INTERNAL_SECRET: "test-agent-secret",
+          LOG_HTTP_REQUESTS: "true",
+          USER_AGENT_SESSION: agentNamespace,
+        },
       );
       loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
     } finally {
@@ -633,6 +638,9 @@ describe("web app", () => {
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
     expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-lares-internal-signature")).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
     expect(loggedEvent).toMatchObject({
       agentTool: "retrieveMemory",
       routeName: "api.conversations",
@@ -973,6 +981,37 @@ describe("web app", () => {
       journalDocuments: [],
       journalRevisions: [],
     });
+  });
+
+  test("account deletion removes the user's Turbopuffer namespace without exposing the user id", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({}));
+    let calls: typeof fetch.mock.calls = [];
+
+    let response: Response;
+    try {
+      response = await app.request(
+        "/api/account/delete",
+        { method: "POST" },
+        {
+          ...env,
+          TURBOPUFFER_API_KEY: "test-key",
+          TURBOPUFFER_REGION: "aws-eu-west-1",
+        },
+      );
+      calls = [...fetch.mock.calls];
+    } finally {
+      fetch.mockRestore();
+    }
+
+    expect(response!.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const [url, init] = calls[0]!;
+    expect(String(url)).toMatch(
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+    );
+    expect(String(url)).not.toContain("dev-user");
+    expect(init?.method).toBe("DELETE");
   });
 
   test("custom integrations can save a daily journal and trigger agent interpretation", async () => {

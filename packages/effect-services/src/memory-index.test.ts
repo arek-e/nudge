@@ -44,11 +44,16 @@ describe("MemoryIndex", () => {
     ]);
   });
 
-  test("writes pending chunks to Turbopuffer and retrieves with BM25", async () => {
-    const requests: Array<{ readonly body: unknown; readonly url: string }> = [];
+  test("writes pending chunks to hashed Turbopuffer namespace and retrieves with BM25", async () => {
+    const requests: Array<{
+      readonly body: unknown;
+      readonly method: string;
+      readonly url: string;
+    }> = [];
     const fetch: typeof globalThis.fetch = async (url, init) => {
       requests.push({
         body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: init?.method ?? "GET",
         url: String(url),
       });
       if (String(url).endsWith("/query")) {
@@ -92,9 +97,10 @@ describe("MemoryIndex", () => {
     );
 
     expect(result.indexed.indexedChunkIds).toEqual([result.memory.chunks[0]?.id]);
-    expect(requests[0]?.url).toBe(
-      "https://aws-eu-west-1.turbopuffer.com/v2/namespaces/lares-user-memory-user",
+    expect(requests[0]?.url).toMatch(
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
     );
+    expect(requests[0]?.url).not.toContain(user.id);
     expect(requests[0]?.body).toMatchObject({
       schema: { text: { full_text_search: true, type: "string" } },
       upsert_rows: [
@@ -118,5 +124,34 @@ describe("MemoryIndex", () => {
       sourceType: "journal_revision",
       text: "need to write to michael about the launch",
     });
+  });
+
+  test("deletes the hashed Turbopuffer namespace for a user", async () => {
+    const requests: Array<{ readonly method: string; readonly url: string }> = [];
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      requests.push({ method: init?.method ?? "GET", url: String(url) });
+      return Response.json({ deleted: true });
+    };
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const memoryIndex = yield* MemoryIndex;
+        yield* memoryIndex.deleteUserNamespace({ user });
+      }).pipe(
+        Effect.provide(
+          MemoryIndex.layerTurbopuffer({ apiKey: "test-key", fetch, region: "aws-eu-west-1" }),
+        ),
+      ),
+    );
+
+    expect(requests).toEqual([
+      {
+        method: "DELETE",
+        url: expect.stringMatching(
+          /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+        ),
+      },
+    ]);
+    expect(requests[0]?.url).not.toContain(user.id);
   });
 });

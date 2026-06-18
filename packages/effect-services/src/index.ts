@@ -58,10 +58,14 @@ interface TurbopufferQueryRow {
   readonly text?: string;
 }
 
-const memoryNamespaceForUser = (userId: string) => {
-  const safeUserId = userId.replaceAll(/[^A-Za-z0-9-_.]/g, "-").slice(0, 117);
-  return `lares-user-${safeUserId}`;
-};
+const sha256Hex = (value: string) =>
+  Effect.promise(async () => {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  });
+
+const memoryNamespaceForUser = (userId: string) =>
+  Effect.map(sha256Hex(userId), (hash) => `lares-user-${hash.slice(0, 48)}`);
 
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
@@ -87,6 +91,20 @@ const turbopufferFetchJson = <A>(
     catch: (error) => (error instanceof Error ? error : new Error("Turbopuffer request failed")),
   });
 
+const turbopufferDelete = (config: TurbopufferMemoryIndexConfig, url: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await (config.fetch ?? globalThis.fetch)(url, {
+        headers: { authorization: `Bearer ${config.apiKey}` },
+        method: "DELETE",
+      });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Turbopuffer delete failed with ${response.status}`);
+      }
+    },
+    catch: (error) => (error instanceof Error ? error : new Error("Turbopuffer delete failed")),
+  });
+
 const tokenizeMemoryQuery = (text: string) =>
   text
     .toLowerCase()
@@ -110,9 +128,11 @@ export class MemoryIndex extends Context.Service<
       readonly query: string;
       readonly limit: number;
     }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
+    readonly deleteUserNamespace: (input: { readonly user: DbUser }) => Effect.Effect<void, Error>;
   }
 >()("lares/MemoryIndex") {
   static readonly layerMemory = Layer.succeed(MemoryIndex)({
+    deleteUserNamespace: () => Effect.void,
     indexPending: (input) =>
       Effect.gen(function* () {
         const db = yield* Db;
@@ -172,6 +192,11 @@ export class MemoryIndex extends Context.Service<
 
   static readonly layerTurbopuffer = (config: TurbopufferMemoryIndexConfig) =>
     Layer.succeed(MemoryIndex)({
+      deleteUserNamespace: (input) =>
+        Effect.gen(function* () {
+          const namespace = yield* memoryNamespaceForUser(input.user.id);
+          yield* turbopufferDelete(config, turbopufferUrl(config, namespace));
+        }),
       indexPending: (input) =>
         Effect.gen(function* () {
           const db = yield* Db;
@@ -190,23 +215,20 @@ export class MemoryIndex extends Context.Service<
           }
           if (chunks.length === 0) return { indexedChunkIds: [] };
 
-          yield* turbopufferFetchJson(
-            config,
-            turbopufferUrl(config, memoryNamespaceForUser(input.user.id)),
-            {
-              schema: {
-                source_id: { type: "string" },
-                source_type: { type: "string" },
-                text: { full_text_search: true, type: "string" },
-              },
-              upsert_rows: chunks.map((chunk) => ({
-                id: chunk.id,
-                source_id: chunk.sourceId,
-                source_type: chunk.sourceType,
-                text: chunk.chunkText,
-              })),
+          const namespace = yield* memoryNamespaceForUser(input.user.id);
+          yield* turbopufferFetchJson(config, turbopufferUrl(config, namespace), {
+            schema: {
+              source_id: { type: "string" },
+              source_type: { type: "string" },
+              text: { full_text_search: true, type: "string" },
             },
-          );
+            upsert_rows: chunks.map((chunk) => ({
+              id: chunk.id,
+              source_id: chunk.sourceId,
+              source_type: chunk.sourceType,
+              text: chunk.chunkText,
+            })),
+          });
 
           const indexedChunkIds = [];
           for (const chunk of chunks) {
@@ -219,9 +241,10 @@ export class MemoryIndex extends Context.Service<
         Effect.gen(function* () {
           const db = yield* Db;
           yield* db.ensureUser(input.user);
+          const namespace = yield* memoryNamespaceForUser(input.user.id);
           const response = yield* turbopufferFetchJson<{
             readonly rows?: ReadonlyArray<TurbopufferQueryRow>;
-          }>(config, turbopufferUrl(config, memoryNamespaceForUser(input.user.id), "/query"), {
+          }>(config, turbopufferUrl(config, namespace, "/query"), {
             include_attributes: ["text", "source_type", "source_id"],
             limit: input.limit,
             rank_by: ["text", "BM25", input.query],

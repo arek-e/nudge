@@ -23,6 +23,7 @@ export default app;
 interface UserAgentSessionState {
   readonly conversationId: string | null;
   readonly createdAt: string | null;
+  readonly recentMemoryRetrievalsAt: ReadonlyArray<string>;
   readonly recentToolEvents: ReadonlyArray<{
     readonly at: string;
     readonly resultCount: number;
@@ -58,6 +59,7 @@ const reasoningHarness = {
 const initialUserAgentSessionState = {
   conversationId: null,
   createdAt: null,
+  recentMemoryRetrievalsAt: [],
   recentToolEvents: [],
   updatedAt: null,
   userId: "dev-user",
@@ -103,8 +105,34 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     };
   }
 
-  private metadata(request: Request) {
+  private async verifyInternalRequest(
+    request: Request,
+    user: LaresUserRef,
+    conversationId: string,
+  ) {
+    const secret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+    if (!secret) return true;
+    const providedSignature = request.headers.get("x-lares-internal-signature");
+    if (!providedSignature) return false;
+    const expectedSignature = await signAgentRequest(secret, user.id, conversationId);
+    return providedSignature === expectedSignature;
+  }
+
+  private reserveMemoryRetrieval(previous: UserAgentSessionState, now: Date) {
+    const windowStart = now.getTime() - 60_000;
+    const recent = previous.recentMemoryRetrievalsAt.filter(
+      (timestamp) => Date.parse(timestamp) >= windowStart,
+    );
+    if (recent.length >= 30) return null;
+    return [now.toISOString(), ...recent].slice(0, 30);
+  }
+
+  private async metadata(request: Request) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const user = this.resolveUser(request);
+    if (!(await this.verifyInternalRequest(request, user, conversationId))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
     const state = this.state ?? initialUserAgentSessionState;
 
     return Response.json({
@@ -124,6 +152,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async listRecentSignals(request: Request, url: URL) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!(await this.verifyInternalRequest(request, user, conversationId))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 50);
     const signals = await Effect.runPromise(
       Effect.provide(
@@ -140,6 +171,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt,
       recentToolEvents: [
         { at: timestamp, resultCount: signals.length, tool: "listRecentSignals" as const },
         ...previous.recentToolEvents,
@@ -167,10 +199,19 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async retrieveMemory(request: Request, url: URL) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!(await this.verifyInternalRequest(request, user, conversationId))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
     const query = String(url.searchParams.get("query") ?? "").trim();
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 5), 1), 20);
     if (query.length === 0) {
       return Response.json({ error: "query is required" }, { status: 400 });
+    }
+    const previous = this.state ?? initialUserAgentSessionState;
+    const now = new Date();
+    const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
+    if (!recentMemoryRetrievalsAt) {
+      return Response.json({ error: "memory retrieval rate limit exceeded" }, { status: 429 });
     }
 
     const memoryIndexLayer = this.env.TURBOPUFFER_API_KEY
@@ -185,12 +226,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         return yield* memoryIndex.retrieve({ limit, query, user });
       }).pipe(Effect.provide(memoryIndexLayer), Effect.provide(Db.layerD1(this.env.DB))),
     );
-    const timestamp = new Date().toISOString();
-    const previous = this.state ?? initialUserAgentSessionState;
+    const timestamp = now.toISOString();
 
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentMemoryRetrievalsAt,
       recentToolEvents: [
         { at: timestamp, resultCount: retrieved.results.length, tool: "retrieveMemory" as const },
         ...previous.recentToolEvents,
@@ -209,17 +250,25 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async reply(request: Request) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!(await this.verifyInternalRequest(request, user, conversationId))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
     const body = (await request.json()) as { readonly message?: string };
     const message = String(body.message ?? "").trim();
-    const memoryResults = await this.retrieveMemoryResults(user, message, 5);
+    const previous = this.state ?? initialUserAgentSessionState;
+    const now = new Date();
+    const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
+    const memoryResults = recentMemoryRetrievalsAt
+      ? await this.retrieveMemoryResults(user, message, 5)
+      : [];
     const intake = await this.subAgent(LoopIntakeThinkAgent, "current-state");
     const draft = await intake.draftFromMessage({ conversationId, memoryResults, message, user });
-    const timestamp = new Date().toISOString();
-    const previous = this.state ?? initialUserAgentSessionState;
+    const timestamp = now.toISOString();
 
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt,
       recentToolEvents: [
         { at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" as const },
         { at: timestamp, resultCount: memoryResults.length, tool: "retrieveMemory" as const },
@@ -245,6 +294,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private async interpretJournal(request: Request) {
     const user = this.resolveUser(request);
+    if (!(await this.verifyInternalRequest(request, user, "journal"))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
     const body = (await request.json()) as {
       readonly changedText?: string;
       readonly documentId?: string;
@@ -266,6 +318,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId: "journal",
       createdAt: previous.createdAt ?? timestamp,
+      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt,
       recentToolEvents: [
         { at: timestamp, resultCount: changedText.length > 0 ? 1 : 0, tool: "reply" as const },
         ...previous.recentToolEvents,
@@ -301,7 +354,6 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
           logKind: "wide_event",
           provider: this.env.TURBOPUFFER_API_KEY ? "turbopuffer" : "memory",
           errorType: safeError.name,
-          errorMessage: safeError.message,
         }),
       );
       return [];
@@ -397,6 +449,22 @@ export class LoopIntakeThinkAgent extends Think<Env> {
         : "I captured this, but I do not have a reviewable next step yet.",
     };
   }
+}
+
+async function signAgentRequest(secret: string, userId: string, conversationId: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${userId}:${conversationId}`),
+  );
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export interface DailyDigestWorkflowParams {

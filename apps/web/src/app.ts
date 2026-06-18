@@ -35,6 +35,7 @@ type AppDbLayer = Layer.Layer<Db>;
 
 interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
+  readonly agentInternalSecret?: string;
   readonly db: DbService;
   readonly recordSpan: <A>(
     name: string,
@@ -72,6 +73,17 @@ const api = implement(apiContract).$context<ApiContext>();
 export const apiRouter = api.router({
   account: {
     delete: api.account.delete.handler(async ({ context }) => {
+      const turbopuffer = context.turbopuffer;
+      if (turbopuffer) {
+        await runMemoryIndex(
+          context.db,
+          turbopuffer,
+          Effect.gen(function* () {
+            const memoryIndex = yield* MemoryIndex;
+            return yield* memoryIndex.deleteUserNamespace({ user: context.user });
+          }),
+        );
+      }
       await Effect.runPromise(context.db.deleteUserData({ userId: context.user.id }));
       return { deleted: true };
     }),
@@ -80,6 +92,7 @@ export const apiRouter = api.router({
     get: api.conversations.get.handler(async ({ context, input }) => {
       return proxyConversationRequest(
         context.agentSessions,
+        context.agentInternalSecret,
         context.user,
         input.conversationId,
         "/metadata",
@@ -91,6 +104,7 @@ export const apiRouter = api.router({
       url.searchParams.set("limit", String(input.limit ?? 10));
       return proxyConversationRequest(
         context.agentSessions,
+        context.agentInternalSecret,
         context.user,
         input.conversationId,
         url,
@@ -103,6 +117,7 @@ export const apiRouter = api.router({
       url.searchParams.set("limit", String(input.limit ?? 5));
       return proxyConversationRequest(
         context.agentSessions,
+        context.agentInternalSecret,
         context.user,
         input.conversationId,
         url,
@@ -112,6 +127,7 @@ export const apiRouter = api.router({
     sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
       return proxyConversationRequest(
         context.agentSessions,
+        context.agentInternalSecret,
         context.user,
         input.conversationId,
         "/messages",
@@ -251,7 +267,6 @@ export const apiRouter = api.router({
                     provider: "turbopuffer",
                     region: turbopuffer.region,
                     errorType: safeError.name,
-                    errorMessage: safeError.message,
                   }),
                 );
               });
@@ -260,6 +275,7 @@ export const apiRouter = api.router({
         }
         await proxyConversationRequest(
           context.agentSessions,
+          context.agentInternalSecret,
           context.user,
           "journal",
           "/journal/interpret",
@@ -421,6 +437,7 @@ export const apiRouter = api.router({
 
 async function proxyConversationRequest<Schema extends z.ZodType>(
   agentSessions: DurableObjectNamespace,
+  internalSecret: string | undefined,
   user: { readonly id: string; readonly displayName: string },
   conversationId: string,
   pathOrUrl: string | URL,
@@ -431,12 +448,18 @@ async function proxyConversationRequest<Schema extends z.ZodType>(
   const agent = agentSessions.get(agentId);
   const url =
     typeof pathOrUrl === "string" ? new URL(`https://lares.local${pathOrUrl}`) : pathOrUrl;
+  const internalSignature = internalSecret
+    ? await signAgentRequest(internalSecret, user.id, conversationId)
+    : undefined;
   const requestInit = {
     headers: {
       "content-type": "application/json",
       "x-lares-conversation-id": conversationId,
       "x-lares-user-display-name": user.displayName,
       "x-lares-user-id": user.id,
+      ...(internalSignature !== undefined
+        ? { "x-lares-internal-signature": internalSignature }
+        : {}),
     },
     method: init.method ?? "GET",
     ...(init.body !== undefined ? { body: init.body } : {}),
@@ -448,6 +471,22 @@ async function proxyConversationRequest<Schema extends z.ZodType>(
   }
 
   return schema.parse(await response.json());
+}
+
+async function signAgentRequest(secret: string, userId: string, conversationId: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${userId}:${conversationId}`),
+  );
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 interface TraceSpanRow {
@@ -792,6 +831,9 @@ export function createApp(options: CreateAppOptions = {}) {
         apiHandler.handle(c.req.raw, {
           context: {
             agentSessions: c.env.USER_AGENT_SESSION,
+            ...((c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET)
+              ? { agentInternalSecret: c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET }
+              : {}),
             db,
             recordSpan,
             session: auth,
