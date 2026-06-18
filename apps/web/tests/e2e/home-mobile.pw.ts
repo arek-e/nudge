@@ -36,7 +36,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Daily note" })).toBeVisible();
   await page.getByLabel("Daily journal").fill("need to write to michael");
   await page.getByRole("button", { name: "Save journal" }).tap();
-  await expect(page.getByText("Saved. Lares will review the changed text.")).toBeVisible();
+  await expect(page.getByText("Saved")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent notes" })).toBeVisible();
 
   const note = `Playwright typed client ${Date.now()}`;
@@ -44,7 +44,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     .getByRole("navigation", { name: "Primary navigation" })
     .getByRole("button", { name: "Write capture" })
     .tap();
-  await page.getByRole("button", { name: "Capture note" }).tap();
+  await page.getByRole("button", { name: "Note" }).tap();
   const captureDialogBox = await page.getByRole("dialog", { name: "Write capture" }).boundingBox();
   expect(captureDialogBox?.y).toBeLessThanOrEqual(2);
   expect(captureDialogBox?.height ?? 0).toBeGreaterThanOrEqual(viewportHeight - 2);
@@ -65,7 +65,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(primaryNav.getByRole("link", { name: "Prompts" })).toHaveCount(0);
 
   await primaryNav.getByRole("button", { name: "Write capture" }).tap();
-  const addSheetBox = await page.getByRole("dialog", { name: "Add to Lares" }).boundingBox();
+  const addSheetBox = await page.getByRole("dialog", { name: "Add" }).boundingBox();
   expect(addSheetBox?.y).toBeGreaterThanOrEqual(0);
   expect((addSheetBox?.y ?? 0) + (addSheetBox?.height ?? 0)).toBeLessThanOrEqual(viewportHeight);
   await page.getByRole("button", { name: "Cancel" }).tap();
@@ -74,13 +74,13 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     Reflect.set(window, "__laresClientNavMarker", "still-mounted");
   });
   await page.getByRole("link", { name: "Loop" }).tap();
-  await expect(page.getByRole("heading", { name: "Daily Operating Loop" })).toBeVisible();
+  await expect(page.getByRole("heading", { exact: true, name: "Loop" })).toBeVisible();
   await expect
     .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
     .toBe("still-mounted");
   await expect(page.getByLabel("Loop funnel chart")).toBeVisible();
   await expect(page.getByText("Signals")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Read and write loop" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(page.getByText("Actions to review")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Tell Lares" })).toBeVisible();
   await page.getByRole("button", { name: "Tell Lares" }).tap();
@@ -98,9 +98,9 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Journey" })).toBeVisible();
   await page.getByRole("button", { name: "Write capture" }).tap();
-  await expect(page.getByRole("dialog", { name: "Add to Lares" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Capture note" })).toBeVisible();
-  await page.getByRole("button", { name: "Capture note" }).tap();
+  await expect(page.getByRole("dialog", { name: "Add" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Note" })).toBeVisible();
+  await page.getByRole("button", { name: "Note" }).tap();
   await expect(page.getByRole("textbox", { name: "Capture body" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).tap();
   await expect(page.getByRole("heading", { name: "Journey timeline" })).toBeVisible();

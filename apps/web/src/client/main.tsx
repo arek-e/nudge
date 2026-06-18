@@ -168,7 +168,7 @@ function AppShell() {
       setNote("");
       setNoteDocument(plainTextToRichTextDocument(""));
       setCaptureOpen(false);
-      setStatus("Saved. This is now in the user-owned event log.");
+      setStatus("Saved");
       await queryClient.invalidateQueries({ queryKey: ["events"] });
     },
     onError: () => {
@@ -204,7 +204,7 @@ function AppShell() {
       <WritingDrawer
         eyebrow="Capture"
         drawerTitle="Write capture"
-        description="Capture the raw note first. Lares will turn it into context after you save."
+        description=""
         bodyLabel="Capture body"
         submitLabel="Save capture"
         open={captureOpen}
@@ -450,15 +450,20 @@ function LoopScreen() {
 
   return (
     <LaresAppShell>
-      <Surface eyebrow="Current state" title="Daily Operating Loop">
+      <Surface eyebrow="State" title="Loop">
         <div className="mt-4">
           <LoopFunnelChart data={funnelData} />
         </div>
       </Surface>
       <Surface eyebrow="Next" title={nextAction.label} primary>
-        <p className="summary">{nextAction.detail}</p>
+        <div className="mt-4 rounded-2xl bg-white/5 p-4">
+          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+            {nextAction.stage}
+          </p>
+          <strong className="mt-1 block text-base text-white">{nextAction.label}</strong>
+        </div>
       </Surface>
-      <Surface id="agent-activity-title" eyebrow="Agent activity" title="Read and write loop">
+      <Surface id="agent-activity-title" eyebrow="Agent" title="Activity">
         <div className="mt-4 grid gap-2">
           {activity.map((item) => (
             <div className="rounded-2xl bg-white/5 p-4" key={item.label}>
@@ -470,10 +475,7 @@ function LoopScreen() {
           ))}
         </div>
       </Surface>
-      <Surface id="agent-title" eyebrow="Agent" title="Tell Lares" primary>
-        <p className="summary">
-          Use this when you want Lares to pull out an action, insight, or reviewable next step.
-        </p>
+      <Surface id="agent-title" eyebrow="Ask" title="Tell Lares" primary>
         <form
           className="mt-4 grid gap-3"
           onSubmit={(event) => {
@@ -507,7 +509,7 @@ function LoopScreen() {
               <strong className="block text-base text-white">{agentDraft.title}</strong>
               <span className="mt-1 block text-sm text-neutral-300">{agentDraft.body}</span>
               <span className="mt-3 block text-xs text-neutral-500">
-                Confidence {Math.round(agentDraft.confidence * 100)}%. Requires review.
+                {Math.round(agentDraft.confidence * 100)}% confidence
               </span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -584,7 +586,7 @@ function LoopScreen() {
       <WritingDrawer
         eyebrow="Edit proposal"
         drawerTitle="Commit this as your own"
-        description="Use the first line as the Commitment title, then write the body below it. Type /ai for a draft."
+        description=""
         bodyLabel="Commitment body"
         submitLabel="Commit edited proposal"
         open={proposalEditor !== null}
@@ -647,16 +649,9 @@ function SettingsScreen() {
   return (
     <LaresAppShell>
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
-        <p className="summary">
-          {sessionUser
-            ? `Signed in as ${sessionUser.displayName}. Auth mode: ${session.data?.authMode}.`
-            : "Loading workspace..."}
-        </p>
+        <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
       </Surface>
       <Surface eyebrow="Data controls" title="Your data">
-        <p className="summary">
-          Export a JSON copy of your current workspace or delete the local MVP data for this user.
-        </p>
         <div className="mt-4 grid gap-2">
           <button
             className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
@@ -735,7 +730,7 @@ function TodayScreen() {
           <textarea
             aria-label="Daily journal"
             className="min-h-40 resize-y rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base leading-7 text-white outline-none focus:border-white/35"
-            placeholder="What should Lares remember from today?"
+            placeholder="Write a note..."
             value={journalBody}
             onChange={(event) => setJournalBody(event.currentTarget.value)}
           />
@@ -748,7 +743,7 @@ function TodayScreen() {
           </button>
           {saveJournal.isSuccess ? (
             <p className="m-0 text-sm text-neutral-400" role="status">
-              Saved. Lares will review the changed text.
+              Saved
             </p>
           ) : null}
         </form>
@@ -768,9 +763,7 @@ function TodayScreen() {
               </article>
             ))
           ) : (
-            <p className="m-0 text-sm leading-6 text-neutral-400">
-              No notes yet. Write the first daily note above.
-            </p>
+            <p className="m-0 text-sm leading-6 text-neutral-400">No notes yet.</p>
           )}
         </div>
       </Surface>

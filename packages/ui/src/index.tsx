@@ -11,7 +11,6 @@ import {
 import {
   BarChart3,
   BookOpen,
-  CheckCircle2,
   ClipboardList,
   Home,
   Moon,
@@ -225,7 +224,7 @@ export function deriveLoopInsights(input: {
       value: totalClosed === 0 ? "No data" : `${completionRate}%`,
       detail:
         totalClosed === 0
-          ? "Close a commitment to start building trend history."
+          ? "No outcomes yet."
           : `${completed} of ${totalClosed} closed loop${totalClosed === 1 ? "" : "s"} completed recently.`,
     },
     {
@@ -411,13 +410,13 @@ export function HomeDashboard(props: {
       <div className="grid grid-cols-2 gap-3">
         <DashboardCard label="Notes">
           <Sun className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
-          <strong>{props.hasJournalEntry ? "Today is written." : "No note yet."}</strong>
-          <span>{props.loading ? "..." : `${props.eventCount} items in context`}</span>
+          <strong>{props.hasJournalEntry ? "Written" : "Empty"}</strong>
+          <span>{props.loading ? "..." : `${props.eventCount} items`}</span>
         </DashboardCard>
         <DashboardCard label="Open loops">
           <Moon className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
           <strong>{props.openLoopCount}</strong>
-          <span>{props.openLoopCount === 0 ? "Nothing waiting." : "Waiting for review."}</span>
+          <span>{props.openLoopCount === 0 ? "Clear" : "Open"}</span>
         </DashboardCard>
       </div>
       <DashboardCard label="Calendar" wide>
@@ -618,7 +617,6 @@ export function CheckInForm(props: {
 }) {
   return (
     <div>
-      <p className={summaryClass}>Capture priorities, energy, constraints, and follow-ups.</p>
       <div className="mt-4 grid grid-cols-1 gap-3">
         <motion.button
           type="button"
@@ -727,11 +725,8 @@ export function AddActionSheet(props: {
             <Drawer.Content>
               <div className="mx-auto mb-5 h-1 w-9 rounded-full bg-white/10" aria-hidden="true" />
               <Drawer.Title className="m-0 text-center text-2xl font-semibold tracking-[-0.03em] text-white">
-                Add to Lares
+                Add
               </Drawer.Title>
-              <Drawer.Description className="mx-auto mt-2 max-w-[18rem] text-center text-[0.8125rem] leading-relaxed text-neutral-400">
-                Start with the smallest useful signal. Lares can synthesize it after you save.
-              </Drawer.Description>
               <div className="mt-6 grid gap-3">
                 <motion.button
                   className={`${buttonClass} justify-start gap-3 px-5`}
@@ -743,20 +738,9 @@ export function AddActionSheet(props: {
                     <PenLine className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
-                    <strong className="text-sm font-semibold">Capture note</strong>
-                    <span className="text-xs text-neutral-600">
-                      Write raw context, thought, or follow-up.
-                    </span>
+                    <strong className="text-sm font-semibold">Note</strong>
                   </span>
                 </motion.button>
-                <button className={`${secondaryButtonClass} gap-2`} type="button" disabled>
-                  <Sparkles className="size-4" aria-hidden="true" strokeWidth={2} />
-                  Start reflection soon
-                </button>
-                <button className={`${secondaryButtonClass} gap-2`} type="button" disabled>
-                  <CheckCircle2 className="size-4" aria-hidden="true" strokeWidth={2} />
-                  Log outcome soon
-                </button>
               </div>
               <Drawer.Close className={`${secondaryButtonClass} mt-4 w-full`}>Cancel</Drawer.Close>
             </Drawer.Content>
@@ -776,8 +760,7 @@ export function SynthesisPanel(props: {
   return (
     <div className="grid gap-4">
       <p className={summaryClass}>
-        {props.synthesis?.summary ??
-          (props.loading ? "Loading latest synthesis..." : "No synthesis yet.")}
+        {props.synthesis?.summary ?? (props.loading ? "Loading..." : "None")}
       </p>
 
       {props.synthesis ? (
@@ -809,7 +792,7 @@ export function SynthesisPanel(props: {
         whileTap={{ scale: 0.985 }}
         onClick={props.onGenerate}
       >
-        {props.generating ? "Synthesizing..." : "Generate synthesis"}
+        {props.generating ? "Synthesizing..." : "Synthesize"}
       </motion.button>
     </div>
   );
@@ -831,10 +814,10 @@ export function ProposalReviewPanel(props: {
       <div className="grid gap-4">
         <p className={summaryClass}>
           {props.loading
-            ? "Loading proposals..."
+            ? "Loading..."
             : props.proposals?.length
-              ? `${props.proposals.length} proposals waiting for review.`
-              : "No pending proposals."}
+              ? `${props.proposals.length} pending`
+              : "None"}
         </p>
         <motion.button
           type="button"
@@ -843,7 +826,7 @@ export function ProposalReviewPanel(props: {
           whileTap={{ scale: 0.985 }}
           onClick={props.onGenerate}
         >
-          {props.generating ? "Generating..." : "Generate proposals"}
+          {props.generating ? "Generating..." : "Generate"}
         </motion.button>
       </div>
 
@@ -857,9 +840,6 @@ export function ProposalReviewPanel(props: {
               </h3>
               <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">
                 {proposal.body}
-              </p>
-              <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-500">
-                {proposal.rationale}
               </p>
               <div className="mt-4 grid grid-cols-1 gap-2">
                 <motion.button
@@ -887,7 +867,7 @@ export function ProposalReviewPanel(props: {
                   whileTap={{ scale: 0.985 }}
                   onClick={() => props.onStartEdit(proposal)}
                 >
-                  Edit & commit
+                  Edit
                 </motion.button>
               </div>
             </article>
@@ -933,9 +913,11 @@ export function WritingDrawer(props: {
                       <Drawer.Title className="m-0 text-2xl font-semibold tracking-[-0.02em] text-white">
                         {props.drawerTitle}
                       </Drawer.Title>
-                      <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-400">
-                        {props.description}
-                      </Drawer.Description>
+                      {props.description ? (
+                        <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-400">
+                          {props.description}
+                        </Drawer.Description>
+                      ) : null}
                     </div>
                     <Drawer.Close className="min-h-10 rounded-full border-0 bg-white/5 px-3 text-xs font-medium text-neutral-200 shadow-none">
                       Cancel
@@ -1088,8 +1070,8 @@ export function CommitmentPanel(props: {
         {props.loading
           ? "Loading commitments..."
           : props.commitments?.length
-            ? `${props.commitments.length} active commitments.`
-            : "No active commitments."}
+            ? `${props.commitments.length} active`
+            : "None"}
       </p>
 
       {props.commitments?.length ? (
@@ -1130,8 +1112,8 @@ export function OutcomePanel(props: {
         {props.loading
           ? "Loading outcomes..."
           : props.outcomes?.length
-            ? `${props.outcomes.length} recently closed loops.`
-            : "No closed loops yet."}
+            ? `${props.outcomes.length} closed`
+            : "None"}
       </p>
 
       {props.outcomes?.length ? (
@@ -1186,11 +1168,11 @@ export function EventTable(props: {
   });
 
   if (props.loading) {
-    return <p className={summaryClass}>Loading events...</p>;
+    return <p className={summaryClass}>Loading...</p>;
   }
 
   if (props.error) {
-    return <p className={summaryClass}>Could not load events. Check the deployment logs.</p>;
+    return <p className={summaryClass}>Could not load.</p>;
   }
 
   return (
@@ -1225,7 +1207,7 @@ export function EventTable(props: {
             ))
           ) : (
             <tr>
-              <td colSpan={eventColumns.length}>No events yet. Save the first check-in.</td>
+              <td colSpan={eventColumns.length}>No events.</td>
             </tr>
           )}
         </tbody>
@@ -1239,9 +1221,9 @@ export function JourneyTimeline(props: {
   readonly loading: boolean;
   readonly error: boolean;
 }) {
-  if (props.loading) return <p className={summaryClass}>Loading Journey...</p>;
-  if (props.error) return <p className={summaryClass}>Could not load Journey.</p>;
-  if (!props.groups?.length) return <p className={summaryClass}>No loop history yet.</p>;
+  if (props.loading) return <p className={summaryClass}>Loading...</p>;
+  if (props.error) return <p className={summaryClass}>Could not load.</p>;
+  if (!props.groups?.length) return <p className={summaryClass}>No history.</p>;
 
   return (
     <div className="mt-4 grid gap-5">
