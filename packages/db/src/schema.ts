@@ -301,6 +301,92 @@ export const journalRevisions = sqliteTable(
   ],
 );
 
+export const memoryDocuments = sqliteTable(
+  "memory_documents",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    title: text("title").notNull(),
+    bodyText: text("body_text").notNull(),
+    localDate: text("local_date"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("memory_documents_source_idx").on(table.userId, table.sourceType, table.sourceId),
+    index("memory_documents_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const memoryChunks = sqliteTable(
+  "memory_chunks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    memoryDocumentId: text("memory_document_id")
+      .notNull()
+      .references(() => memoryDocuments.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    chunkText: text("chunk_text").notNull(),
+    chunkHash: text("chunk_hash").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    indexedAt: text("indexed_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("memory_chunks_document_index_idx").on(table.memoryDocumentId, table.chunkIndex),
+    uniqueIndex("memory_chunks_hash_idx").on(table.userId, table.chunkHash),
+    index("memory_chunks_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const memoryIndexJobs = sqliteTable(
+  "memory_index_jobs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    memoryChunkId: text("memory_chunk_id")
+      .notNull()
+      .references(() => memoryChunks.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("memory_index_jobs_chunk_idx").on(table.memoryChunkId),
+    index("memory_index_jobs_user_status_idx").on(table.userId, table.status, table.createdAt),
+  ],
+);
+
+export const memoryRetrievalEvents = sqliteTable(
+  "memory_retrieval_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    query: text("query").notNull(),
+    resultChunkIds: text("result_chunk_ids", { mode: "json" })
+      .$type<ReadonlyArray<string>>()
+      .notNull(),
+    source: text("source").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("memory_retrieval_events_user_created_idx").on(table.userId, table.createdAt)],
+);
+
 export const traceSpans = sqliteTable(
   "trace_spans",
   {
@@ -342,6 +428,10 @@ export const schema = {
   events,
   journalDocuments,
   journalRevisions,
+  memoryChunks,
+  memoryDocuments,
+  memoryIndexJobs,
+  memoryRetrievalEvents,
   outcomes,
   frames,
   proposals,

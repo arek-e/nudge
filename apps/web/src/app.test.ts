@@ -938,6 +938,25 @@ describe("web app", () => {
     const exported = await exportResponse.json();
     expect(exported.journalDocuments).toHaveLength(1);
     expect(exported.journalRevisions).toHaveLength(1);
+    expect(exported.memoryDocuments).toEqual([
+      expect.objectContaining({
+        bodyText: "need to write to michael",
+        sourceId: saved.revision.id,
+        sourceType: "journal_revision",
+      }),
+    ]);
+    expect(exported.memoryChunks).toEqual([
+      expect.objectContaining({
+        chunkText: "need to write to michael",
+        sourceId: saved.revision.id,
+      }),
+    ]);
+    expect(exported.memoryIndexJobs).toEqual([
+      expect.objectContaining({
+        memoryChunkId: exported.memoryChunks[0].id,
+        status: "pending",
+      }),
+    ]);
   });
 
   test("custom integrations can capture and list signals using primitive routes", async () => {

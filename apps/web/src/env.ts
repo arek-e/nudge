@@ -12,4 +12,6 @@ export interface Env {
   AUTH_SEED_SECRET?: string;
   AI: Ai;
   THINK_MODEL: string;
+  TURBOPUFFER_API_KEY?: string;
+  TURBOPUFFER_REGION?: string;
 }

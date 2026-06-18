@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { Db, type DbUser, type ReviewDecision } from "@lares/db";
+import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@lares/db";
 import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
@@ -34,6 +34,219 @@ export class AuthService extends Context.Service<
       displayName: "Dev User",
     }),
   });
+}
+
+export interface MemorySearchResult {
+  readonly chunkId: string;
+  readonly score: number;
+  readonly sourceType: MemoryChunkRecord["sourceType"];
+  readonly sourceId: string;
+  readonly text: string;
+}
+
+export interface TurbopufferMemoryIndexConfig {
+  readonly apiKey: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly region: string;
+}
+
+interface TurbopufferQueryRow {
+  readonly $dist?: number;
+  readonly id: string;
+  readonly source_id?: string;
+  readonly source_type?: MemoryChunkRecord["sourceType"];
+  readonly text?: string;
+}
+
+const memoryNamespaceForUser = (userId: string) => {
+  const safeUserId = userId.replaceAll(/[^A-Za-z0-9-_.]/g, "-").slice(0, 117);
+  return `lares-user-${safeUserId}`;
+};
+
+const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
+  `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
+
+const turbopufferFetchJson = <A>(
+  config: TurbopufferMemoryIndexConfig,
+  url: string,
+  body: unknown,
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await (config.fetch ?? globalThis.fetch)(url, {
+        body: JSON.stringify(body),
+        headers: {
+          authorization: `Bearer ${config.apiKey}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(`Turbopuffer request failed with ${response.status}`);
+      return (await response.json()) as A;
+    },
+    catch: (error) => (error instanceof Error ? error : new Error("Turbopuffer request failed")),
+  });
+
+const tokenizeMemoryQuery = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0);
+
+const scoreMemoryChunk = (queryTokens: ReadonlyArray<string>, chunk: MemoryChunkRecord) => {
+  const chunkText = chunk.chunkText.toLowerCase();
+  return queryTokens.reduce((score, token) => score + (chunkText.includes(token) ? 1 : 0), 0);
+};
+
+export class MemoryIndex extends Context.Service<
+  MemoryIndex,
+  {
+    readonly indexPending: (input: {
+      readonly user: DbUser;
+      readonly limit: number;
+    }) => Effect.Effect<{ readonly indexedChunkIds: ReadonlyArray<string> }, Error, Db>;
+    readonly retrieve: (input: {
+      readonly user: DbUser;
+      readonly query: string;
+      readonly limit: number;
+    }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
+  }
+>()("lares/MemoryIndex") {
+  static readonly layerMemory = Layer.succeed(MemoryIndex)({
+    indexPending: (input) =>
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.ensureUser(input.user);
+        const jobs = yield* db.listPendingMemoryIndexJobs({
+          limit: input.limit,
+          userId: input.user.id,
+        });
+        const indexedChunkIds = [];
+        for (const job of jobs) {
+          const chunk = yield* db.getMemoryChunk({
+            memoryChunkId: job.memoryChunkId,
+            userId: input.user.id,
+          });
+          if (!chunk) continue;
+          yield* db.markMemoryChunkIndexed({
+            memoryChunkId: chunk.id,
+            userId: input.user.id,
+          });
+          indexedChunkIds.push(chunk.id);
+        }
+        return { indexedChunkIds };
+      }),
+    retrieve: (input) =>
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.ensureUser(input.user);
+        const exported = yield* db.exportUserData(input.user);
+        const queryTokens = tokenizeMemoryQuery(input.query);
+        const results = exported.memoryChunks
+          .filter((chunk) => chunk.indexedAt !== undefined)
+          .map((chunk) => ({ chunk, score: scoreMemoryChunk(queryTokens, chunk) }))
+          .filter((result) => result.score > 0)
+          .sort(
+            (left, right) =>
+              right.score - left.score || left.chunk.createdAt.localeCompare(right.chunk.createdAt),
+          )
+          .slice(0, input.limit)
+          .map(({ chunk, score }) => ({
+            chunkId: chunk.id,
+            score,
+            sourceId: chunk.sourceId,
+            sourceType: chunk.sourceType,
+            text: chunk.chunkText,
+          }));
+
+        yield* db.recordMemoryRetrieval({
+          query: input.query,
+          resultChunkIds: results.map((result) => result.chunkId),
+          source: "memory-index.memory",
+          userId: input.user.id,
+        });
+
+        return { results };
+      }),
+  });
+
+  static readonly layerTurbopuffer = (config: TurbopufferMemoryIndexConfig) =>
+    Layer.succeed(MemoryIndex)({
+      indexPending: (input) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db.ensureUser(input.user);
+          const jobs = yield* db.listPendingMemoryIndexJobs({
+            limit: input.limit,
+            userId: input.user.id,
+          });
+          const chunks = [];
+          for (const job of jobs) {
+            const chunk = yield* db.getMemoryChunk({
+              memoryChunkId: job.memoryChunkId,
+              userId: input.user.id,
+            });
+            if (chunk) chunks.push(chunk);
+          }
+          if (chunks.length === 0) return { indexedChunkIds: [] };
+
+          yield* turbopufferFetchJson(
+            config,
+            turbopufferUrl(config, memoryNamespaceForUser(input.user.id)),
+            {
+              schema: {
+                source_id: { type: "string" },
+                source_type: { type: "string" },
+                text: { full_text_search: true, type: "string" },
+              },
+              upsert_rows: chunks.map((chunk) => ({
+                id: chunk.id,
+                source_id: chunk.sourceId,
+                source_type: chunk.sourceType,
+                text: chunk.chunkText,
+              })),
+            },
+          );
+
+          const indexedChunkIds = [];
+          for (const chunk of chunks) {
+            yield* db.markMemoryChunkIndexed({ memoryChunkId: chunk.id, userId: input.user.id });
+            indexedChunkIds.push(chunk.id);
+          }
+          return { indexedChunkIds };
+        }),
+      retrieve: (input) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db.ensureUser(input.user);
+          const response = yield* turbopufferFetchJson<{
+            readonly rows?: ReadonlyArray<TurbopufferQueryRow>;
+          }>(config, turbopufferUrl(config, memoryNamespaceForUser(input.user.id), "/query"), {
+            include_attributes: ["text", "source_type", "source_id"],
+            limit: input.limit,
+            rank_by: ["text", "BM25", input.query],
+          });
+          const results = (response.rows ?? []).flatMap((row) => {
+            if (!row.text || !row.source_id || !row.source_type) return [];
+            return [
+              {
+                chunkId: row.id,
+                score: row.$dist ?? 0,
+                sourceId: row.source_id,
+                sourceType: row.source_type,
+                text: row.text,
+              },
+            ];
+          });
+          yield* db.recordMemoryRetrieval({
+            query: input.query,
+            resultChunkIds: results.map((result) => result.chunkId),
+            source: "memory-index.turbopuffer",
+            userId: input.user.id,
+          });
+          return { results };
+        }),
+    });
 }
 
 const ensureCurrentFrame = (userId: string, key: string) =>

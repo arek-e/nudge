@@ -124,6 +124,52 @@ export const journalRevisionSchema = z.object({
   createdAt: z.string(),
 });
 
+export const memoryDocumentSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  sourceType: z.enum(["journal_document", "journal_revision", "signal", "proposal", "commitment"]),
+  sourceId: z.string(),
+  title: z.string(),
+  bodyText: z.string(),
+  localDate: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const memoryChunkSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  memoryDocumentId: z.string(),
+  sourceType: z.enum(["journal_document", "journal_revision", "signal", "proposal", "commitment"]),
+  sourceId: z.string(),
+  chunkText: z.string(),
+  chunkHash: z.string(),
+  chunkIndex: z.number().int(),
+  indexedAt: z.string().optional(),
+  createdAt: z.string(),
+});
+
+export const memoryIndexJobSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  memoryChunkId: z.string(),
+  sourceType: z.enum(["journal_document", "journal_revision", "signal", "proposal", "commitment"]),
+  sourceId: z.string(),
+  status: z.enum(["pending", "indexed", "failed"]),
+  errorMessage: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const memoryRetrievalEventSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  query: z.string(),
+  resultChunkIds: z.array(z.string()),
+  source: z.string(),
+  createdAt: z.string(),
+});
+
 export const traceSpanSummarySchema = z.object({
   id: z.string(),
   traceId: z.string(),
@@ -206,6 +252,10 @@ export const dataExportResponseSchema = z.object({
   frames: z.array(frameRecordSchema),
   journalDocuments: z.array(journalDocumentSchema),
   journalRevisions: z.array(journalRevisionSchema),
+  memoryChunks: z.array(memoryChunkSchema),
+  memoryDocuments: z.array(memoryDocumentSchema),
+  memoryIndexJobs: z.array(memoryIndexJobSchema),
+  memoryRetrievalEvents: z.array(memoryRetrievalEventSchema),
   outcomes: z.array(outcomeRecordSchema),
   proposals: z.array(proposalRecordSchema),
   reviews: z.array(reviewRecordSchema),

@@ -195,4 +195,47 @@ describe("Db", () => {
     );
     expect(result.pendingAfterReview).toEqual([]);
   });
+
+  test("stores memory documents with chunks and pending index jobs", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const indexed = yield* db.upsertMemoryDocument({
+        userId: "user-a",
+        sourceType: "journal_revision",
+        sourceId: "revision-1",
+        title: "June 18 journal update",
+        bodyText: "need to write to michael",
+        localDate: "2026-06-18",
+      });
+      const pending = yield* db.listPendingMemoryIndexJobs({ userId: "user-a", limit: 10 });
+      const marked = yield* db.markMemoryChunkIndexed({
+        userId: "user-a",
+        memoryChunkId: indexed.chunks[0]!.id,
+      });
+      const chunk = yield* db.getMemoryChunk({
+        userId: "user-a",
+        memoryChunkId: indexed.chunks[0]!.id,
+      });
+      const retrieval = yield* db.recordMemoryRetrieval({
+        userId: "user-a",
+        query: "michael",
+        resultChunkIds: [indexed.chunks[0]!.id],
+        source: "think.retrieveMemory",
+      });
+
+      return { chunk, indexed, marked, pending, retrieval };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.indexed.document.sourceType).toBe("journal_revision");
+    expect(result.indexed.chunks).toHaveLength(1);
+    expect(result.indexed.indexJobs).toHaveLength(1);
+    expect(result.pending[0]?.memoryChunkId).toBe(result.indexed.chunks[0]?.id);
+    expect(result.marked.indexedAt).toBeString();
+    expect(result.chunk?.indexedAt).toBe(result.marked.indexedAt);
+    expect(result.retrieval.resultChunkIds).toEqual([result.indexed.chunks[0]?.id]);
+  });
 });

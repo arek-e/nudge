@@ -8,6 +8,10 @@ import {
   frames,
   journalDocuments,
   journalRevisions,
+  memoryChunks,
+  memoryDocuments,
+  memoryIndexJobs,
+  memoryRetrievalEvents,
   proposals,
   reviews,
   schema,
@@ -186,10 +190,77 @@ export interface UserDataExport {
   readonly frames: ReadonlyArray<FrameRecord>;
   readonly journalDocuments: ReadonlyArray<JournalDocumentRecord>;
   readonly journalRevisions: ReadonlyArray<JournalRevisionRecord>;
+  readonly memoryChunks: ReadonlyArray<MemoryChunkRecord>;
+  readonly memoryDocuments: ReadonlyArray<MemoryDocumentRecord>;
+  readonly memoryIndexJobs: ReadonlyArray<MemoryIndexJobRecord>;
+  readonly memoryRetrievalEvents: ReadonlyArray<MemoryRetrievalEventRecord>;
   readonly outcomes: ReadonlyArray<OutcomeRecord>;
   readonly proposals: ReadonlyArray<ProposalRecord>;
   readonly reviews: ReadonlyArray<ReviewRecord>;
   readonly syntheses: ReadonlyArray<SynthesisRecord>;
+}
+
+export type MemorySourceType =
+  | "journal_document"
+  | "journal_revision"
+  | "signal"
+  | "proposal"
+  | "commitment";
+export type MemoryIndexJobStatus = "pending" | "indexed" | "failed";
+
+export interface UpsertMemoryDocumentInput {
+  readonly userId: string;
+  readonly sourceType: MemorySourceType;
+  readonly sourceId: string;
+  readonly title: string;
+  readonly bodyText: string;
+  readonly localDate?: string;
+}
+
+export interface MemoryDocumentRecord extends UpsertMemoryDocumentInput {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface MemoryChunkRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly memoryDocumentId: string;
+  readonly sourceType: MemorySourceType;
+  readonly sourceId: string;
+  readonly chunkText: string;
+  readonly chunkHash: string;
+  readonly chunkIndex: number;
+  readonly indexedAt?: string;
+  readonly createdAt: string;
+}
+
+export interface MemoryIndexJobRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly memoryChunkId: string;
+  readonly sourceType: MemorySourceType;
+  readonly sourceId: string;
+  readonly status: MemoryIndexJobStatus;
+  readonly errorMessage?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface MemoryRetrievalEventRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly query: string;
+  readonly resultChunkIds: ReadonlyArray<string>;
+  readonly source: string;
+  readonly createdAt: string;
+}
+
+export interface UpsertMemoryDocumentResult {
+  readonly document: MemoryDocumentRecord;
+  readonly chunks: ReadonlyArray<MemoryChunkRecord>;
+  readonly indexJobs: ReadonlyArray<MemoryIndexJobRecord>;
 }
 
 export interface UpsertJournalDocumentInput {
@@ -238,6 +309,10 @@ export interface DbService {
     readonly userId: string;
     readonly localDate: string;
   }) => Effect.Effect<JournalDocumentRecord | null>;
+  readonly getMemoryChunk: (input: {
+    readonly userId: string;
+    readonly memoryChunkId: string;
+  }) => Effect.Effect<MemoryChunkRecord | null>;
   readonly getProposal: (input: GetProposalInput) => Effect.Effect<ProposalRecord | null>;
   readonly getReviewForProposal: (
     input: GetReviewForProposalInput,
@@ -257,11 +332,32 @@ export interface DbService {
     readonly documentId: string;
     readonly limit: number;
   }) => Effect.Effect<ReadonlyArray<JournalRevisionRecord>>;
+  readonly listMemoryChunks: (input: {
+    readonly userId: string;
+    readonly memoryDocumentId: string;
+  }) => Effect.Effect<ReadonlyArray<MemoryChunkRecord>>;
+  readonly listPendingMemoryIndexJobs: (input: {
+    readonly userId: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<MemoryIndexJobRecord>>;
+  readonly recordMemoryRetrieval: (input: {
+    readonly userId: string;
+    readonly query: string;
+    readonly resultChunkIds: ReadonlyArray<string>;
+    readonly source: string;
+  }) => Effect.Effect<MemoryRetrievalEventRecord>;
+  readonly markMemoryChunkIndexed: (input: {
+    readonly userId: string;
+    readonly memoryChunkId: string;
+  }) => Effect.Effect<MemoryChunkRecord>;
   readonly recordOutcome: (input: RecordOutcomeInput) => Effect.Effect<OutcomeRecord>;
   readonly reviewProposal: (input: ReviewProposalInput) => Effect.Effect<ReviewRecord>;
   readonly upsertJournalDocument: (
     input: UpsertJournalDocumentInput,
   ) => Effect.Effect<UpsertJournalDocumentResult>;
+  readonly upsertMemoryDocument: (
+    input: UpsertMemoryDocumentInput,
+  ) => Effect.Effect<UpsertMemoryDocumentResult>;
   readonly upsertCurrentFrame: (input: UpsertCurrentFrameInput) => Effect.Effect<FrameRecord>;
 }
 
@@ -390,6 +486,21 @@ const diffSummaryFrom = (previous: string | null, next: string, changedText: str
   return "Updated daily journal document.";
 };
 
+const memoryChunkHash = (input: {
+  readonly userId: string;
+  readonly sourceType: MemorySourceType;
+  readonly sourceId: string;
+  readonly chunkIndex: number;
+  readonly chunkText: string;
+}) =>
+  `${input.userId}:${input.sourceType}:${input.sourceId}:${input.chunkIndex}:${input.chunkText}`;
+
+const memoryChunksFrom = (input: UpsertMemoryDocumentInput) => {
+  const trimmed = input.bodyText.trim();
+  if (trimmed.length === 0) return [];
+  return [trimmed];
+};
+
 const toJournalDocumentRecord = (row: typeof journalDocuments.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
@@ -411,6 +522,52 @@ const toJournalRevisionRecord = (row: typeof journalRevisions.$inferSelect) => (
   createdAt: row.createdAt,
 });
 
+const toMemoryDocumentRecord = (row: typeof memoryDocuments.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  sourceType: row.sourceType as MemorySourceType,
+  sourceId: row.sourceId,
+  title: row.title,
+  bodyText: row.bodyText,
+  ...(row.localDate !== null ? { localDate: row.localDate } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toMemoryChunkRecord = (row: typeof memoryChunks.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  memoryDocumentId: row.memoryDocumentId,
+  sourceType: row.sourceType as MemorySourceType,
+  sourceId: row.sourceId,
+  chunkText: row.chunkText,
+  chunkHash: row.chunkHash,
+  chunkIndex: row.chunkIndex,
+  ...(row.indexedAt !== null ? { indexedAt: row.indexedAt } : {}),
+  createdAt: row.createdAt,
+});
+
+const toMemoryIndexJobRecord = (row: typeof memoryIndexJobs.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  memoryChunkId: row.memoryChunkId,
+  sourceType: row.sourceType as MemorySourceType,
+  sourceId: row.sourceId,
+  status: row.status as MemoryIndexJobStatus,
+  ...(row.errorMessage !== null ? { errorMessage: row.errorMessage } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toMemoryRetrievalEventRecord = (row: typeof memoryRetrievalEvents.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  query: row.query,
+  resultChunkIds: row.resultChunkIds,
+  source: row.source,
+  createdAt: row.createdAt,
+});
+
 export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
@@ -422,6 +579,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
       const frameStore = new Map<string, FrameRecord>();
       const journalDocumentStore = new Map<string, JournalDocumentRecord>();
       const journalRevisionStore = new Map<string, JournalRevisionRecord>();
+      const memoryChunkStore = new Map<string, MemoryChunkRecord>();
+      const memoryDocumentStore = new Map<string, MemoryDocumentRecord>();
+      const memoryIndexJobStore = new Map<string, MemoryIndexJobRecord>();
+      const memoryRetrievalEventStore = new Map<string, MemoryRetrievalEventRecord>();
       const proposalStore = new Map<string, ProposalRecord>();
       const reviewStore = new Map<string, ReviewRecord>();
       const synthesisStore = new Map<string, SynthesisRecord>();
@@ -437,6 +598,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               frameStore,
               journalDocumentStore,
               journalRevisionStore,
+              memoryChunkStore,
+              memoryDocumentStore,
+              memoryIndexJobStore,
+              memoryRetrievalEventStore,
               proposalStore,
               reviewStore,
               synthesisStore,
@@ -463,6 +628,18 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               (record) => record.userId === user.id,
             ),
             journalRevisions: [...journalRevisionStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            memoryChunks: [...memoryChunkStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            memoryDocuments: [...memoryDocumentStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            memoryIndexJobs: [...memoryIndexJobStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            memoryRetrievalEvents: [...memoryRetrievalEventStore.values()].filter(
               (record) => record.userId === user.id,
             ),
             outcomes: [...outcomeStore.values()].filter((record) => record.userId === user.id),
@@ -563,6 +740,11 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }),
         getJournalDocument: (input) =>
           Effect.sync(() => journalDocumentStore.get(`${input.userId}:${input.localDate}`) ?? null),
+        getMemoryChunk: (input) =>
+          Effect.sync(() => {
+            const chunk = memoryChunkStore.get(input.memoryChunkId) ?? null;
+            return chunk?.userId === input.userId ? chunk : null;
+          }),
         getProposal: (input) =>
           Effect.sync(() => {
             const proposal = proposalStore.get(input.proposalId);
@@ -622,6 +804,42 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               )
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
               .slice(0, input.limit);
+          }),
+        listMemoryChunks: (input) =>
+          Effect.sync(() => {
+            return [...memoryChunkStore.values()]
+              .filter(
+                (chunk) =>
+                  chunk.userId === input.userId &&
+                  chunk.memoryDocumentId === input.memoryDocumentId,
+              )
+              .sort((left, right) => left.chunkIndex - right.chunkIndex);
+          }),
+        listPendingMemoryIndexJobs: (input) =>
+          Effect.sync(() => {
+            return [...memoryIndexJobStore.values()]
+              .filter((job) => job.userId === input.userId && job.status === "pending")
+              .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+              .slice(0, input.limit);
+          }),
+        markMemoryChunkIndexed: (input) =>
+          Effect.sync(() => {
+            const chunk = memoryChunkStore.get(input.memoryChunkId);
+            if (!chunk || chunk.userId !== input.userId) throw new Error("Memory chunk not found");
+            const indexedAt = nowIso();
+            const updatedChunk = { ...chunk, indexedAt } satisfies MemoryChunkRecord;
+            memoryChunkStore.set(updatedChunk.id, updatedChunk);
+            const job = [...memoryIndexJobStore.values()].find(
+              (candidate) => candidate.memoryChunkId === input.memoryChunkId,
+            );
+            if (job) {
+              memoryIndexJobStore.set(job.id, {
+                ...job,
+                status: "indexed",
+                updatedAt: indexedAt,
+              });
+            }
+            return updatedChunk;
           }),
         recordOutcome: (input) =>
           Effect.sync(() => {
@@ -696,6 +914,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             reviewStore.set(review.id, review);
             return review;
           }),
+        recordMemoryRetrieval: (input) =>
+          Effect.sync(() => {
+            const record = {
+              id: eventId(),
+              createdAt: nowIso(),
+              ...input,
+            } satisfies MemoryRetrievalEventRecord;
+            memoryRetrievalEventStore.set(record.id, record);
+            return record;
+          }),
         upsertCurrentFrame: (input) =>
           Effect.sync(() => {
             const key = `${input.userId}:${input.key}`;
@@ -737,6 +965,63 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             journalRevisionStore.set(revision.id, revision);
             return { document, revision };
           }),
+        upsertMemoryDocument: (input) =>
+          Effect.sync(() => {
+            const key = `${input.userId}:${input.sourceType}:${input.sourceId}`;
+            const previous = memoryDocumentStore.get(key) ?? null;
+            const timestamp = nowIso();
+            const document = {
+              ...input,
+              id: previous?.id ?? eventId(),
+              createdAt: previous?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            } satisfies MemoryDocumentRecord;
+
+            memoryDocumentStore.set(key, document);
+            for (const chunk of [...memoryChunkStore.values()].filter(
+              (candidate) => candidate.memoryDocumentId === document.id,
+            )) {
+              memoryChunkStore.delete(chunk.id);
+            }
+
+            const chunks = memoryChunksFrom(input).map((chunkText, chunkIndex) => {
+              const chunk = {
+                id: eventId(),
+                userId: input.userId,
+                memoryDocumentId: document.id,
+                sourceType: input.sourceType,
+                sourceId: input.sourceId,
+                chunkText,
+                chunkHash: memoryChunkHash({
+                  userId: input.userId,
+                  sourceType: input.sourceType,
+                  sourceId: input.sourceId,
+                  chunkIndex,
+                  chunkText,
+                }),
+                chunkIndex,
+                createdAt: timestamp,
+              } satisfies MemoryChunkRecord;
+              memoryChunkStore.set(chunk.id, chunk);
+              return chunk;
+            });
+            const indexJobs = chunks.map((chunk) => {
+              const job = {
+                id: eventId(),
+                userId: input.userId,
+                memoryChunkId: chunk.id,
+                sourceType: input.sourceType,
+                sourceId: input.sourceId,
+                status: "pending" as const,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              } satisfies MemoryIndexJobRecord;
+              memoryIndexJobStore.set(job.id, job);
+              return job;
+            });
+
+            return { document, chunks, indexJobs };
+          }),
       });
     }),
   );
@@ -764,6 +1049,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 database.prepare("DELETE FROM syntheses WHERE user_id = ?").bind(input.userId),
                 database.prepare("DELETE FROM frames WHERE user_id = ?").bind(input.userId),
                 database.prepare("DELETE FROM events WHERE user_id = ?").bind(input.userId),
+                database
+                  .prepare("DELETE FROM memory_retrieval_events WHERE user_id = ?")
+                  .bind(input.userId),
+                database
+                  .prepare("DELETE FROM memory_index_jobs WHERE user_id = ?")
+                  .bind(input.userId),
+                database.prepare("DELETE FROM memory_chunks WHERE user_id = ?").bind(input.userId),
+                database
+                  .prepare("DELETE FROM memory_documents WHERE user_id = ?")
+                  .bind(input.userId),
                 database
                   .prepare("DELETE FROM journal_revisions WHERE user_id = ?")
                   .bind(input.userId),
@@ -801,6 +1096,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 outcomeRows,
                 journalDocumentRows,
                 journalRevisionRows,
+                memoryDocumentRows,
+                memoryChunkRows,
+                memoryIndexJobRows,
+                memoryRetrievalEventRows,
               ] = await Promise.all([
                 db.select().from(events).where(eq(events.userId, user.id)),
                 db.select().from(frames).where(eq(frames.userId, user.id)),
@@ -811,6 +1110,13 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 db.select().from(outcomes).where(eq(outcomes.userId, user.id)),
                 db.select().from(journalDocuments).where(eq(journalDocuments.userId, user.id)),
                 db.select().from(journalRevisions).where(eq(journalRevisions.userId, user.id)),
+                db.select().from(memoryDocuments).where(eq(memoryDocuments.userId, user.id)),
+                db.select().from(memoryChunks).where(eq(memoryChunks.userId, user.id)),
+                db.select().from(memoryIndexJobs).where(eq(memoryIndexJobs.userId, user.id)),
+                db
+                  .select()
+                  .from(memoryRetrievalEvents)
+                  .where(eq(memoryRetrievalEvents.userId, user.id)),
               ]);
               const synthesisRecords = await Promise.all(
                 synthesisRows.map(async (row) => {
@@ -839,6 +1145,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 frames: frameRows.map(toFrameRecord),
                 journalDocuments: journalDocumentRows.map(toJournalDocumentRecord),
                 journalRevisions: journalRevisionRows.map(toJournalRevisionRecord),
+                memoryChunks: memoryChunkRows.map(toMemoryChunkRecord),
+                memoryDocuments: memoryDocumentRows.map(toMemoryDocumentRecord),
+                memoryIndexJobs: memoryIndexJobRows.map(toMemoryIndexJobRecord),
+                memoryRetrievalEvents: memoryRetrievalEventRows.map(toMemoryRetrievalEventRecord),
                 outcomes: outcomeRows.map(toOutcomeRecord),
                 proposals: proposalRows.map(toProposalRecord),
                 reviews: reviewRows.map(toReviewRecord),
@@ -1168,6 +1478,21 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
               return row ? toJournalDocumentRecord(row) : null;
             }),
+          getMemoryChunk: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(memoryChunks)
+                .where(
+                  and(
+                    eq(memoryChunks.id, input.memoryChunkId),
+                    eq(memoryChunks.userId, input.userId),
+                  ),
+                )
+                .get();
+
+              return row ? toMemoryChunkRecord(row) : null;
+            }),
           getProposal: (input) =>
             Effect.promise(async () => {
               const row = await db
@@ -1283,6 +1608,37 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 .limit(input.limit);
 
               return rows.map(toJournalRevisionRecord);
+            }),
+          listMemoryChunks: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(memoryChunks)
+                .where(
+                  and(
+                    eq(memoryChunks.userId, input.userId),
+                    eq(memoryChunks.memoryDocumentId, input.memoryDocumentId),
+                  ),
+                )
+                .orderBy(memoryChunks.chunkIndex);
+
+              return rows.map(toMemoryChunkRecord);
+            }),
+          listPendingMemoryIndexJobs: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(memoryIndexJobs)
+                .where(
+                  and(
+                    eq(memoryIndexJobs.userId, input.userId),
+                    eq(memoryIndexJobs.status, "pending"),
+                  ),
+                )
+                .orderBy(memoryIndexJobs.createdAt)
+                .limit(input.limit);
+
+              return rows.map(toMemoryIndexJobRecord);
             }),
           recordOutcome: (input) =>
             Effect.promise(async () => {
@@ -1584,6 +1940,140 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               await db.insert(journalRevisions).values(revision);
 
               return { document, revision };
+            }),
+          markMemoryChunkIndexed: (input) =>
+            Effect.promise(async () => {
+              const timestamp = nowIso();
+              await database.batch([
+                database
+                  .prepare("UPDATE memory_chunks SET indexed_at = ? WHERE id = ? AND user_id = ?")
+                  .bind(timestamp, input.memoryChunkId, input.userId),
+                database
+                  .prepare(
+                    "UPDATE memory_index_jobs SET status = ?, updated_at = ? WHERE memory_chunk_id = ? AND user_id = ?",
+                  )
+                  .bind("indexed", timestamp, input.memoryChunkId, input.userId),
+              ]);
+              const row = await db
+                .select()
+                .from(memoryChunks)
+                .where(
+                  and(
+                    eq(memoryChunks.id, input.memoryChunkId),
+                    eq(memoryChunks.userId, input.userId),
+                  ),
+                )
+                .get();
+              if (!row) throw new Error("Memory chunk not found");
+              return toMemoryChunkRecord(row);
+            }),
+          recordMemoryRetrieval: (input) =>
+            Effect.promise(async () => {
+              const record = {
+                id: eventId(),
+                createdAt: nowIso(),
+                ...input,
+              } satisfies MemoryRetrievalEventRecord;
+              await db.insert(memoryRetrievalEvents).values(record);
+              return record;
+            }),
+          upsertMemoryDocument: (input) =>
+            Effect.promise(async () => {
+              const previous = await db
+                .select()
+                .from(memoryDocuments)
+                .where(
+                  and(
+                    eq(memoryDocuments.userId, input.userId),
+                    eq(memoryDocuments.sourceType, input.sourceType),
+                    eq(memoryDocuments.sourceId, input.sourceId),
+                  ),
+                )
+                .get();
+              const timestamp = nowIso();
+              const document = {
+                ...input,
+                id: previous?.id ?? eventId(),
+                createdAt: previous?.createdAt ?? timestamp,
+                updatedAt: timestamp,
+              } satisfies MemoryDocumentRecord;
+
+              await db
+                .insert(memoryDocuments)
+                .values({
+                  id: document.id,
+                  userId: document.userId,
+                  sourceType: document.sourceType,
+                  sourceId: document.sourceId,
+                  title: document.title,
+                  bodyText: document.bodyText,
+                  localDate: document.localDate ?? null,
+                  createdAt: document.createdAt,
+                  updatedAt: document.updatedAt,
+                })
+                .onConflictDoUpdate({
+                  target: [
+                    memoryDocuments.userId,
+                    memoryDocuments.sourceType,
+                    memoryDocuments.sourceId,
+                  ],
+                  set: {
+                    title: document.title,
+                    bodyText: document.bodyText,
+                    localDate: document.localDate ?? null,
+                    updatedAt: document.updatedAt,
+                  },
+                });
+
+              await db.delete(memoryChunks).where(eq(memoryChunks.memoryDocumentId, document.id));
+              const chunks = memoryChunksFrom(input).map((chunkText, chunkIndex) => {
+                return {
+                  id: eventId(),
+                  userId: input.userId,
+                  memoryDocumentId: document.id,
+                  sourceType: input.sourceType,
+                  sourceId: input.sourceId,
+                  chunkText,
+                  chunkHash: memoryChunkHash({
+                    userId: input.userId,
+                    sourceType: input.sourceType,
+                    sourceId: input.sourceId,
+                    chunkIndex,
+                    chunkText,
+                  }),
+                  chunkIndex,
+                  createdAt: timestamp,
+                } satisfies MemoryChunkRecord;
+              });
+              await db.insert(memoryChunks).values(
+                chunks.map((chunk) => ({
+                  id: chunk.id,
+                  userId: chunk.userId,
+                  memoryDocumentId: chunk.memoryDocumentId,
+                  sourceType: chunk.sourceType,
+                  sourceId: chunk.sourceId,
+                  chunkText: chunk.chunkText,
+                  chunkHash: chunk.chunkHash,
+                  chunkIndex: chunk.chunkIndex,
+                  indexedAt: null,
+                  createdAt: chunk.createdAt,
+                })),
+              );
+              const indexJobs = chunks.map((chunk) => {
+                return {
+                  id: eventId(),
+                  userId: input.userId,
+                  memoryChunkId: chunk.id,
+                  sourceType: input.sourceType,
+                  sourceId: input.sourceId,
+                  status: "pending" as const,
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                } satisfies MemoryIndexJobRecord;
+              });
+              await db.insert(memoryIndexJobs).values(indexJobs);
+
+              return { document, chunks, indexJobs };
             }),
         });
       }),

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
-import { AuthService, PrimitiveWorkflows } from "@lares/effect-services";
+import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
 import {
   apiContract,
@@ -44,6 +44,10 @@ interface ApiContext {
     task: () => Promise<A>,
   ) => Promise<A>;
   readonly traceDb?: D1Database;
+  readonly turbopuffer?: {
+    readonly apiKey: string;
+    readonly region: string;
+  };
   readonly session: {
     readonly authMode: "better-auth" | "dev" | "unauthenticated";
     readonly user: {
@@ -131,6 +135,13 @@ export const apiRouter = api.router({
       frames: [...exported.frames],
       journalDocuments: [...exported.journalDocuments],
       journalRevisions: [...exported.journalRevisions],
+      memoryChunks: [...exported.memoryChunks],
+      memoryDocuments: [...exported.memoryDocuments],
+      memoryIndexJobs: [...exported.memoryIndexJobs],
+      memoryRetrievalEvents: exported.memoryRetrievalEvents.map((retrievalEvent) => ({
+        ...retrievalEvent,
+        resultChunkIds: [...retrievalEvent.resultChunkIds],
+      })),
       outcomes: [...exported.outcomes],
       proposals: [...exported.proposals],
       reviews: [...exported.reviews],
@@ -189,6 +200,51 @@ export const apiRouter = api.router({
         }),
       );
       if (result.revision.changedText.trim().length > 0) {
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: result.revision.changedText,
+            localDate: result.document.localDate,
+            sourceId: result.revision.id,
+            sourceType: "journal_revision",
+            title: result.document.title,
+            userId: context.user.id,
+          }),
+        );
+        const turbopuffer = context.turbopuffer;
+        if (turbopuffer) {
+          await context.recordSpan(
+            "memory.index_pending",
+            {
+              attributes: {
+                "lares.memory_index.provider": "turbopuffer",
+                "turbopuffer.region": turbopuffer.region,
+              },
+              kind: "client",
+            },
+            async () => {
+              await runMemoryIndex(
+                context.db,
+                turbopuffer,
+                Effect.gen(function* () {
+                  const memoryIndex = yield* MemoryIndex;
+                  return yield* memoryIndex.indexPending({ limit: 20, user: context.user });
+                }),
+              ).catch((error: unknown) => {
+                const safeError = error instanceof Error ? error : new Error("Memory index failed");
+                console.warn(
+                  JSON.stringify({
+                    event: "memory_index_failed",
+                    logKind: "wide_event",
+                    provider: "turbopuffer",
+                    region: turbopuffer.region,
+                    errorType: safeError.name,
+                    errorMessage: safeError.message,
+                  }),
+                );
+              });
+            },
+          );
+        }
         await proxyConversationRequest(
           context.agentSessions,
           context.user,
@@ -485,6 +541,18 @@ function runWorkflow<A, E>(db: DbService, workflow: Effect.Effect<A, E, Db>) {
   return Effect.runPromise(Effect.provideService(workflow, Db, db));
 }
 
+function runMemoryIndex<A, E>(
+  db: DbService,
+  turbopuffer: { readonly apiKey: string; readonly region: string },
+  workflow: Effect.Effect<A, E, Db | MemoryIndex>,
+) {
+  return Effect.runPromise(
+    Effect.provide(workflow, MemoryIndex.layerTurbopuffer(turbopuffer)).pipe(
+      Effect.provideService(Db, db),
+    ),
+  );
+}
+
 function makeApiHandler() {
   return new OpenAPIHandler(apiRouter, {
     interceptors: [
@@ -713,6 +781,14 @@ export function createApp(options: CreateAppOptions = {}) {
             recordSpan,
             session: auth,
             traceDb: c.env.DB,
+            ...(c.env.TURBOPUFFER_API_KEY
+              ? {
+                  turbopuffer: {
+                    apiKey: c.env.TURBOPUFFER_API_KEY,
+                    region: c.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
+                  },
+                }
+              : {}),
             user,
           },
           prefix: "/api",
