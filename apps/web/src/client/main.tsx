@@ -5,6 +5,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
 import {
@@ -132,6 +133,7 @@ declare module "@tanstack/react-router" {
 
 function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const navigate = useNavigate();
   const session = useSession();
   const [note, setNote] = useState("");
   const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
@@ -227,6 +229,9 @@ function AppShell() {
                   : "today"
           }
           onCapture={() => setAddOpen(true)}
+          onNavigate={(to) => {
+            void navigate({ to });
+          }}
         />
       )}
     </CaptureContext.Provider>

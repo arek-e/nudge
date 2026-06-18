@@ -1,5 +1,5 @@
 import type { Value } from "platejs";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { Drawer } from "@base-ui/react/drawer";
 import { BoldPlugin, ItalicPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import {
@@ -455,11 +455,21 @@ export function CheckInForm(props: {
 export function BottomNav(props: {
   readonly active: "today" | "loop" | "journey" | "insights";
   readonly onCapture: () => void;
+  readonly onNavigate?: (href: "/" | "/loop" | "/journey" | "/insights") => void;
 }) {
   const todayActive = props.active === "today";
   const loopActive = props.active === "loop";
   const journeyActive = props.active === "journey";
   const insightsActive = props.active === "insights";
+  const navigate = (
+    href: "/" | "/loop" | "/journey" | "/insights",
+    event: MouseEvent<HTMLAnchorElement>,
+  ) => {
+    if (!props.onNavigate || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    event.preventDefault();
+    props.onNavigate(href);
+  };
 
   return (
     <nav
@@ -470,6 +480,7 @@ export function BottomNav(props: {
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${todayActive ? "text-white" : "text-neutral-500"}`}
         aria-current={todayActive ? "page" : undefined}
         href="/"
+        onClick={(event) => navigate("/", event)}
       >
         <Home className="size-5" aria-hidden="true" strokeWidth={todayActive ? 2.8 : 2} />
         Today
@@ -478,6 +489,7 @@ export function BottomNav(props: {
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${loopActive ? "text-white" : "text-neutral-500"}`}
         aria-current={loopActive ? "page" : undefined}
         href="/loop"
+        onClick={(event) => navigate("/loop", event)}
       >
         <ClipboardList className="size-5" aria-hidden="true" strokeWidth={loopActive ? 2.8 : 2} />
         Loop
@@ -495,6 +507,7 @@ export function BottomNav(props: {
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${journeyActive ? "text-white" : "text-neutral-500"}`}
         aria-current={journeyActive ? "page" : undefined}
         href="/journey"
+        onClick={(event) => navigate("/journey", event)}
       >
         <BookOpen className="size-5" aria-hidden="true" strokeWidth={journeyActive ? 2.8 : 2} />
         Journey
@@ -503,6 +516,7 @@ export function BottomNav(props: {
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${insightsActive ? "text-white" : "text-neutral-500"}`}
         aria-current={insightsActive ? "page" : undefined}
         href="/insights"
+        onClick={(event) => navigate("/insights", event)}
       >
         <BarChart3 className="size-5" aria-hidden="true" strokeWidth={insightsActive ? 2.8 : 2} />
         Insights
