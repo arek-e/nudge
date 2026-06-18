@@ -45,7 +45,10 @@ describe("web app", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
     expect(body).toContain('rel="manifest"');
+    expect(body).toContain('rel="apple-touch-icon"');
     expect(body).toContain('name="theme-color"');
+    expect(body).toContain('name="apple-mobile-web-app-status-bar-style"');
+    expect(body).toContain("navigator.serviceWorker.register('/sw.js')");
     expect(body).toContain("Today");
     expect(body).toContain("Daily Operating Loop");
     expect(body).toContain("Capture");
@@ -81,9 +84,26 @@ describe("web app", () => {
     expect(await response.json()).toMatchObject({
       name: "Lares",
       display: "standalone",
+      display_override: ["standalone", "minimal-ui"],
       theme_color: "#111111",
-      icons: [expect.objectContaining({ src: "/icons/icon.svg" })],
+      icons: [
+        expect.objectContaining({ sizes: "192x192", src: "/icons/icon-192.png" }),
+        expect.objectContaining({ sizes: "512x512", src: "/icons/icon-512.png" }),
+        expect.objectContaining({ src: "/icons/icon.svg" }),
+      ],
+      shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
+  });
+
+  test("GET /offline.html serves a PWA offline fallback", async () => {
+    const app = createApp();
+    const response = await app.request("/offline.html", {}, env);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(body).toContain("You are offline");
+    expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
   test("GET /api/auth/session is unavailable until Better Auth is configured", async () => {

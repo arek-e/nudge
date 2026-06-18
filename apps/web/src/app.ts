@@ -711,9 +711,23 @@ export function createApp(options: CreateAppOptions = {}) {
       start_url: "/",
       scope: "/",
       display: "standalone",
+      display_override: ["standalone", "minimal-ui"],
       background_color: "#111111",
       theme_color: "#111111",
+      categories: ["productivity", "lifestyle"],
       icons: [
+        {
+          src: "/icons/icon-192.png",
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+        {
+          src: "/icons/icon-512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any maskable",
+        },
         {
           src: "/icons/icon.svg",
           sizes: "any",
@@ -721,7 +735,32 @@ export function createApp(options: CreateAppOptions = {}) {
           purpose: "any maskable",
         },
       ],
+      shortcuts: [
+        {
+          name: "Today",
+          short_name: "Today",
+          description: "Open today's operating loop.",
+          url: "/",
+          icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
+      ],
     });
+  });
+
+  app.get("/offline.html", (c) => {
+    addWideEventFields(c, { routeName: "pwa.offline" });
+    return c.html(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lares" />
+    <title>Lares Offline</title>
+  </head>
+  <body><main><p>Lares</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Lares.</p></main></body>
+</html>`);
   });
 
   app.get("/icons/icon.svg", (c) => {
@@ -891,8 +930,11 @@ export function createApp(options: CreateAppOptions = {}) {
     <meta name="theme-color" content="#111111" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Lares" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Lares Daily Operating Loop</title>
     <style>
       :root {
@@ -1060,6 +1102,12 @@ export function createApp(options: CreateAppOptions = {}) {
       const note = document.querySelector('#note');
       const status = document.querySelector('#status');
       const events = document.querySelector('#events');
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+        });
+      }
 
       async function loadEvents() {
         const response = await fetch('/api/events');

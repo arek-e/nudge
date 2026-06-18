@@ -1,10 +1,29 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   build: {
     outDir: "dist/client",
   },
-  plugins: [tailwindcss(), react()],
+  plugins: [
+    tailwindcss(),
+    react(),
+    VitePWA({
+      filename: "sw.js",
+      includeAssets: [
+        "offline.html",
+        "icons/icon.svg",
+        "icons/icon-192.png",
+        "icons/icon-512.png",
+        "icons/apple-touch-icon.png",
+      ],
+      manifest: false,
+      registerType: "autoUpdate",
+      workbox: {
+        globPatterns: ["**/*.{css,html,ico,js,png,svg,webmanifest}"],
+      },
+    }),
+  ],
 });
