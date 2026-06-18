@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "catalog:",
+    "@cloudflare/think": "catalog:",
     "@lares/db": "workspace:*",
     "@lares/domain": "workspace:*",
     "@lares/effect-services": "workspace:*",
@@ -37,6 +38,7 @@
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
     "agents": "catalog:",
+    "ai": "catalog:",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
@@ -44,6 +46,7 @@
     "hono": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "workers-ai-provider": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

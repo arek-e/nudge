@@ -4,6 +4,8 @@ import { readHttpTelemetrySnapshot } from "@lares/observability";
 import type { Env } from "./env";
 import { createApp } from "./app";
 
+const testAi = (() => ({ provider: "test" })) as Ai;
+
 const env = {
   DB: {} as D1Database,
   TRACE_ARTIFACTS: {} as R2Bucket,
@@ -13,6 +15,8 @@ const env = {
   APP_VERSION: "test-version",
   BETTER_AUTH_URL: "http://localhost:8787",
   LOG_HTTP_REQUESTS: "false",
+  AI: testAi,
+  THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
 
 const createTraceDb = () => {
@@ -596,8 +600,9 @@ describe("web app", () => {
             createdAt: null,
             updatedAt: null,
             recentToolEvents: [],
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
             skills: ["intake-loop", "review-commitment", "close-loop"],
-            subAgents: ["loopIntake"],
+            subAgents: ["loopIntakeThink"],
             tools: ["listRecentSignals"],
             workflows: ["dailyDigest"],
           });
@@ -623,8 +628,9 @@ describe("web app", () => {
       createdAt: null,
       updatedAt: null,
       recentToolEvents: [],
+      reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
       skills: ["intake-loop", "review-commitment", "close-loop"],
-      subAgents: ["loopIntake"],
+      subAgents: ["loopIntakeThink"],
       tools: ["listRecentSignals"],
       workflows: ["dailyDigest"],
     });
@@ -671,9 +677,10 @@ describe("web app", () => {
               requiresReview: true,
             },
             message: "What should I do next?",
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
             reply: "I drafted a reviewable next step from your message.",
             skillsApplied: ["intake-loop"],
-            subAgentsUsed: ["loopIntake"],
+            subAgentsUsed: ["loopIntakeThink"],
             usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
             workflowHooks: ["dailyDigest"],
           });
@@ -728,9 +735,10 @@ describe("web app", () => {
         requiresReview: true,
       },
       message: "What should I do next?",
+      reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
       reply: "I drafted a reviewable next step from your message.",
       skillsApplied: ["intake-loop"],
-      subAgentsUsed: ["loopIntake"],
+      subAgentsUsed: ["loopIntakeThink"],
       usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
     });

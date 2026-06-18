@@ -1,4 +1,7 @@
+import type { LanguageModel } from "ai";
+import { Think } from "@cloudflare/think";
 import { Agent } from "agents";
+import { createWorkersAI } from "workers-ai-provider";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
 import { Db } from "@lares/db";
@@ -39,6 +42,11 @@ interface LoopIntakeDraftInput {
   readonly user: LaresUserRef;
 }
 
+const reasoningHarness = {
+  name: "think" as const,
+  runtime: "cloudflare-agents" as const,
+};
+
 const initialUserAgentSessionState = {
   conversationId: null,
   createdAt: null,
@@ -68,8 +76,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json({
       ok: true,
       role: "user-agent-session",
+      reasoningHarness,
       skills: ["intake-loop", "review-commitment", "close-loop"],
-      subAgents: ["loopIntake"],
+      subAgents: ["loopIntakeThink"],
       session: this.state,
       tools: ["listRecentSignals"],
       workflows: ["dailyDigest"],
@@ -93,8 +102,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       recentToolEvents: state.recentToolEvents,
+      reasoningHarness,
       skills: ["intake-loop", "review-commitment", "close-loop"],
-      subAgents: ["loopIntake"],
+      subAgents: ["loopIntakeThink"],
       tools: ["listRecentSignals"],
       workflows: ["dailyDigest"],
     });
@@ -148,7 +158,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const user = this.resolveUser(request);
     const body = (await request.json()) as { readonly message?: string };
     const message = String(body.message ?? "").trim();
-    const intake = await this.subAgent(LoopIntakeAgent, "current-state");
+    const intake = await this.subAgent(LoopIntakeThinkAgent, "current-state");
     const draft = await intake.draftFromMessage({ conversationId, message, user });
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -168,9 +178,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       conversationId,
       draft: draft.draft,
       message,
+      reasoningHarness,
       reply: draft.reply,
       skillsApplied: ["intake-loop"],
-      subAgentsUsed: ["loopIntake"],
+      subAgentsUsed: ["loopIntakeThink"],
       usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
     });
@@ -186,7 +197,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     };
     const changedText = String(body.changedText ?? "").trim();
     if (changedText.length > 0) {
-      const intake = await this.subAgent(LoopIntakeAgent, "journal-current-state");
+      const intake = await this.subAgent(LoopIntakeThinkAgent, "journal-current-state");
       await intake.draftFromMessage({
         conversationId: `journal:${body.localDate ?? "today"}`,
         message: changedText,
@@ -210,8 +221,29 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 }
 
-export class LoopIntakeAgent extends Agent<Env> {
+export class LoopIntakeThinkAgent extends Think<Env> {
+  workspaceBash = false;
+
+  getModel(): LanguageModel {
+    return createWorkersAI({ binding: this.env.AI })(this.env.THINK_MODEL);
+  }
+
+  getSystemPrompt(): string {
+    return [
+      "You are Lares, a private operating loop agent.",
+      "Interpret the user's journal or message into reviewable loop operations.",
+      "Never create external side effects. Draft signals, proposals, follow-ups, and reminders for review.",
+      "Prefer concrete next actions over generic advice.",
+    ].join("\n");
+  }
+
   async draftFromMessage(input: LoopIntakeDraftInput) {
+    // Think owns the durable reasoning harness; this RPC seam stays stable while model-produced
+    // structured output is introduced behind the same contract.
+    return this.deterministicDraftFromMessage(input);
+  }
+
+  private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
     const occurredAt = new Date().toISOString();
     const signal = await Effect.runPromise(
       Effect.provide(

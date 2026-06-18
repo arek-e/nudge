@@ -151,8 +151,12 @@ export const conversationMetadataSchema = z.object({
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
   recentToolEvents: z.array(conversationToolEventSchema),
+  reasoningHarness: z.object({
+    name: z.literal("think"),
+    runtime: z.literal("cloudflare-agents"),
+  }),
   skills: z.array(z.enum(["intake-loop", "review-commitment", "close-loop"])),
-  subAgents: z.array(z.enum(["loopIntake"])),
+  subAgents: z.array(z.enum(["loopIntakeThink"])),
   tools: z.array(z.literal("listRecentSignals")),
   workflows: z.array(z.enum(["dailyDigest"])),
 });
@@ -178,9 +182,13 @@ export const conversationMessageResponseSchema = z.object({
     })
     .nullable(),
   message: z.string(),
+  reasoningHarness: z.object({
+    name: z.literal("think"),
+    runtime: z.literal("cloudflare-agents"),
+  }),
   reply: z.string(),
   skillsApplied: z.array(z.enum(["intake-loop"])),
-  subAgentsUsed: z.array(z.enum(["loopIntake"])),
+  subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
   usedTools: z.array(z.enum(["appendSignal", "createSynthesis", "generateProposals"])),
   workflowHooks: z.array(z.enum(["dailyDigest"])),
 });

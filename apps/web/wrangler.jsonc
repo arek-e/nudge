@@ -26,6 +26,11 @@
     "APP_VERSION": "0.0.0",
     "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
     "LOG_HTTP_REQUESTS": "true",
+    "THINK_MODEL": "@cf/moonshotai/kimi-k2.6",
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true,
   },
   "d1_databases": [
     {
