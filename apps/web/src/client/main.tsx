@@ -21,7 +21,6 @@ import {
   BottomNav,
   CheckInForm,
   CommitmentPanel,
-  DashboardHeader,
   deriveJourneyDayGroups,
   deriveLoopInsights,
   deriveTodayNextAction,
@@ -153,8 +152,8 @@ function AppShell() {
     },
   });
 
-  if (session.isLoading) {
-    return <LoginFrame title="Checking session..." />;
+  if (!session.data) {
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
   }
 
   if (session.data?.authMode === "unauthenticated") {
@@ -227,10 +226,7 @@ function LoginFrame(props: { readonly children?: React.ReactNode; readonly title
   return (
     <main className="grid min-h-dvh place-items-center bg-[#111] px-5 py-10 text-white">
       <section className="w-full max-w-sm rounded-[2rem] bg-white/[0.06] p-6 shadow-2xl ring-1 shadow-black/30 ring-white/10">
-        <p className="m-0 text-xs font-semibold tracking-[0.18em] text-neutral-400 uppercase">
-          Lares
-        </p>
-        <h1 className="mt-3 mb-2 text-3xl font-semibold tracking-[-0.04em]">{props.title}</h1>
+        <h1 className="m-0 mb-2 text-3xl font-semibold tracking-[-0.04em]">{props.title}</h1>
         {props.children}
       </section>
     </main>
@@ -317,7 +313,6 @@ function LoopScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Loop" />
       <Surface eyebrow="Current state" title="Daily Operating Loop">
         <p className="summary">
           Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome
@@ -370,7 +365,6 @@ function SettingsScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Settings" />
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">
           {sessionUser
@@ -491,8 +485,6 @@ function TodayScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Home" />
-
       <HomeDashboard
         eventCount={events.data?.events.length ?? 0}
         loading={events.isLoading}
@@ -599,8 +591,6 @@ function JourneyScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Journey" />
-
       <Surface id="events-title" eyebrow="Loop history" title="Journey timeline">
         <JourneyTimeline groups={groups} loading={events.isLoading} error={events.isError} />
       </Surface>
@@ -619,8 +609,6 @@ function InsightsScreen() {
 
   return (
     <LaresAppShell>
-      <DashboardHeader title="Insights" />
-
       <Surface id="insights-title" eyebrow="Loop intelligence" title="Completion trend">
         <InsightsPanel insights={insights} />
       </Surface>
@@ -642,6 +630,8 @@ function useSession() {
   return useQuery({
     queryKey: ["session"],
     queryFn: async () => apiClient.session(),
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
