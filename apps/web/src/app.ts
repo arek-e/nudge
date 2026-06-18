@@ -43,11 +43,17 @@ interface ApiContext {
     task: () => Promise<A>,
   ) => Promise<A>;
   readonly traceDb?: D1Database;
+  readonly session: {
+    readonly authMode: "better-auth" | "dev" | "unauthenticated";
+    readonly user: {
+      readonly id: string;
+      readonly displayName: string;
+    } | null;
+  };
   readonly user: {
     readonly id: string;
     readonly displayName: string;
   };
-  readonly authMode: "better-auth" | "dev";
 }
 
 interface CreateAppOptions {
@@ -164,12 +170,14 @@ export const apiRouter = api.router({
   },
   session: api.session.handler(({ context }) => {
     return {
-      authMode: context.authMode,
-      user: context.user,
-      workspace: {
-        id: context.user.id,
-        label: `${context.user.displayName}'s workspace`,
-      },
+      authMode: context.session.authMode,
+      user: context.session.user,
+      workspace: context.session.user
+        ? {
+            id: context.session.user.id,
+            label: `${context.session.user.displayName}'s workspace`,
+          }
+        : null,
     };
   }),
   proposals: {
@@ -465,12 +473,20 @@ async function resolveCurrentUser(input: {
 }) {
   const session = await input.resolveSession({ env: input.env, headers: input.headers });
   if (session) {
+    const user = {
+      displayName: session.user.name ?? session.user.email ?? "Lares User",
+      id: session.user.id,
+    };
     return {
       authMode: "better-auth" as const,
-      user: {
-        displayName: session.user.name ?? session.user.email ?? "Lares User",
-        id: session.user.id,
-      },
+      user,
+    };
+  }
+
+  if (isBetterAuthConfigured(input.env)) {
+    return {
+      authMode: "unauthenticated" as const,
+      user: null,
     };
   }
 
@@ -616,6 +632,11 @@ export function createApp(options: CreateAppOptions = {}) {
       { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
       () => resolveCurrentUser({ env: c.env, headers: c.req.raw.headers, resolveSession }),
     );
+    if (!auth.user && !c.req.path.startsWith("/api/session")) {
+      return c.json({ error: "Authentication required" }, 401);
+    }
+
+    const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
     const result = await runWithRequestSpan(
@@ -627,9 +648,9 @@ export function createApp(options: CreateAppOptions = {}) {
             agentSessions: c.env.USER_AGENT_SESSION,
             db,
             recordSpan,
+            session: auth,
             traceDb: c.env.DB,
-            authMode: auth.authMode,
-            user: auth.user,
+            user,
           },
           prefix: "/api",
         }),

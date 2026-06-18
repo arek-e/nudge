@@ -664,6 +664,35 @@ describe("web app", () => {
     });
   });
 
+  test("custom integrations see an unauthenticated session when Better Auth is configured without a cookie", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request("/api/session", {}, { ...env, BETTER_AUTH_SECRET: "test" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "unauthenticated",
+      user: null,
+      workspace: null,
+    });
+  });
+
+  test("custom integrations cannot use user data routes without an authenticated production session", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/signals?limit=10",
+      {},
+      {
+        ...env,
+        BETTER_AUTH_SECRET: "test",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
+  });
+
   test("custom integrations resolve workspace from a Better Auth session", async () => {
     const app = createApp({
       authSessionResolver: async () => ({

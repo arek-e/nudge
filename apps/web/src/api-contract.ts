@@ -140,9 +140,9 @@ export const listRecentSignalsToolResponseSchema = z.object({
 });
 
 export const sessionResponseSchema = z.object({
-  authMode: z.enum(["better-auth", "dev"]),
-  user: z.object({ id: z.string(), displayName: z.string() }),
-  workspace: z.object({ id: z.string(), label: z.string() }),
+  authMode: z.enum(["better-auth", "dev", "unauthenticated"]),
+  user: z.object({ id: z.string(), displayName: z.string() }).nullable(),
+  workspace: z.object({ id: z.string(), label: z.string() }).nullable(),
 });
 
 export const dataExportResponseSchema = z.object({

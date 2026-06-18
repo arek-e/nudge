@@ -7,7 +7,14 @@ import {
   RouterProvider,
   useRouterState,
 } from "@tanstack/react-router";
-import { createContext, StrictMode, useContext, useState, useTransition } from "react";
+import {
+  createContext,
+  type FormEvent,
+  StrictMode,
+  useContext,
+  useState,
+  useTransition,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   AddActionSheet,
@@ -115,6 +122,7 @@ declare module "@tanstack/react-router" {
 
 function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const session = useSession();
   const [note, setNote] = useState("");
   const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
     plainTextToRichTextDocument(""),
@@ -144,6 +152,14 @@ function AppShell() {
       setStatus("Could not save. Check the deployment logs.");
     },
   });
+
+  if (session.isLoading) {
+    return <LoginFrame title="Checking session..." />;
+  }
+
+  if (session.data?.authMode === "unauthenticated") {
+    return <LoginScreen />;
+  }
 
   return (
     <CaptureContext.Provider
@@ -207,6 +223,85 @@ function AppShell() {
   );
 }
 
+function LoginFrame(props: { readonly children?: React.ReactNode; readonly title: string }) {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[#111] px-5 py-10 text-white">
+      <section className="w-full max-w-sm rounded-[2rem] bg-white/[0.06] p-6 shadow-2xl ring-1 shadow-black/30 ring-white/10">
+        <p className="m-0 text-xs font-semibold tracking-[0.18em] text-neutral-400 uppercase">
+          Lares
+        </p>
+        <h1 className="mt-3 mb-2 text-3xl font-semibold tracking-[-0.04em]">{props.title}</h1>
+        {props.children}
+      </section>
+    </main>
+  );
+}
+
+function LoginScreen() {
+  const [email, setEmail] = useState("alek@teampitch.app");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const signIn = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!response.ok) throw new Error("Could not sign in");
+    },
+    onError: () => setError("Email or password is incorrect."),
+    onSuccess: async () => {
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+  });
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    signIn.mutate();
+  };
+
+  return (
+    <LoginFrame title="Sign in to Lares">
+      <p className="m-0 text-sm leading-6 text-neutral-300">
+        Private workspace access is limited to invited accounts.
+      </p>
+      <form className="mt-6 grid gap-4" onSubmit={submit}>
+        <label className="grid gap-2 text-sm font-medium text-neutral-200">
+          Email
+          <input
+            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+            autoComplete="email"
+            inputMode="email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.currentTarget.value)}
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-medium text-neutral-200">
+          Password
+          <input
+            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+            autoComplete="current-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.currentTarget.value)}
+          />
+        </label>
+        {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
+        <button
+          className="rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
+          disabled={signIn.isPending}
+          type="submit"
+        >
+          {signIn.isPending ? "Signing in..." : "Sign in"}
+        </button>
+      </form>
+    </LoginFrame>
+  );
+}
+
 function LoopScreen() {
   const events = useEvents();
   const latestSynthesis = useLatestSynthesis();
@@ -252,6 +347,8 @@ function LoopScreen() {
 
 function SettingsScreen() {
   const session = useSession();
+  const sessionUser = session.data?.user;
+  const workspace = session.data?.workspace;
   const exportData = useMutation({
     mutationFn: async () => apiClient.dataExport(),
     onSuccess: (data) => {
@@ -274,10 +371,10 @@ function SettingsScreen() {
   return (
     <LaresAppShell>
       <DashboardHeader title="Settings" />
-      <Surface eyebrow="Workspace" title={session.data?.workspace.label ?? "Workspace"}>
+      <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">
-          {session.data
-            ? `Signed in as ${session.data.user.displayName}. Auth mode: ${session.data.authMode}.`
+          {sessionUser
+            ? `Signed in as ${sessionUser.displayName}. Auth mode: ${session.data?.authMode}.`
             : "Loading workspace..."}
         </p>
       </Surface>

@@ -1,5 +1,24 @@
 import { expect, test } from "@playwright/test";
 
+test("unauthenticated app shell shows the login page", async ({ page }) => {
+  await page.route("**/api/session", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: { authMode: "unauthenticated", user: null, workspace: null },
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Sign in to Lares" })).toBeVisible();
+  await expect(
+    page.getByText("Private workspace access is limited to invited accounts."),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "good afternoon." })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toHaveCount(0);
+});
+
 test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.goto("/");
 
