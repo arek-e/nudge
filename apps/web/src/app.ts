@@ -13,6 +13,7 @@ import {
   conversationMessageResponseSchema,
   conversationMetadataSchema,
   listRecentSignalsToolResponseSchema,
+  retrieveMemoryToolResponseSchema,
 } from "./api-contract";
 import {
   createBetterAuth,
@@ -94,6 +95,18 @@ export const apiRouter = api.router({
         input.conversationId,
         url,
         listRecentSignalsToolResponseSchema,
+      );
+    }),
+    retrieveMemory: api.conversations.retrieveMemory.handler(async ({ context, input }) => {
+      const url = new URL("https://lares.local/tools/retrieve-memory");
+      url.searchParams.set("query", input.query);
+      url.searchParams.set("limit", String(input.limit ?? 5));
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.user,
+        input.conversationId,
+        url,
+        retrieveMemoryToolResponseSchema,
       );
     }),
     sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
@@ -724,6 +737,8 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.conversations" });
       if (c.req.path.includes("/tools/list-recent-signals")) {
         addWideEventFields(c, { agentTool: "listRecentSignals" });
+      } else if (c.req.path.includes("/tools/retrieve-memory")) {
+        addWideEventFields(c, { agentTool: "retrieveMemory" });
       }
     } else if (c.req.path.startsWith("/api/signals")) {
       addWideEventFields(c, { routeName: "api.signals" });

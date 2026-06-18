@@ -188,8 +188,10 @@ export const traceSpanSummarySchema = z.object({
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
-  tool: z.enum(["listRecentSignals", "reply"]),
+  tool: z.enum(["listRecentSignals", "retrieveMemory", "reply"]),
 });
+
+export const conversationToolSchema = z.enum(["listRecentSignals", "retrieveMemory"]);
 
 export const conversationMetadataSchema = z.object({
   conversationId: z.string(),
@@ -203,7 +205,7 @@ export const conversationMetadataSchema = z.object({
   }),
   skills: z.array(z.enum(["intake-loop", "review-commitment", "close-loop"])),
   subAgents: z.array(z.enum(["loopIntakeThink"])),
-  tools: z.array(z.literal("listRecentSignals")),
+  tools: z.array(conversationToolSchema),
   workflows: z.array(z.enum(["dailyDigest"])),
 });
 
@@ -211,6 +213,26 @@ export const listRecentSignalsToolResponseSchema = z.object({
   conversationId: z.string(),
   tool: z.literal("listRecentSignals"),
   signals: z.array(eventRecordSchema),
+});
+
+export const retrieveMemoryToolResponseSchema = z.object({
+  conversationId: z.string(),
+  tool: z.literal("retrieveMemory"),
+  results: z.array(
+    z.object({
+      chunkId: z.string(),
+      score: z.number(),
+      sourceId: z.string(),
+      sourceType: z.enum([
+        "journal_document",
+        "journal_revision",
+        "signal",
+        "proposal",
+        "commitment",
+      ]),
+      text: z.string(),
+    }),
+  ),
 });
 
 export const conversationMessageInputSchema = z.object({
@@ -228,6 +250,21 @@ export const conversationMessageResponseSchema = z.object({
     })
     .nullable(),
   message: z.string(),
+  memoryResults: z.array(
+    z.object({
+      chunkId: z.string(),
+      score: z.number(),
+      sourceId: z.string(),
+      sourceType: z.enum([
+        "journal_document",
+        "journal_revision",
+        "signal",
+        "proposal",
+        "commitment",
+      ]),
+      text: z.string(),
+    }),
+  ),
   reasoningHarness: z.object({
     name: z.literal("think"),
     runtime: z.literal("cloudflare-agents"),
@@ -235,7 +272,9 @@ export const conversationMessageResponseSchema = z.object({
   reply: z.string(),
   skillsApplied: z.array(z.enum(["intake-loop"])),
   subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
-  usedTools: z.array(z.enum(["appendSignal", "createSynthesis", "generateProposals"])),
+  usedTools: z.array(
+    z.enum(["appendSignal", "createSynthesis", "generateProposals", "retrieveMemory"]),
+  ),
   workflowHooks: z.array(z.enum(["dailyDigest"])),
 });
 
@@ -299,6 +338,10 @@ const conversationInputSchema = z.object({
 const conversationSignalsInputSchema = conversationInputSchema.extend({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
+const conversationMemoryInputSchema = conversationInputSchema.extend({
+  limit: z.coerce.number().int().min(1).max(20).default(5),
+  query: z.string().min(1).max(1_000),
+});
 const conversationMessageRouteInputSchema = conversationInputSchema.extend(
   conversationMessageInputSchema.shape,
 );
@@ -321,6 +364,13 @@ export const apiContract = {
       })
       .input(conversationSignalsInputSchema)
       .output(listRecentSignalsToolResponseSchema),
+    retrieveMemory: oc
+      .route({
+        method: "GET",
+        path: "/conversations/{conversationId}/tools/retrieve-memory",
+      })
+      .input(conversationMemoryInputSchema)
+      .output(retrieveMemoryToolResponseSchema),
     sendMessage: oc
       .route({ method: "POST", path: "/conversations/{conversationId}/messages" })
       .input(conversationMessageRouteInputSchema)

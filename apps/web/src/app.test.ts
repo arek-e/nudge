@@ -583,6 +583,75 @@ describe("web app", () => {
     });
   });
 
+  test("GET /api/conversations/:conversationId/tools/retrieve-memory forwards user-scoped retrieval to the agent session", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          return Response.json({
+            conversationId: "focus",
+            tool: "retrieveMemory",
+            results: [
+              {
+                chunkId: "chunk-1",
+                score: 4.2,
+                sourceId: "revision-1",
+                sourceType: "journal_revision",
+                text: "need to write to michael about the launch",
+              },
+            ],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp();
+    const consoleLog = spyOn(console, "log").mockImplementation(() => {});
+
+    let response: Response;
+    let loggedEvent: unknown;
+    try {
+      response = await app.request(
+        "/api/conversations/focus/tools/retrieve-memory?query=michael%20launch&limit=3",
+        {},
+        { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
+      );
+      loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
+    } finally {
+      consoleLog.mockRestore();
+    }
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
+    expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
+    expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
+    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(loggedEvent).toMatchObject({
+      agentTool: "retrieveMemory",
+      routeName: "api.conversations",
+    });
+    expect(await response.json()).toEqual({
+      conversationId: "focus",
+      tool: "retrieveMemory",
+      results: [
+        {
+          chunkId: "chunk-1",
+          score: 4.2,
+          sourceId: "revision-1",
+          sourceType: "journal_revision",
+          text: "need to write to michael about the launch",
+        },
+      ],
+    });
+  });
+
   test("GET /api/conversations/:conversationId returns conversation metadata", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
@@ -603,7 +672,7 @@ describe("web app", () => {
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
             skills: ["intake-loop", "review-commitment", "close-loop"],
             subAgents: ["loopIntakeThink"],
-            tools: ["listRecentSignals"],
+            tools: ["listRecentSignals", "retrieveMemory"],
             workflows: ["dailyDigest"],
           });
         },
@@ -631,7 +700,7 @@ describe("web app", () => {
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
       skills: ["intake-loop", "review-commitment", "close-loop"],
       subAgents: ["loopIntakeThink"],
-      tools: ["listRecentSignals"],
+      tools: ["listRecentSignals", "retrieveMemory"],
       workflows: ["dailyDigest"],
     });
   });
@@ -677,11 +746,20 @@ describe("web app", () => {
               requiresReview: true,
             },
             message: "What should I do next?",
+            memoryResults: [
+              {
+                chunkId: "chunk-1",
+                score: 4.2,
+                sourceId: "revision-1",
+                sourceType: "journal_revision",
+                text: "need to write to michael about the launch",
+              },
+            ],
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-            reply: "I drafted a reviewable next step from your message.",
+            reply: "I found 1 related memory and drafted a reviewable next step from your message.",
             skillsApplied: ["intake-loop"],
             subAgentsUsed: ["loopIntakeThink"],
-            usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
             workflowHooks: ["dailyDigest"],
           });
         },
@@ -735,11 +813,20 @@ describe("web app", () => {
         requiresReview: true,
       },
       message: "What should I do next?",
+      memoryResults: [
+        {
+          chunkId: "chunk-1",
+          score: 4.2,
+          sourceId: "revision-1",
+          sourceType: "journal_revision",
+          text: "need to write to michael about the launch",
+        },
+      ],
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-      reply: "I drafted a reviewable next step from your message.",
+      reply: "I found 1 related memory and drafted a reviewable next step from your message.",
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
-      usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
+      usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
     });
   });
