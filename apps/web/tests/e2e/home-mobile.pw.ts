@@ -33,6 +33,11 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   const viewportHeight = page.viewportSize()?.height ?? 0;
   expect(dashboardBottom).toBeLessThanOrEqual(viewportHeight);
 
+  await expect(page.getByRole("heading", { name: "Journal" })).toBeVisible();
+  await page.getByLabel("Daily journal").fill("need to write to michael");
+  await page.getByRole("button", { name: "Save journal" }).tap();
+  await expect(page.getByText("Saved. Lares will review the changed text.")).toBeVisible();
+
   const note = `Playwright typed client ${Date.now()}`;
   await page
     .getByRole("region", { name: "Capture" })
@@ -46,7 +51,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
   await page.getByRole("textbox", { name: "Capture body" }).fill(note);
   await page.getByRole("button", { name: "Save capture" }).tap();
-  await expect(page.getByRole("status")).toContainText("Saved");
+  await expect(page.getByText("Saved. This is now in the user-owned event log.")).toBeVisible();
 
   await expect(page.getByRole("heading", { name: "Tell Lares" })).toBeVisible();
   await page.getByRole("button", { name: "Tell Lares" }).tap();

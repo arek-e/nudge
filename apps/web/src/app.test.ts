@@ -875,7 +875,61 @@ describe("web app", () => {
       outcomes: [],
       proposals: [],
       syntheses: [],
+      journalDocuments: [],
+      journalRevisions: [],
     });
+  });
+
+  test("custom integrations can save a daily journal and trigger agent interpretation", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => ({ name }),
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          return Response.json({ accepted: true });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const firstSave = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "need to write to michael",
+          localDate: "2026-06-18",
+          title: "June 18",
+        }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+
+    expect(firstSave.status).toBe(200);
+    const saved = await firstSave.json();
+    expect(saved.document.bodyText).toBe("need to write to michael");
+    expect(saved.revision.changedText).toBe("need to write to michael");
+
+    const forwarded = forwardedRequests[0]!;
+    expect(new URL(forwarded.url).pathname).toBe("/journal/interpret");
+    expect(forwarded.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(await forwarded.json()).toEqual({
+      changedText: "need to write to michael",
+      documentId: saved.document.id,
+      localDate: "2026-06-18",
+      revisionId: saved.revision.id,
+    });
+
+    const documentResponse = await app.request("/api/journal/2026-06-18", {}, env);
+    expect(documentResponse.status).toBe(200);
+    expect((await documentResponse.json()).document.bodyText).toBe("need to write to michael");
+
+    const exportResponse = await app.request("/api/export", {}, env);
+    const exported = await exportResponse.json();
+    expect(exported.journalDocuments).toHaveLength(1);
+    expect(exported.journalRevisions).toHaveLength(1);
   });
 
   test("custom integrations can capture and list signals using primitive routes", async () => {

@@ -6,6 +6,8 @@ import {
   events,
   outcomes,
   frames,
+  journalDocuments,
+  journalRevisions,
   proposals,
   reviews,
   schema,
@@ -182,10 +184,41 @@ export interface UserDataExport {
   readonly commitments: ReadonlyArray<CommitmentRecord>;
   readonly events: ReadonlyArray<EventRecord>;
   readonly frames: ReadonlyArray<FrameRecord>;
+  readonly journalDocuments: ReadonlyArray<JournalDocumentRecord>;
+  readonly journalRevisions: ReadonlyArray<JournalRevisionRecord>;
   readonly outcomes: ReadonlyArray<OutcomeRecord>;
   readonly proposals: ReadonlyArray<ProposalRecord>;
   readonly reviews: ReadonlyArray<ReviewRecord>;
   readonly syntheses: ReadonlyArray<SynthesisRecord>;
+}
+
+export interface UpsertJournalDocumentInput {
+  readonly userId: string;
+  readonly localDate: string;
+  readonly title: string;
+  readonly bodyText: string;
+  readonly bodyDocument?: unknown;
+}
+
+export interface JournalDocumentRecord extends UpsertJournalDocumentInput {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface JournalRevisionRecord {
+  readonly id: string;
+  readonly documentId: string;
+  readonly userId: string;
+  readonly bodyText: string;
+  readonly changedText: string;
+  readonly diffSummary: string;
+  readonly createdAt: string;
+}
+
+export interface UpsertJournalDocumentResult {
+  readonly document: JournalDocumentRecord;
+  readonly revision: JournalRevisionRecord;
 }
 
 export interface DbService {
@@ -201,6 +234,10 @@ export interface DbService {
   readonly getLatestSynthesis: (
     input: GetLatestSynthesisInput,
   ) => Effect.Effect<SynthesisRecord | null>;
+  readonly getJournalDocument: (input: {
+    readonly userId: string;
+    readonly localDate: string;
+  }) => Effect.Effect<JournalDocumentRecord | null>;
   readonly getProposal: (input: GetProposalInput) => Effect.Effect<ProposalRecord | null>;
   readonly getReviewForProposal: (
     input: GetReviewForProposalInput,
@@ -215,8 +252,16 @@ export interface DbService {
     input: ListCommitmentsInput,
   ) => Effect.Effect<ReadonlyArray<CommitmentRecord>>;
   readonly listOutcomes: (input: ListOutcomesInput) => Effect.Effect<ReadonlyArray<OutcomeRecord>>;
+  readonly listJournalRevisions: (input: {
+    readonly userId: string;
+    readonly documentId: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<JournalRevisionRecord>>;
   readonly recordOutcome: (input: RecordOutcomeInput) => Effect.Effect<OutcomeRecord>;
   readonly reviewProposal: (input: ReviewProposalInput) => Effect.Effect<ReviewRecord>;
+  readonly upsertJournalDocument: (
+    input: UpsertJournalDocumentInput,
+  ) => Effect.Effect<UpsertJournalDocumentResult>;
   readonly upsertCurrentFrame: (input: UpsertCurrentFrameInput) => Effect.Effect<FrameRecord>;
 }
 
@@ -333,6 +378,39 @@ const sameJson = (left: unknown, right: unknown) => JSON.stringify(left) === JSO
 
 const optionalJsonText = (value: unknown) => (value === undefined ? null : JSON.stringify(value));
 
+const changedTextFrom = (previous: string | null, next: string) => {
+  if (!previous) return next;
+  if (next.startsWith(previous)) return next.slice(previous.length).trim();
+  return next;
+};
+
+const diffSummaryFrom = (previous: string | null, next: string, changedText: string) => {
+  if (!previous) return "Created daily journal document.";
+  if (changedText.length === 0) return "Saved without text changes.";
+  return "Updated daily journal document.";
+};
+
+const toJournalDocumentRecord = (row: typeof journalDocuments.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  localDate: row.localDate,
+  title: row.title,
+  bodyText: row.bodyText,
+  ...(row.bodyDocument !== null ? { bodyDocument: row.bodyDocument } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toJournalRevisionRecord = (row: typeof journalRevisions.$inferSelect) => ({
+  id: row.id,
+  documentId: row.documentId,
+  userId: row.userId,
+  bodyText: row.bodyText,
+  changedText: row.changedText,
+  diffSummary: row.diffSummary,
+  createdAt: row.createdAt,
+});
+
 export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
@@ -342,6 +420,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
       const eventStore = new Map<string, EventRecord>();
       const outcomeStore = new Map<string, OutcomeRecord>();
       const frameStore = new Map<string, FrameRecord>();
+      const journalDocumentStore = new Map<string, JournalDocumentRecord>();
+      const journalRevisionStore = new Map<string, JournalRevisionRecord>();
       const proposalStore = new Map<string, ProposalRecord>();
       const reviewStore = new Map<string, ReviewRecord>();
       const synthesisStore = new Map<string, SynthesisRecord>();
@@ -355,6 +435,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               eventStore,
               outcomeStore,
               frameStore,
+              journalDocumentStore,
+              journalRevisionStore,
               proposalStore,
               reviewStore,
               synthesisStore,
@@ -377,6 +459,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             ),
             events: [...eventStore.values()].filter((record) => record.userId === user.id),
             frames: [...frameStore.values()].filter((record) => record.userId === user.id),
+            journalDocuments: [...journalDocumentStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
+            journalRevisions: [...journalRevisionStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
             outcomes: [...outcomeStore.values()].filter((record) => record.userId === user.id),
             proposals: [...proposalStore.values()].filter((record) => record.userId === user.id),
             reviews: [...reviewStore.values()].filter((record) => record.userId === user.id),
@@ -473,6 +561,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 )[0] ?? null
             );
           }),
+        getJournalDocument: (input) =>
+          Effect.sync(() => journalDocumentStore.get(`${input.userId}:${input.localDate}`) ?? null),
         getProposal: (input) =>
           Effect.sync(() => {
             const proposal = proposalStore.get(input.proposalId);
@@ -521,6 +611,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             return [...outcomeStore.values()]
               .filter((outcome) => outcome.userId === input.userId)
               .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+              .slice(0, input.limit);
+          }),
+        listJournalRevisions: (input) =>
+          Effect.sync(() => {
+            return [...journalRevisionStore.values()]
+              .filter(
+                (revision) =>
+                  revision.userId === input.userId && revision.documentId === input.documentId,
+              )
+              .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
               .slice(0, input.limit);
           }),
         recordOutcome: (input) =>
@@ -611,6 +711,32 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             frameStore.set(key, record);
             return record;
           }),
+        upsertJournalDocument: (input) =>
+          Effect.sync(() => {
+            const key = `${input.userId}:${input.localDate}`;
+            const previous = journalDocumentStore.get(key) ?? null;
+            const timestamp = nowIso();
+            const changedText = changedTextFrom(previous?.bodyText ?? null, input.bodyText);
+            const document = {
+              ...input,
+              id: previous?.id ?? eventId(),
+              createdAt: previous?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            } satisfies JournalDocumentRecord;
+            const revision = {
+              id: eventId(),
+              documentId: document.id,
+              userId: input.userId,
+              bodyText: input.bodyText,
+              changedText,
+              diffSummary: diffSummaryFrom(previous?.bodyText ?? null, input.bodyText, changedText),
+              createdAt: timestamp,
+            } satisfies JournalRevisionRecord;
+
+            journalDocumentStore.set(key, document);
+            journalRevisionStore.set(revision.id, revision);
+            return { document, revision };
+          }),
       });
     }),
   );
@@ -638,6 +764,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 database.prepare("DELETE FROM syntheses WHERE user_id = ?").bind(input.userId),
                 database.prepare("DELETE FROM frames WHERE user_id = ?").bind(input.userId),
                 database.prepare("DELETE FROM events WHERE user_id = ?").bind(input.userId),
+                database
+                  .prepare("DELETE FROM journal_revisions WHERE user_id = ?")
+                  .bind(input.userId),
+                database
+                  .prepare("DELETE FROM journal_documents WHERE user_id = ?")
+                  .bind(input.userId),
                 database.prepare("DELETE FROM users WHERE id = ?").bind(input.userId),
               ]);
             }),
@@ -667,6 +799,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 reviewRows,
                 commitmentRows,
                 outcomeRows,
+                journalDocumentRows,
+                journalRevisionRows,
               ] = await Promise.all([
                 db.select().from(events).where(eq(events.userId, user.id)),
                 db.select().from(frames).where(eq(frames.userId, user.id)),
@@ -675,6 +809,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 db.select().from(reviews).where(eq(reviews.userId, user.id)),
                 db.select().from(commitments).where(eq(commitments.userId, user.id)),
                 db.select().from(outcomes).where(eq(outcomes.userId, user.id)),
+                db.select().from(journalDocuments).where(eq(journalDocuments.userId, user.id)),
+                db.select().from(journalRevisions).where(eq(journalRevisions.userId, user.id)),
               ]);
               const synthesisRecords = await Promise.all(
                 synthesisRows.map(async (row) => {
@@ -701,6 +837,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 commitments: commitmentRows.map(toCommitmentRecord),
                 events: eventRows.map(toEventRecord),
                 frames: frameRows.map(toFrameRecord),
+                journalDocuments: journalDocumentRows.map(toJournalDocumentRecord),
+                journalRevisions: journalRevisionRows.map(toJournalRevisionRecord),
                 outcomes: outcomeRows.map(toOutcomeRecord),
                 proposals: proposalRows.map(toProposalRecord),
                 reviews: reviewRows.map(toReviewRecord),
@@ -1015,6 +1153,21 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 createdAt: row.createdAt,
               };
             }),
+          getJournalDocument: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(journalDocuments)
+                .where(
+                  and(
+                    eq(journalDocuments.userId, input.userId),
+                    eq(journalDocuments.localDate, input.localDate),
+                  ),
+                )
+                .get();
+
+              return row ? toJournalDocumentRecord(row) : null;
+            }),
           getProposal: (input) =>
             Effect.promise(async () => {
               const row = await db
@@ -1114,6 +1267,22 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 .limit(input.limit);
 
               return rows.map(toOutcomeRecord);
+            }),
+          listJournalRevisions: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(journalRevisions)
+                .where(
+                  and(
+                    eq(journalRevisions.userId, input.userId),
+                    eq(journalRevisions.documentId, input.documentId),
+                  ),
+                )
+                .orderBy(desc(journalRevisions.createdAt))
+                .limit(input.limit);
+
+              return rows.map(toJournalRevisionRecord);
             }),
           recordOutcome: (input) =>
             Effect.promise(async () => {
@@ -1356,6 +1525,65 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 });
 
               return record;
+            }),
+          upsertJournalDocument: (input) =>
+            Effect.promise(async () => {
+              const previous = await db
+                .select()
+                .from(journalDocuments)
+                .where(
+                  and(
+                    eq(journalDocuments.userId, input.userId),
+                    eq(journalDocuments.localDate, input.localDate),
+                  ),
+                )
+                .get();
+              const timestamp = nowIso();
+              const changedText = changedTextFrom(previous?.bodyText ?? null, input.bodyText);
+              const document = {
+                ...input,
+                id: previous?.id ?? eventId(),
+                createdAt: previous?.createdAt ?? timestamp,
+                updatedAt: timestamp,
+              } satisfies JournalDocumentRecord;
+              const revision = {
+                id: eventId(),
+                documentId: document.id,
+                userId: input.userId,
+                bodyText: input.bodyText,
+                changedText,
+                diffSummary: diffSummaryFrom(
+                  previous?.bodyText ?? null,
+                  input.bodyText,
+                  changedText,
+                ),
+                createdAt: timestamp,
+              } satisfies JournalRevisionRecord;
+
+              await db
+                .insert(journalDocuments)
+                .values({
+                  id: document.id,
+                  userId: document.userId,
+                  localDate: document.localDate,
+                  title: document.title,
+                  bodyText: document.bodyText,
+                  bodyDocument: document.bodyDocument ?? null,
+                  createdAt: document.createdAt,
+                  updatedAt: document.updatedAt,
+                })
+                .onConflictDoUpdate({
+                  target: [journalDocuments.userId, journalDocuments.localDate],
+                  set: {
+                    title: document.title,
+                    bodyText: document.bodyText,
+                    bodyDocument: document.bodyDocument ?? null,
+                    updatedAt: document.updatedAt,
+                  },
+                });
+              await db.insert(journalRevisions).values(revision);
+
+              return { document, revision };
             }),
         });
       }),

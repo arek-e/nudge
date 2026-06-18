@@ -61,6 +61,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     if (url.pathname === "/messages" && request.method === "POST") {
       return this.reply(request);
     }
+    if (url.pathname === "/journal/interpret" && request.method === "POST") {
+      return this.interpretJournal(request);
+    }
 
     return Response.json({
       ok: true,
@@ -171,6 +174,39 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
     });
+  }
+
+  private async interpretJournal(request: Request) {
+    const user = this.resolveUser(request);
+    const body = (await request.json()) as {
+      readonly changedText?: string;
+      readonly documentId?: string;
+      readonly localDate?: string;
+      readonly revisionId?: string;
+    };
+    const changedText = String(body.changedText ?? "").trim();
+    if (changedText.length > 0) {
+      const intake = await this.subAgent(LoopIntakeAgent, "journal-current-state");
+      await intake.draftFromMessage({
+        conversationId: `journal:${body.localDate ?? "today"}`,
+        message: changedText,
+        user,
+      });
+    }
+    const timestamp = new Date().toISOString();
+    const previous = this.state ?? initialUserAgentSessionState;
+    this.setState({
+      conversationId: "journal",
+      createdAt: previous.createdAt ?? timestamp,
+      recentToolEvents: [
+        { at: timestamp, resultCount: changedText.length > 0 ? 1 : 0, tool: "reply" as const },
+        ...previous.recentToolEvents,
+      ].slice(0, 20),
+      updatedAt: timestamp,
+      userId: user.id,
+    });
+
+    return Response.json({ accepted: true });
   }
 }
 

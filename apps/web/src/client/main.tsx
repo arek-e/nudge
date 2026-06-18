@@ -12,6 +12,7 @@ import {
   type FormEvent,
   StrictMode,
   useContext,
+  useEffect,
   useState,
   useTransition,
 } from "react";
@@ -71,6 +72,8 @@ const bodyFromEditorText = (text: string) => {
   const body = rest.join("\n").trim();
   return body || text.trim();
 };
+
+const todayLocalDate = () => new Date().toISOString().slice(0, 10);
 
 interface AgentDraftCardState {
   readonly body: string;
@@ -407,6 +410,13 @@ function SettingsScreen() {
 
 function TodayScreen() {
   const capture = useCapture();
+  const localDate = todayLocalDate();
+  const journal = useQuery({
+    queryKey: ["journal", localDate],
+    queryFn: async () => apiClient.journal.get({ localDate }),
+  });
+  const [journalBody, setJournalBody] = useState("");
+  const [journalLoadedId, setJournalLoadedId] = useState<string | null>(null);
   const [agentMessage, setAgentMessage] = useState(
     "Follow up with Maya about the travel plan before lunch.",
   );
@@ -422,6 +432,12 @@ function TodayScreen() {
   const proposals = usePendingProposals();
   const commitments = useActiveCommitments();
   const outcomes = useRecentOutcomes();
+  useEffect(() => {
+    if (journal.data?.document && journalLoadedId !== journal.data.document.id) {
+      setJournalLoadedId(journal.data.document.id);
+      setJournalBody(journal.data.document.bodyText);
+    }
+  }, [journal.data?.document, journalLoadedId]);
   const generateSynthesis = useMutation({
     mutationFn: async () => {
       await apiClient.syntheses.create({ frameKey: "current_state" });
@@ -500,6 +516,21 @@ function TodayScreen() {
       await queryClient.invalidateQueries({ queryKey: ["proposals"] });
     },
   });
+  const saveJournal = useMutation({
+    mutationFn: async () => {
+      return apiClient.journal.save({
+        bodyText: journalBody,
+        localDate,
+        title: localDate,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
+      await queryClient.invalidateQueries({ queryKey: ["events"] });
+      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+  });
   const nextAction = deriveTodayNextAction({
     activeCommitmentCount: commitments.data?.commitments.length ?? 0,
     hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
@@ -536,6 +567,40 @@ function TodayScreen() {
         nextAction={nextAction}
         onOpenLoop={openNextAction}
       />
+
+      <Surface id="journal-title" eyebrow="Daily note" title="Journal" primary>
+        <p className="summary">
+          Write freely. Lares interprets changes in the background and turns open loops into
+          reviewable action points.
+        </p>
+        <form
+          className="mt-4 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveJournal.mutate();
+          }}
+        >
+          <textarea
+            aria-label="Daily journal"
+            className="min-h-40 resize-y rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base leading-7 text-white outline-none focus:border-white/35"
+            placeholder="need to write to michael..."
+            value={journalBody}
+            onChange={(event) => setJournalBody(event.currentTarget.value)}
+          />
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            disabled={saveJournal.isPending || journalBody.trim().length === 0}
+            type="submit"
+          >
+            {saveJournal.isPending ? "Saving..." : "Save journal"}
+          </button>
+          {saveJournal.isSuccess ? (
+            <p className="m-0 text-sm text-neutral-400" role="status">
+              Saved. Lares will review the changed text.
+            </p>
+          ) : null}
+        </form>
+      </Surface>
 
       <Surface id="agent-title" eyebrow="Agent" title="Tell Lares" primary>
         <p className="summary">

@@ -103,6 +103,27 @@ export const outcomeRecordSchema = z.object({
   createdAt: z.string(),
 });
 
+export const journalDocumentSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  localDate: z.string(),
+  title: z.string(),
+  bodyText: z.string(),
+  bodyDocument: z.unknown().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const journalRevisionSchema = z.object({
+  id: z.string(),
+  documentId: z.string(),
+  userId: z.string(),
+  bodyText: z.string(),
+  changedText: z.string(),
+  diffSummary: z.string(),
+  createdAt: z.string(),
+});
+
 export const traceSpanSummarySchema = z.object({
   id: z.string(),
   traceId: z.string(),
@@ -175,6 +196,8 @@ export const dataExportResponseSchema = z.object({
   commitments: z.array(commitmentRecordSchema),
   events: z.array(eventRecordSchema),
   frames: z.array(frameRecordSchema),
+  journalDocuments: z.array(journalDocumentSchema),
+  journalRevisions: z.array(journalRevisionSchema),
   outcomes: z.array(outcomeRecordSchema),
   proposals: z.array(proposalRecordSchema),
   reviews: z.array(reviewRecordSchema),
@@ -199,6 +222,15 @@ const outcomeInputSchema = z.object({
   commitmentId: z.string(),
   result: z.enum(["completed", "abandoned"]),
   note: z.string().optional(),
+});
+const journalInputSchema = z.object({
+  bodyDocument: z.unknown().optional(),
+  bodyText: z.string().max(100_000),
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  title: z.string().min(1).max(200),
+});
+const journalGetInputSchema = z.object({
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 const outcomesInputSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -252,6 +284,16 @@ export const apiContract = {
       .route({ method: "GET", path: "/events" })
       .input(eventListInputSchema)
       .output(z.object({ events: z.array(eventRecordSchema) })),
+  },
+  journal: {
+    get: oc
+      .route({ method: "GET", path: "/journal/{localDate}" })
+      .input(journalGetInputSchema)
+      .output(z.object({ document: journalDocumentSchema.nullable() })),
+    save: oc
+      .route({ method: "POST", path: "/journal" })
+      .input(journalInputSchema)
+      .output(z.object({ document: journalDocumentSchema, revision: journalRevisionSchema })),
   },
   signals: {
     list: oc

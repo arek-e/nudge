@@ -1,8 +1,8 @@
-import type { z } from "zod";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
+import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
@@ -129,6 +129,8 @@ export const apiRouter = api.router({
       commitments: [...exported.commitments],
       events: [...exported.events],
       frames: [...exported.frames],
+      journalDocuments: [...exported.journalDocuments],
+      journalRevisions: [...exported.journalRevisions],
       outcomes: [...exported.outcomes],
       proposals: [...exported.proposals],
       reviews: [...exported.reviews],
@@ -167,6 +169,44 @@ export const apiRouter = api.router({
       );
 
       return { events: [...events] };
+    }),
+  },
+  journal: {
+    get: api.journal.get.handler(async ({ context, input }) => {
+      const document = await Effect.runPromise(
+        context.db.getJournalDocument({ localDate: input.localDate, userId: context.user.id }),
+      );
+      return { document };
+    }),
+    save: api.journal.save.handler(async ({ context, input }) => {
+      const result = await Effect.runPromise(
+        context.db.upsertJournalDocument({
+          bodyText: input.bodyText,
+          ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+          localDate: input.localDate,
+          title: input.title,
+          userId: context.user.id,
+        }),
+      );
+      if (result.revision.changedText.trim().length > 0) {
+        await proxyConversationRequest(
+          context.agentSessions,
+          context.user,
+          "journal",
+          "/journal/interpret",
+          z.object({ accepted: z.literal(true) }),
+          {
+            body: JSON.stringify({
+              changedText: result.revision.changedText,
+              documentId: result.document.id,
+              localDate: result.document.localDate,
+              revisionId: result.revision.id,
+            }),
+            method: "POST",
+          },
+        );
+      }
+      return result;
     }),
   },
   signals: {

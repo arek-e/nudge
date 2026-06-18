@@ -260,6 +260,47 @@ export const outcomes = sqliteTable(
   ],
 );
 
+export const journalDocuments = sqliteTable(
+  "journal_documents",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    localDate: text("local_date").notNull(),
+    title: text("title").notNull(),
+    bodyText: text("body_text").notNull(),
+    bodyDocument: text("body_document", { mode: "json" }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("journal_documents_user_date_idx").on(table.userId, table.localDate),
+    index("journal_documents_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const journalRevisions = sqliteTable(
+  "journal_revisions",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => journalDocuments.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    bodyText: text("body_text").notNull(),
+    changedText: text("changed_text").notNull(),
+    diffSummary: text("diff_summary").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("journal_revisions_document_created_idx").on(table.documentId, table.createdAt),
+    index("journal_revisions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
 export const traceSpans = sqliteTable(
   "trace_spans",
   {
@@ -299,6 +340,8 @@ export const schema = {
   authVerifications,
   commitments,
   events,
+  journalDocuments,
+  journalRevisions,
   outcomes,
   frames,
   proposals,
