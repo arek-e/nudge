@@ -120,7 +120,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private reserveMemoryRetrieval(previous: UserAgentSessionState, now: Date) {
     const windowStart = now.getTime() - 60_000;
-    const recent = previous.recentMemoryRetrievalsAt.filter(
+    const recent = (previous.recentMemoryRetrievalsAt ?? []).filter(
       (timestamp) => Date.parse(timestamp) >= windowStart,
     );
     if (recent.length >= 30) return null;
@@ -171,7 +171,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
-      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt,
+      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         { at: timestamp, resultCount: signals.length, tool: "listRecentSignals" as const },
         ...previous.recentToolEvents,
@@ -268,7 +268,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
-      recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt,
+      recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         { at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" as const },
         { at: timestamp, resultCount: memoryResults.length, tool: "retrieveMemory" as const },
@@ -318,7 +318,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId: "journal",
       createdAt: previous.createdAt ?? timestamp,
-      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt,
+      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         { at: timestamp, resultCount: changedText.length > 0 ? 1 : 0, tool: "reply" as const },
         ...previous.recentToolEvents,
