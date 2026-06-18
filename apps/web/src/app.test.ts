@@ -507,8 +507,12 @@ describe("web app", () => {
 
   test("GET /api/conversations/:conversationId/tools/list-recent-signals forwards to the agent session", async () => {
     const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
     const agentNamespace = {
-      idFromName: (name: string) => ({ name }),
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
       get: () => ({
         fetch: async (request: Request) => {
           forwardedRequests.push(request);
@@ -549,6 +553,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
+    expect(agentNames).toEqual(["dev-user:focus"]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
     expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
@@ -576,8 +581,12 @@ describe("web app", () => {
 
   test("GET /api/conversations/:conversationId returns conversation metadata", async () => {
     const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
     const agentNamespace = {
-      idFromName: (name: string) => ({ name }),
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
       get: () => ({
         fetch: async (request: Request) => {
           forwardedRequests.push(request);
@@ -602,6 +611,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
+    expect(agentNames).toEqual(["dev-user:focus"]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
     expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
@@ -611,6 +621,54 @@ describe("web app", () => {
       updatedAt: null,
       recentToolEvents: [],
       tools: ["listRecentSignals"],
+    });
+  });
+
+  test("POST /api/conversations/:conversationId/messages forwards user-scoped messages to the agent", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "What should I do next?" });
+          return Response.json({
+            conversationId: "focus",
+            message: "What should I do next?",
+            reply: "I found 2 recent signals. Start by capturing the current state.",
+            usedTools: ["listRecentSignals"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp();
+
+    const response = await app.request(
+      "/api/conversations/focus/messages",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "What should I do next?" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
+    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-lares-user-display-name")).toBe("Dev User");
+    expect(await response.json()).toEqual({
+      conversationId: "focus",
+      message: "What should I do next?",
+      reply: "I found 2 recent signals. Start by capturing the current state.",
+      usedTools: ["listRecentSignals"],
     });
   });
 

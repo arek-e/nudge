@@ -121,7 +121,7 @@ export const traceSpanSummarySchema = z.object({
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
-  tool: z.literal("listRecentSignals"),
+  tool: z.enum(["listRecentSignals", "reply"]),
 });
 
 export const conversationMetadataSchema = z.object({
@@ -137,6 +137,17 @@ export const listRecentSignalsToolResponseSchema = z.object({
   conversationId: z.string(),
   tool: z.literal("listRecentSignals"),
   signals: z.array(eventRecordSchema),
+});
+
+export const conversationMessageInputSchema = z.object({
+  message: z.string().min(1).max(4_000),
+});
+
+export const conversationMessageResponseSchema = z.object({
+  conversationId: z.string(),
+  message: z.string(),
+  reply: z.string(),
+  usedTools: z.array(z.literal("listRecentSignals")),
 });
 
 export const sessionResponseSchema = z.object({
@@ -184,6 +195,9 @@ const conversationInputSchema = z.object({
 const conversationSignalsInputSchema = conversationInputSchema.extend({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
+const conversationMessageRouteInputSchema = conversationInputSchema.extend(
+  conversationMessageInputSchema.shape,
+);
 
 export const apiContract = {
   account: {
@@ -203,6 +217,10 @@ export const apiContract = {
       })
       .input(conversationSignalsInputSchema)
       .output(listRecentSignalsToolResponseSchema),
+    sendMessage: oc
+      .route({ method: "POST", path: "/conversations/{conversationId}/messages" })
+      .input(conversationMessageRouteInputSchema)
+      .output(conversationMessageResponseSchema),
   },
   captures: {
     append: oc

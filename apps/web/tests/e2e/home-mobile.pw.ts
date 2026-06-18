@@ -48,6 +48,10 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.getByRole("button", { name: "Save capture" }).tap();
   await expect(page.getByRole("status")).toContainText("Saved");
 
+  await expect(page.getByRole("heading", { name: "Ask Lares" })).toBeVisible();
+  await page.getByRole("button", { name: "Ask Lares" }).tap();
+  await expect(page.getByText(/I found \d+ recent signal/)).toBeVisible();
+
   await page.getByRole("button", { name: "Generate synthesis" }).tap();
   await expect(page.getByText(/signal[s]? captured/i)).toBeVisible();
 

@@ -22,7 +22,7 @@ interface UserAgentSessionState {
   readonly recentToolEvents: ReadonlyArray<{
     readonly at: string;
     readonly resultCount: number;
-    readonly tool: "listRecentSignals";
+    readonly tool: "listRecentSignals" | "reply";
   }>;
   readonly updatedAt: string | null;
   readonly userId: string;
@@ -47,6 +47,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     if (url.pathname === "/tools/list-recent-signals") {
       return this.listRecentSignals(request, url);
     }
+    if (url.pathname === "/messages" && request.method === "POST") {
+      return this.reply(request);
+    }
 
     return Response.json({
       ok: true,
@@ -54,6 +57,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       session: this.state,
       tools: ["listRecentSignals"],
     });
+  }
+
+  private resolveUser(request: Request) {
+    return {
+      displayName: request.headers.get("x-lares-user-display-name") ?? "Lares User",
+      id: request.headers.get("x-lares-user-id") ?? "dev-user",
+    };
   }
 
   private metadata(request: Request) {
@@ -72,11 +82,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private async listRecentSignals(request: Request, url: URL) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const user = this.resolveUser(request);
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 50);
     const signals = await Effect.runPromise(
       Effect.provide(
         PrimitiveWorkflows.listSignals({
-          user: { id: "dev-user", displayName: "Dev User" },
+          user,
           limit,
         }),
         Db.layerD1(this.env.DB),
@@ -93,7 +104,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
-      userId: "dev-user",
+      userId: user.id,
     });
 
     return Response.json({
@@ -109,6 +120,47 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         payload: signal.payload,
         createdAt: signal.createdAt,
       })),
+    });
+  }
+
+  private async reply(request: Request) {
+    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const user = this.resolveUser(request);
+    const body = (await request.json()) as { readonly message?: string };
+    const message = String(body.message ?? "").trim();
+    const signals = await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.listSignals({
+          user,
+          limit: 5,
+        }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    const timestamp = new Date().toISOString();
+    const previous = this.state ?? initialUserAgentSessionState;
+
+    this.setState({
+      conversationId,
+      createdAt: previous.createdAt ?? timestamp,
+      recentToolEvents: [
+        { at: timestamp, resultCount: signals.length, tool: "reply" as const },
+        ...previous.recentToolEvents,
+      ].slice(0, 20),
+      updatedAt: timestamp,
+      userId: user.id,
+    });
+
+    const nextStep =
+      signals.length === 0
+        ? "Start by capturing one concrete signal from what is on your mind."
+        : "Start by reviewing the newest signal, then choose one next commitment.";
+
+    return Response.json({
+      conversationId,
+      message,
+      reply: `I found ${signals.length} recent signal${signals.length === 1 ? "" : "s"}. ${nextStep}`,
+      usedTools: ["listRecentSignals"],
     });
   }
 }

@@ -399,6 +399,8 @@ function SettingsScreen() {
 
 function TodayScreen() {
   const capture = useCapture();
+  const [agentMessage, setAgentMessage] = useState("What should I do next?");
+  const [agentReply, setAgentReply] = useState("");
   const [proposalEditor, setProposalEditor] = useState<{
     readonly proposalId: string;
     readonly body: string;
@@ -455,6 +457,16 @@ function TodayScreen() {
       await queryClient.invalidateQueries({ queryKey: ["commitments"] });
     },
   });
+  const askAgent = useMutation({
+    mutationFn: async () => {
+      return apiClient.conversations.sendMessage({
+        conversationId: "today",
+        message: agentMessage,
+      });
+    },
+    onError: () => setAgentReply("Lares could not answer yet. Try again in a moment."),
+    onSuccess: (response) => setAgentReply(response.reply),
+  });
   const nextAction = deriveTodayNextAction({
     activeCommitmentCount: commitments.data?.commitments.length ?? 0,
     hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
@@ -491,6 +503,40 @@ function TodayScreen() {
         nextAction={nextAction}
         onOpenLoop={openNextAction}
       />
+
+      <Surface id="agent-title" eyebrow="Agent" title="Ask Lares" primary>
+        <p className="summary">
+          Lares can inspect your recent signals and suggest the next safe, reviewable step.
+        </p>
+        <form
+          className="mt-4 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            askAgent.mutate();
+          }}
+        >
+          <label className="grid gap-2 text-sm font-medium text-neutral-200">
+            Message
+            <textarea
+              className="min-h-24 resize-none rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+              value={agentMessage}
+              onChange={(event) => setAgentMessage(event.currentTarget.value)}
+            />
+          </label>
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            disabled={askAgent.isPending || agentMessage.trim().length === 0}
+            type="submit"
+          >
+            {askAgent.isPending ? "Asking..." : "Ask Lares"}
+          </button>
+        </form>
+        {agentReply ? (
+          <div className="mt-4 rounded-2xl bg-black/20 p-4 text-sm leading-6 text-neutral-200">
+            {agentReply}
+          </div>
+        ) : null}
+      </Surface>
 
       <Surface id="today-title" eyebrow="Today" title="Start with the current state">
         <p className="summary">

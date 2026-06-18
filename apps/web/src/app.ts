@@ -10,6 +10,7 @@ import { AuthService, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
 import {
   apiContract,
+  conversationMessageResponseSchema,
   conversationMetadataSchema,
   listRecentSignalsToolResponseSchema,
 } from "./api-contract";
@@ -74,6 +75,7 @@ export const apiRouter = api.router({
     get: api.conversations.get.handler(async ({ context, input }) => {
       return proxyConversationRequest(
         context.agentSessions,
+        context.user,
         input.conversationId,
         "/metadata",
         conversationMetadataSchema,
@@ -84,9 +86,23 @@ export const apiRouter = api.router({
       url.searchParams.set("limit", String(input.limit ?? 10));
       return proxyConversationRequest(
         context.agentSessions,
+        context.user,
         input.conversationId,
         url,
         listRecentSignalsToolResponseSchema,
+      );
+    }),
+    sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.user,
+        input.conversationId,
+        "/messages",
+        conversationMessageResponseSchema,
+        {
+          body: JSON.stringify({ message: input.message }),
+          method: "POST",
+        },
       );
     }),
   },
@@ -296,20 +312,27 @@ export const apiRouter = api.router({
 
 async function proxyConversationRequest<Schema extends z.ZodType>(
   agentSessions: DurableObjectNamespace,
+  user: { readonly id: string; readonly displayName: string },
   conversationId: string,
   pathOrUrl: string | URL,
   schema: Schema,
+  init: { readonly body?: BodyInit; readonly method?: string } = {},
 ): Promise<z.infer<Schema>> {
-  const agentId = agentSessions.idFromName(conversationId);
+  const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
   const agent = agentSessions.get(agentId);
   const url =
     typeof pathOrUrl === "string" ? new URL(`https://lares.local${pathOrUrl}`) : pathOrUrl;
-  const response = await agent.fetch(
-    new Request(url, {
-      headers: { "x-lares-conversation-id": conversationId },
-      method: "GET",
-    }),
-  );
+  const requestInit = {
+    headers: {
+      "content-type": "application/json",
+      "x-lares-conversation-id": conversationId,
+      "x-lares-user-display-name": user.displayName,
+      "x-lares-user-id": user.id,
+    },
+    method: init.method ?? "GET",
+    ...(init.body !== undefined ? { body: init.body } : {}),
+  } satisfies RequestInit;
+  const response = await agent.fetch(new Request(url.toString(), requestInit));
 
   if (!response.ok) {
     throw new Error(`Conversation agent request failed with ${response.status}`);
