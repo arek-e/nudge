@@ -12,7 +12,6 @@ import {
   createContext,
   type FormEvent,
   StrictMode,
-  useContext,
   useEffect,
   useState,
   useTransition,
@@ -21,26 +20,14 @@ import { createRoot } from "react-dom/client";
 import {
   AddActionSheet,
   BottomNav,
-  buildLoopFunnelData,
-  buildOutcomeTrendData,
   buildSignalCalendarData,
-  CheckInForm,
-  CommitmentPanel,
   deriveJourneyDayGroups,
-  deriveLoopInsights,
-  deriveTodayNextAction,
   HomeDashboard,
-  InsightsPanel,
   JourneyTimeline,
   LaresAppShell,
-  LoopFunnelChart,
-  OutcomePanel,
-  OutcomeTrendChart,
   plainTextToRichTextDocument,
-  ProposalReviewPanel,
   type RichTextDocument,
   Surface,
-  SynthesisPanel,
   WritingDrawer,
 } from "@lares/ui";
 import { apiClient } from "./api-client";
@@ -57,37 +44,7 @@ interface CaptureContextValue {
 
 const CaptureContext = createContext<CaptureContextValue | null>(null);
 
-function useCapture() {
-  const context = useContext(CaptureContext);
-  if (!context) throw new Error("useCapture must be used inside AppShell");
-  return context;
-}
-
-const titleFromEditorText = (text: string, fallback: string) => {
-  return (
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) ?? fallback
-  );
-};
-
-const bodyFromEditorText = (text: string) => {
-  const lines = text.split("\n");
-  const [, ...rest] = lines;
-  const body = rest.join("\n").trim();
-  return body || text.trim();
-};
-
 const todayLocalDate = () => new Date().toISOString().slice(0, 10);
-
-interface AgentDraftCardState {
-  readonly body: string;
-  readonly confidence: number;
-  readonly proposalId: string;
-  readonly signalNote: string;
-  readonly title: string;
-}
 
 const noteTextFromPayload = (payload: unknown) => {
   if (payload && typeof payload === "object" && "note" in payload) {
@@ -110,10 +67,10 @@ const eventsRoute = createRoute({
   path: "/journey",
   component: JourneyScreen,
 });
-const loopRoute = createRoute({
+const actionsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/loop",
-  component: LoopScreen,
+  path: "/actions",
+  component: ActionsScreen,
 });
 const insightsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -130,7 +87,7 @@ const router = createRouter({
   routeTree: rootRoute.addChildren([
     indexRoute,
     eventsRoute,
-    loopRoute,
+    actionsRoute,
     insightsRoute,
     settingsRoute,
   ]),
@@ -231,7 +188,7 @@ function AppShell() {
       {addOpen || captureOpen ? null : (
         <BottomNav
           active={
-            pathname === "/loop"
+            pathname === "/actions"
               ? "loop"
               : pathname === "/journey"
                 ? "journey"
@@ -325,300 +282,85 @@ function LoginScreen() {
   );
 }
 
-function LoopScreen() {
-  const capture = useCapture();
-  const events = useEvents();
-  const latestSynthesis = useLatestSynthesis();
-  const proposals = usePendingProposals();
-  const commitments = useActiveCommitments();
-  const outcomes = useRecentOutcomes();
-  const [agentMessage, setAgentMessage] = useState(
-    "Follow up with Maya about the travel plan before lunch.",
-  );
-  const [agentDraft, setAgentDraft] = useState<AgentDraftCardState | null>(null);
-  const [agentReply, setAgentReply] = useState("");
-  const [proposalEditor, setProposalEditor] = useState<{
-    readonly proposalId: string;
-    readonly body: string;
-    readonly bodyDocument: RichTextDocument;
-  } | null>(null);
-  const nextAction = deriveTodayNextAction({
-    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
-    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
-    pendingProposalCount: proposals.data?.proposals.length ?? 0,
-    signalCount: events.data?.events.length ?? 0,
-  });
-  const funnelData = buildLoopFunnelData({
-    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
-    closedOutcomeCount: outcomes.data?.outcomes.length ?? 0,
-    pendingProposalCount: proposals.data?.proposals.length ?? 0,
-    signalCount: events.data?.events.length ?? 0,
-    synthesisCount: latestSynthesis.data?.synthesis ? 1 : 0,
-  });
-  const generateSynthesis = useMutation({
-    mutationFn: async () => {
-      await apiClient.syntheses.create({ frameKey: "current_state" });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
-    },
-  });
-  const generateProposals = useMutation({
-    mutationFn: async () => {
-      await apiClient.proposals.generate({ frameKey: "current_state" });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
-      await queryClient.invalidateQueries({ queryKey: ["commitments"] });
-    },
-  });
-  const recordOutcome = useMutation({
-    mutationFn: async (commitmentId: string) => {
-      await apiClient.outcomes.create({
-        commitmentId,
-        result: "completed",
-        note: `Marked complete from the Loop view at ${new Date().toISOString()}.`,
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["commitments"] });
-      await queryClient.invalidateQueries({ queryKey: ["outcomes"] });
-    },
-  });
-  const reviewProposal = useMutation({
+function ActionsScreen() {
+  const actions = useActions();
+  const summaries = useSummaries();
+  const updateStatus = useMutation({
     mutationFn: async (input: {
-      readonly proposalId: string;
-      readonly decision: "accepted" | "edited" | "rejected";
-      readonly editedTitle?: string;
-      readonly editedBody?: string;
-      readonly editedBodyDocument?: unknown;
+      readonly itemId: string;
+      readonly status: "accepted" | "dismissed" | "completed";
     }) => {
-      await apiClient.reviews.create(input);
+      await apiClient.actions.updateStatus(input);
     },
     onSuccess: async () => {
-      setProposalEditor(null);
-      setAgentDraft(null);
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
-      await queryClient.invalidateQueries({ queryKey: ["commitments"] });
+      await queryClient.invalidateQueries({ queryKey: ["actions"] });
     },
   });
-  const askAgent = useMutation({
-    mutationFn: async () => {
-      return apiClient.conversations.sendMessage({
-        conversationId: "loop",
-        message: agentMessage,
-      });
-    },
-    onError: () => setAgentReply("Lares could not answer yet. Try again in a moment."),
-    onSuccess: async (response) => {
-      setAgentReply(response.reply);
-      setAgentDraft(
-        response.draft
-          ? {
-              body: response.draft.proposal.body,
-              confidence: response.draft.confidence,
-              proposalId: response.draft.proposal.id,
-              signalNote:
-                typeof response.draft.signal.payload === "object" &&
-                response.draft.signal.payload !== null &&
-                "note" in response.draft.signal.payload
-                  ? String(response.draft.signal.payload.note)
-                  : response.message,
-              title: response.draft.proposal.title,
-            }
-          : null,
-      );
-      await queryClient.invalidateQueries({ queryKey: ["events"] });
-      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
-    },
-  });
-  const activity = [
-    {
-      label: "Insights pulled out",
-      value: latestSynthesis.data?.synthesis ? "1 current synthesis" : "None yet",
-    },
-    {
-      label: "Actions to review",
-      value: `${proposals.data?.proposals.length ?? 0} proposal${(proposals.data?.proposals.length ?? 0) === 1 ? "" : "s"}`,
-    },
-    {
-      label: "Active commitments",
-      value: `${commitments.data?.commitments.length ?? 0} open`,
-    },
-  ];
 
   return (
     <LaresAppShell>
-      <Surface eyebrow="State" title="Loop">
-        <div className="mt-4">
-          <LoopFunnelChart data={funnelData} />
+      <Surface eyebrow="AI" title="Actions" primary>
+        <div className="mt-4 grid gap-3">
+          {(actions.data?.actions ?? []).length > 0 ? (
+            actions.data?.actions.map((action) => (
+              <article className="rounded-2xl bg-white/5 p-4" key={action.id}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                      {action.kind} · {action.status}
+                    </p>
+                    <h2 className="mt-1 mb-0 text-base font-semibold text-white">{action.title}</h2>
+                    <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{action.body}</p>
+                  </div>
+                  <span className="text-xs text-neutral-500">
+                    {Math.round(action.confidence * 100)}%
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <button
+                    className="min-h-10 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
+                  >
+                    Done
+                  </button>
+                  <button
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <p className="m-0 text-sm text-neutral-400">No actions.</p>
+          )}
         </div>
       </Surface>
-      <Surface eyebrow="Next" title={nextAction.label} primary>
-        <div className="mt-4 rounded-2xl bg-white/5 p-4">
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
-            {nextAction.stage}
-          </p>
-          <strong className="mt-1 block text-base text-white">{nextAction.label}</strong>
-        </div>
-      </Surface>
-      <Surface id="agent-activity-title" eyebrow="Agent" title="Activity">
-        <div className="mt-4 grid gap-2">
-          {activity.map((item) => (
-            <div className="rounded-2xl bg-white/5 p-4" key={item.label}>
+      <Surface eyebrow="Summaries" title="Latest">
+        <div className="mt-4 grid gap-3">
+          {(summaries.data?.summaries ?? []).slice(0, 3).map((summary) => (
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
               <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
-                {item.label}
+                {summary.periodType} · {summary.periodStart}
               </p>
-              <strong className="mt-1 block text-base text-white">{item.value}</strong>
-            </div>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-neutral-300">
+                {summary.body}
+              </p>
+            </article>
           ))}
         </div>
       </Surface>
-      <Surface id="agent-title" eyebrow="Ask" title="Tell Lares" primary>
-        <form
-          className="mt-4 grid gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            askAgent.mutate();
-          }}
-        >
-          <label className="grid gap-2 text-sm font-medium text-neutral-200">
-            Message
-            <textarea
-              className="min-h-24 resize-none rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base text-white outline-none focus:border-white/35"
-              value={agentMessage}
-              onChange={(event) => setAgentMessage(event.currentTarget.value)}
-            />
-          </label>
-          <button
-            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
-            disabled={askAgent.isPending || agentMessage.trim().length === 0}
-            type="submit"
-          >
-            {askAgent.isPending ? "Drafting..." : "Tell Lares"}
-          </button>
-        </form>
-        {agentDraft ? (
-          <div className="mt-4 rounded-2xl bg-black/20 p-4 text-sm leading-6 text-neutral-200">
-            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
-              Lares understood
-            </p>
-            <p className="mt-2 mb-0 text-neutral-300">{agentDraft.signalNote}</p>
-            <div className="mt-4 rounded-2xl bg-white/5 p-4">
-              <strong className="block text-base text-white">{agentDraft.title}</strong>
-              <span className="mt-1 block text-sm text-neutral-300">{agentDraft.body}</span>
-              <span className="mt-3 block text-xs text-neutral-500">
-                {Math.round(agentDraft.confidence * 100)}% confidence
-              </span>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                className="min-h-11 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
-                disabled={reviewProposal.isPending}
-                type="button"
-                onClick={() =>
-                  reviewProposal.mutate({ proposalId: agentDraft.proposalId, decision: "accepted" })
-                }
-              >
-                Accept
-              </button>
-              <button
-                className="min-h-11 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100 disabled:opacity-60"
-                disabled={reviewProposal.isPending}
-                type="button"
-                onClick={() =>
-                  reviewProposal.mutate({ proposalId: agentDraft.proposalId, decision: "rejected" })
-                }
-              >
-                Reject
-              </button>
-            </div>
-            {agentReply ? <p className="mt-4 mb-0 text-neutral-400">{agentReply}</p> : null}
-          </div>
-        ) : agentReply ? (
-          <p className="mt-4 mb-0 rounded-2xl bg-black/20 p-4 text-sm leading-6 text-neutral-200">
-            {agentReply}
-          </p>
-        ) : null}
-      </Surface>
-      <Surface id="synthesis-title" eyebrow="Synthesis" title="What matters now?">
-        <SynthesisPanel
-          synthesis={latestSynthesis.data?.synthesis}
-          loading={latestSynthesis.isLoading}
-          generating={generateSynthesis.isPending}
-          onGenerate={() => generateSynthesis.mutate()}
-        />
-      </Surface>
-      <Surface id="proposals-title" eyebrow="Review" title="Proposals">
-        <ProposalReviewPanel
-          proposals={proposals.data?.proposals}
-          loading={proposals.isLoading}
-          generating={generateProposals.isPending}
-          reviewingId={reviewProposal.variables?.proposalId}
-          editingProposalId={proposalEditor?.proposalId}
-          onGenerate={() => generateProposals.mutate()}
-          onAccept={(proposalId) => reviewProposal.mutate({ proposalId, decision: "accepted" })}
-          onReject={(proposalId) => reviewProposal.mutate({ proposalId, decision: "rejected" })}
-          onStartEdit={(proposal) =>
-            setProposalEditor({
-              proposalId: proposal.id,
-              body: `${proposal.title}\n${proposal.body}`,
-              bodyDocument: plainTextToRichTextDocument(`${proposal.title}\n${proposal.body}`),
-            })
-          }
-        />
-      </Surface>
-      <Surface id="commitments-title" eyebrow="Commit" title="Active commitments">
-        <CommitmentPanel
-          commitments={commitments.data?.commitments}
-          loading={commitments.isLoading}
-          completingId={recordOutcome.variables}
-          onComplete={(commitmentId) => recordOutcome.mutate(commitmentId)}
-        />
-      </Surface>
-      <Surface id="closed-loop-title" eyebrow="Outcome" title="Closed loop">
-        <OutcomePanel outcomes={outcomes.data?.outcomes} loading={outcomes.isLoading} />
-      </Surface>
-      <Surface id="check-in-title" title="Capture" primary>
-        <CheckInForm status={capture.status} saving={capture.saving} onOpen={capture.openCapture} />
-      </Surface>
-      <WritingDrawer
-        eyebrow="Edit proposal"
-        drawerTitle="Commit this as your own"
-        description=""
-        bodyLabel="Commitment body"
-        submitLabel="Commit edited proposal"
-        open={proposalEditor !== null}
-        body={proposalEditor?.body ?? ""}
-        bodyDocument={proposalEditor?.bodyDocument}
-        onBodyChange={(body) =>
-          setProposalEditor((editor) => (editor ? { ...editor, body } : editor))
-        }
-        onBodyDocumentChange={(bodyDocument) =>
-          setProposalEditor((editor) => (editor ? { ...editor, bodyDocument } : editor))
-        }
-        onAiDraft={() => {
-          const draft =
-            "Confirm travel follow-up\nI will send the follow-up and confirm the next concrete step today.";
-          setProposalEditor((editor) =>
-            editor
-              ? { ...editor, body: draft, bodyDocument: plainTextToRichTextDocument(draft) }
-              : editor,
-          );
-        }}
-        onCancel={() => setProposalEditor(null)}
-        onCommit={() => {
-          if (!proposalEditor) return;
-          reviewProposal.mutate({
-            proposalId: proposalEditor.proposalId,
-            decision: "edited",
-            editedTitle: titleFromEditorText(proposalEditor.body, "Edited commitment"),
-            editedBody: bodyFromEditorText(proposalEditor.body),
-            editedBodyDocument: proposalEditor.bodyDocument,
-          });
-        }}
-      />
     </LaresAppShell>
   );
 }
@@ -682,8 +424,7 @@ function TodayScreen() {
   const [journalBody, setJournalBody] = useState("");
   const [journalLoadedId, setJournalLoadedId] = useState<string | null>(null);
   const events = useEvents();
-  const proposals = usePendingProposals();
-  const commitments = useActiveCommitments();
+  const actions = useActions();
   useEffect(() => {
     if (journal.data?.document && journalLoadedId !== journal.data.document.id) {
       setJournalLoadedId(journal.data.document.id);
@@ -701,13 +442,16 @@ function TodayScreen() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
       await queryClient.invalidateQueries({ queryKey: ["events"] });
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      await queryClient.invalidateQueries({ queryKey: ["actions"] });
+      await queryClient.invalidateQueries({ queryKey: ["summaries"] });
     },
   });
   const recentNotes = (events.data?.events ?? []).slice(0, 4);
   const weeklyActivity = buildSignalCalendarData(events.data?.events ?? []);
   const openLoopCount =
-    (proposals.data?.proposals.length ?? 0) + (commitments.data?.commitments.length ?? 0);
+    actions.data?.actions.filter(
+      (action) => action.status === "proposed" || action.status === "accepted",
+    ).length ?? 0;
 
   return (
     <LaresAppShell>
@@ -785,22 +529,22 @@ function JourneyScreen() {
 }
 
 function InsightsScreen() {
-  const commitments = useActiveCommitments();
-  const outcomes = useRecentOutcomes();
-  const activeCount = commitments.data?.commitments.length ?? 0;
-  const insights = deriveLoopInsights({
-    activeCommitmentCount: activeCount,
-    outcomes: outcomes.data?.outcomes ?? [],
-  });
-  const outcomeTrend = buildOutcomeTrendData(outcomes.data?.outcomes ?? []);
+  const summaries = useSummaries();
 
   return (
     <LaresAppShell>
-      <Surface id="outcomes-chart-title" eyebrow="Outcomes" title="Closed-loop trend">
-        <OutcomeTrendChart data={outcomeTrend} />
-      </Surface>
-      <Surface id="insights-title" eyebrow="Loop intelligence" title="Completion trend">
-        <InsightsPanel insights={insights} />
+      <Surface id="insights-title" eyebrow="Archive" title="Summaries">
+        <div className="mt-4 grid gap-3">
+          {(summaries.data?.summaries ?? []).map((summary) => (
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                {summary.periodType} · {summary.periodStart}
+              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{summary.body}</p>
+            </article>
+          ))}
+        </div>
       </Surface>
     </LaresAppShell>
   );
@@ -816,48 +560,26 @@ function useEvents() {
   });
 }
 
+function useActions() {
+  return useQuery({
+    queryKey: ["actions"],
+    queryFn: async () => apiClient.actions.list({ limit: 100 }),
+  });
+}
+
+function useSummaries() {
+  return useQuery({
+    queryKey: ["summaries"],
+    queryFn: async () => apiClient.summaries.list({ limit: 20 }),
+  });
+}
+
 function useSession() {
   return useQuery({
     queryKey: ["session"],
     queryFn: async () => apiClient.session(),
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
-  });
-}
-
-function useLatestSynthesis() {
-  return useQuery({
-    queryKey: ["synthesis", "current_state"],
-    queryFn: async () => {
-      return apiClient.syntheses.latest({ frameKey: "current_state" });
-    },
-  });
-}
-
-function usePendingProposals() {
-  return useQuery({
-    queryKey: ["proposals"],
-    queryFn: async () => {
-      return apiClient.proposals.list({ limit: 20 });
-    },
-  });
-}
-
-function useActiveCommitments() {
-  return useQuery({
-    queryKey: ["commitments"],
-    queryFn: async () => {
-      return apiClient.commitments.list({ limit: 20 });
-    },
-  });
-}
-
-function useRecentOutcomes() {
-  return useQuery({
-    queryKey: ["outcomes"],
-    queryFn: async () => {
-      return apiClient.outcomes.list({ limit: 10 });
-    },
   });
 }
 

@@ -20,7 +20,11 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
 });
 
 test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
+  const journalLoaded = page.waitForResponse(
+    (response) => response.request().method() === "GET" && response.url().includes("/api/journal/"),
+  );
   await page.goto("/");
+  await journalLoaded;
 
   await expect(page.getByRole("heading", { name: "good afternoon." })).toBeVisible();
   await expect(page.getByLabel("Home dashboard")).toBeVisible();
@@ -34,7 +38,9 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   expect(dashboardBottom).toBeLessThanOrEqual(viewportHeight);
 
   await expect(page.getByRole("heading", { name: "Daily note" })).toBeVisible();
-  await page.getByLabel("Daily journal").fill("need to write to michael");
+  const journalStamp = Date.now();
+  const journalAction = `write to michael about playwright ${journalStamp}`;
+  await page.getByLabel("Daily journal").fill(`need to ${journalAction}`);
   await page.getByRole("button", { name: "Save journal" }).tap();
   await expect(page.getByText("Saved")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent notes" })).toBeVisible();
@@ -58,7 +64,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
   const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(primaryNav.getByRole("link", { name: "Today" })).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Loop" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Actions" })).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: "Journey" })).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: "Insights" })).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: "Docs" })).toHaveCount(0);
@@ -73,19 +79,16 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.evaluate(() => {
     Reflect.set(window, "__laresClientNavMarker", "still-mounted");
   });
-  await page.getByRole("link", { name: "Loop" }).tap();
-  await expect(page.getByRole("heading", { exact: true, name: "Loop" })).toBeVisible();
+  await page.getByRole("link", { name: "Actions" }).tap();
+  await expect(page.getByRole("heading", { exact: true, name: "Actions" })).toBeVisible();
   await expect
     .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
     .toBe("still-mounted");
-  await expect(page.getByLabel("Loop funnel chart")).toBeVisible();
-  await expect(page.getByText("Signals")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByText("Actions to review")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tell Lares" })).toBeVisible();
-  await page.getByRole("button", { name: "Tell Lares" }).tap();
-  await expect(page.getByText("Lares understood")).toBeVisible();
-  await expect(page.getByLabel("Tell Lares").getByRole("button", { name: "Accept" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Write to michael about playwright ${journalStamp}` }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Latest" })).toBeVisible();
 
   await page.goto("/settings");
   await expect(page.getByText("Dev User's workspace")).toBeVisible();
@@ -107,8 +110,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByText("Manual check in submitted").first()).toBeVisible();
 
   await page.getByRole("link", { name: "Insights" }).tap();
-  await expect(page.getByText("Completion trend")).toBeVisible();
-  await expect(page.getByText("Completion rate")).toBeVisible();
+  await expect(page.getByText("Summaries")).toBeVisible();
 
   await page.screenshot({ path: "test-results/mobile-home-menu.png", fullPage: true });
 });

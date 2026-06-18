@@ -301,6 +301,188 @@ export const journalRevisions = sqliteTable(
   ],
 );
 
+export const dailyNotes = sqliteTable(
+  "daily_notes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    localDate: text("local_date").notNull(),
+    title: text("title").notNull(),
+    bodyText: text("body_text").notNull(),
+    bodyDocument: text("body_document", { mode: "json" }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("daily_notes_user_date_idx").on(table.userId, table.localDate),
+    index("daily_notes_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const noteRevisions = sqliteTable(
+  "note_revisions",
+  {
+    id: text("id").primaryKey(),
+    noteId: text("note_id")
+      .notNull()
+      .references(() => dailyNotes.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    revisionNumber: integer("revision_number").notNull(),
+    bodyText: text("body_text").notNull(),
+    changedText: text("changed_text").notNull(),
+    changeHash: text("change_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+    processedAt: text("processed_at"),
+  },
+  (table) => [
+    uniqueIndex("note_revisions_note_number_idx").on(table.noteId, table.revisionNumber),
+    uniqueIndex("note_revisions_user_change_hash_idx").on(table.userId, table.changeHash),
+    index("note_revisions_user_created_idx").on(table.userId, table.createdAt),
+    index("note_revisions_user_processed_idx").on(table.userId, table.processedAt),
+  ],
+);
+
+export const extractedItems = sqliteTable(
+  "extracted_items",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    sourceRevisionId: text("source_revision_id")
+      .notNull()
+      .references(() => noteRevisions.id, { onDelete: "cascade" }),
+    sourceNoteId: text("source_note_id")
+      .notNull()
+      .references(() => dailyNotes.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull(),
+    dueAt: text("due_at"),
+    remindAt: text("remind_at"),
+    eventStartsAt: text("event_starts_at"),
+    eventEndsAt: text("event_ends_at"),
+    confidence: real("confidence").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    metadata: text("metadata", { mode: "json" }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("extracted_items_user_dedupe_idx").on(table.userId, table.dedupeKey),
+    index("extracted_items_user_status_updated_idx").on(
+      table.userId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("extracted_items_user_kind_status_idx").on(table.userId, table.kind, table.status),
+    index("extracted_items_source_revision_idx").on(table.sourceRevisionId),
+  ],
+);
+
+export const itemEvents = sqliteTable(
+  "item_events",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => extractedItems.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    eventType: text("event_type").notNull(),
+    payload: text("payload", { mode: "json" }).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("item_events_item_created_idx").on(table.itemId, table.createdAt),
+    index("item_events_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const summaryDocuments = sqliteTable(
+  "summary_documents",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    periodType: text("period_type").notNull(),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull(),
+    generatedAt: text("generated_at").notNull(),
+    sourceNoteIds: text("source_note_ids", { mode: "json" })
+      .$type<ReadonlyArray<string>>()
+      .notNull(),
+    sourceItemIds: text("source_item_ids", { mode: "json" })
+      .$type<ReadonlyArray<string>>()
+      .notNull(),
+    metadata: text("metadata", { mode: "json" }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("summary_documents_user_period_idx").on(
+      table.userId,
+      table.periodType,
+      table.periodStart,
+    ),
+    index("summary_documents_user_status_idx").on(table.userId, table.status, table.generatedAt),
+  ],
+);
+
+export const agentRuns = sqliteTable(
+  "daily_agent_runs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    triggerType: text("trigger_type").notNull(),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    status: text("status").notNull(),
+    model: text("model"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    errorCode: text("error_code"),
+    metadata: text("metadata", { mode: "json" }).notNull(),
+  },
+  (table) => [
+    index("daily_agent_runs_user_status_started_idx").on(
+      table.userId,
+      table.status,
+      table.startedAt,
+    ),
+    index("daily_agent_runs_user_source_idx").on(table.userId, table.sourceType, table.sourceId),
+  ],
+);
+
+export const agentRunOutputs = sqliteTable(
+  "daily_agent_run_outputs",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    outputType: text("output_type").notNull(),
+    outputId: text("output_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("daily_agent_run_outputs_run_idx").on(table.runId),
+    index("daily_agent_run_outputs_output_idx").on(table.outputType, table.outputId),
+  ],
+);
+
 export const memoryDocuments = sqliteTable(
   "memory_documents",
   {
@@ -420,22 +602,29 @@ export const traceSpans = sqliteTable(
 );
 
 export const schema = {
+  agentRunOutputs,
+  agentRuns,
   authAccounts,
   authSessions,
   authUsers,
   authVerifications,
   commitments,
+  dailyNotes,
   events,
+  extractedItems,
   journalDocuments,
   journalRevisions,
+  itemEvents,
   memoryChunks,
   memoryDocuments,
   memoryIndexJobs,
   memoryRetrievalEvents,
+  noteRevisions,
   outcomes,
   frames,
   proposals,
   reviews,
+  summaryDocuments,
   syntheses,
   synthesisSources,
   traceSpans,

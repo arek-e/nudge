@@ -1084,25 +1084,61 @@ describe("web app", () => {
     const exported = await exportResponse.json();
     expect(exported.journalDocuments).toHaveLength(1);
     expect(exported.journalRevisions).toHaveLength(1);
-    expect(exported.memoryDocuments).toEqual([
+    expect(exported.dailyNotes).toEqual([
       expect.objectContaining({
         bodyText: "need to write to michael",
-        sourceId: saved.revision.id,
-        sourceType: "journal_revision",
+        localDate: "2026-06-18",
       }),
     ]);
-    expect(exported.memoryChunks).toEqual([
+    expect(exported.noteRevisions).toEqual([
       expect.objectContaining({
-        chunkText: "need to write to michael",
-        sourceId: saved.revision.id,
+        changedText: "need to write to michael",
       }),
     ]);
-    expect(exported.memoryIndexJobs).toEqual([
+    expect(exported.extractedItems).toEqual([
       expect.objectContaining({
-        memoryChunkId: exported.memoryChunks[0].id,
-        status: "pending",
+        body: "need to write to michael",
+        kind: "task",
+        status: "proposed",
+        title: "Write to michael",
       }),
     ]);
+    expect(exported.summaryDocuments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ periodType: "day", status: "ready" }),
+        expect.objectContaining({ periodType: "week", status: "ready" }),
+      ]),
+    );
+    expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "completed" })]);
+    expect(exported.agentRunOutputs.length).toBeGreaterThanOrEqual(3);
+    expect(exported.memoryDocuments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceType: "daily_note" }),
+        expect.objectContaining({ sourceType: "note_revision" }),
+        expect.objectContaining({ sourceType: "extracted_item" }),
+        expect.objectContaining({ sourceType: "summary" }),
+        expect.objectContaining({ sourceType: "journal_revision" }),
+      ]),
+    );
+    expect(exported.memoryChunks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ chunkText: "need to write to michael" })]),
+    );
+    expect(exported.memoryIndexJobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "pending",
+        }),
+      ]),
+    );
+
+    const actionsResponse = await app.request("/api/actions", {}, env);
+    expect((await actionsResponse.json()).actions).toEqual([
+      expect.objectContaining({ title: "Write to michael", kind: "task" }),
+    ]);
+    const summariesResponse = await app.request("/api/summaries", {}, env);
+    expect((await summariesResponse.json()).summaries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ periodType: "day" })]),
+    );
   });
 
   test("custom integrations can capture and list signals using primitive routes", async () => {

@@ -2,19 +2,26 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Context, Effect, Layer } from "effect";
 import {
+  agentRunOutputs,
+  agentRuns,
   commitments,
+  dailyNotes,
   events,
+  extractedItems,
   outcomes,
   frames,
+  itemEvents,
   journalDocuments,
   journalRevisions,
   memoryChunks,
   memoryDocuments,
   memoryIndexJobs,
   memoryRetrievalEvents,
+  noteRevisions,
   proposals,
   reviews,
   schema,
+  summaryDocuments,
   syntheses,
   synthesisSources,
   users,
@@ -184,9 +191,13 @@ export interface ListOutcomesInput {
 }
 
 export interface UserDataExport {
+  readonly agentRunOutputs: ReadonlyArray<AgentRunOutputRecord>;
+  readonly agentRuns: ReadonlyArray<AgentRunRecord>;
   readonly user: DbUser;
   readonly commitments: ReadonlyArray<CommitmentRecord>;
+  readonly dailyNotes: ReadonlyArray<DailyNoteRecord>;
   readonly events: ReadonlyArray<EventRecord>;
+  readonly extractedItems: ReadonlyArray<ExtractedItemRecord>;
   readonly frames: ReadonlyArray<FrameRecord>;
   readonly journalDocuments: ReadonlyArray<JournalDocumentRecord>;
   readonly journalRevisions: ReadonlyArray<JournalRevisionRecord>;
@@ -197,10 +208,148 @@ export interface UserDataExport {
   readonly outcomes: ReadonlyArray<OutcomeRecord>;
   readonly proposals: ReadonlyArray<ProposalRecord>;
   readonly reviews: ReadonlyArray<ReviewRecord>;
+  readonly itemEvents: ReadonlyArray<ItemEventRecord>;
+  readonly noteRevisions: ReadonlyArray<NoteRevisionRecord>;
+  readonly summaryDocuments: ReadonlyArray<SummaryDocumentRecord>;
   readonly syntheses: ReadonlyArray<SynthesisRecord>;
 }
 
+export type ExtractedItemKind =
+  | "task"
+  | "reminder"
+  | "follow_up"
+  | "event"
+  | "memory"
+  | "question"
+  | "idea";
+export type ExtractedItemStatus = "proposed" | "accepted" | "dismissed" | "completed" | "archived";
+export type ItemEventType =
+  | "created"
+  | "accepted"
+  | "edited"
+  | "dismissed"
+  | "completed"
+  | "snoozed"
+  | "archived";
+export type SummaryPeriodType = "day" | "week" | "month" | "quarter" | "year" | "custom";
+export type SummaryStatus = "draft" | "ready" | "superseded";
+export type AgentRunStatus = "queued" | "running" | "completed" | "failed";
+
+export interface UpsertDailyNoteInput {
+  readonly userId: string;
+  readonly localDate: string;
+  readonly title: string;
+  readonly bodyText: string;
+  readonly bodyDocument?: unknown;
+}
+
+export interface DailyNoteRecord extends UpsertDailyNoteInput {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface NoteRevisionRecord {
+  readonly id: string;
+  readonly noteId: string;
+  readonly userId: string;
+  readonly revisionNumber: number;
+  readonly bodyText: string;
+  readonly changedText: string;
+  readonly changeHash: string;
+  readonly createdAt: string;
+  readonly processedAt?: string;
+}
+
+export interface UpsertDailyNoteResult {
+  readonly note: DailyNoteRecord;
+  readonly revision: NoteRevisionRecord;
+}
+
+export interface UpsertExtractedItemInput {
+  readonly userId: string;
+  readonly sourceRevisionId: string;
+  readonly sourceNoteId: string;
+  readonly kind: ExtractedItemKind;
+  readonly title: string;
+  readonly body: string;
+  readonly status?: ExtractedItemStatus;
+  readonly dueAt?: string;
+  readonly remindAt?: string;
+  readonly eventStartsAt?: string;
+  readonly eventEndsAt?: string;
+  readonly confidence: number;
+  readonly dedupeKey: string;
+  readonly metadata: unknown;
+}
+
+export interface ExtractedItemRecord extends Omit<UpsertExtractedItemInput, "status"> {
+  readonly id: string;
+  readonly status: ExtractedItemStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ItemEventRecord {
+  readonly id: string;
+  readonly itemId: string;
+  readonly userId: string;
+  readonly eventType: ItemEventType;
+  readonly payload: unknown;
+  readonly createdAt: string;
+}
+
+export interface UpsertSummaryDocumentInput {
+  readonly userId: string;
+  readonly periodType: SummaryPeriodType;
+  readonly periodStart: string;
+  readonly periodEnd: string;
+  readonly title: string;
+  readonly body: string;
+  readonly status: SummaryStatus;
+  readonly sourceNoteIds: ReadonlyArray<string>;
+  readonly sourceItemIds: ReadonlyArray<string>;
+  readonly metadata: unknown;
+}
+
+export interface SummaryDocumentRecord extends UpsertSummaryDocumentInput {
+  readonly id: string;
+  readonly generatedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface StartAgentRunInput {
+  readonly userId: string;
+  readonly triggerType: "note_inactivity" | "manual" | "end_of_day" | "end_of_week" | "backfill";
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly status?: AgentRunStatus;
+  readonly model?: string;
+  readonly metadata: unknown;
+}
+
+export interface AgentRunRecord extends StartAgentRunInput {
+  readonly id: string;
+  readonly status: AgentRunStatus;
+  readonly startedAt: string;
+  readonly completedAt?: string;
+  readonly errorCode?: string;
+}
+
+export interface AgentRunOutputRecord {
+  readonly id: string;
+  readonly runId: string;
+  readonly outputType: "extracted_item" | "summary" | "memory_document";
+  readonly outputId: string;
+  readonly createdAt: string;
+}
+
 export type MemorySourceType =
+  | "daily_note"
+  | "note_revision"
+  | "extracted_item"
+  | "summary"
   | "journal_document"
   | "journal_revision"
   | "signal"
@@ -309,6 +458,10 @@ export interface DbService {
     readonly userId: string;
     readonly localDate: string;
   }) => Effect.Effect<JournalDocumentRecord | null>;
+  readonly getDailyNote: (input: {
+    readonly userId: string;
+    readonly localDate: string;
+  }) => Effect.Effect<DailyNoteRecord | null>;
   readonly getMemoryChunk: (input: {
     readonly userId: string;
     readonly memoryChunkId: string;
@@ -327,6 +480,21 @@ export interface DbService {
     input: ListCommitmentsInput,
   ) => Effect.Effect<ReadonlyArray<CommitmentRecord>>;
   readonly listOutcomes: (input: ListOutcomesInput) => Effect.Effect<ReadonlyArray<OutcomeRecord>>;
+  readonly listExtractedItems: (input: {
+    readonly userId: string;
+    readonly limit: number;
+    readonly status?: ExtractedItemStatus;
+  }) => Effect.Effect<ReadonlyArray<ExtractedItemRecord>>;
+  readonly listSummaryDocuments: (input: {
+    readonly userId: string;
+    readonly limit: number;
+    readonly periodType?: SummaryPeriodType;
+  }) => Effect.Effect<ReadonlyArray<SummaryDocumentRecord>>;
+  readonly listNoteRevisions: (input: {
+    readonly userId: string;
+    readonly noteId: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<NoteRevisionRecord>>;
   readonly listJournalRevisions: (input: {
     readonly userId: string;
     readonly documentId: string;
@@ -346,6 +514,23 @@ export interface DbService {
     readonly resultChunkIds: ReadonlyArray<string>;
     readonly source: string;
   }) => Effect.Effect<MemoryRetrievalEventRecord>;
+  readonly recordItemEvent: (input: {
+    readonly userId: string;
+    readonly itemId: string;
+    readonly eventType: ItemEventType;
+    readonly payload: unknown;
+  }) => Effect.Effect<ItemEventRecord>;
+  readonly startAgentRun: (input: StartAgentRunInput) => Effect.Effect<AgentRunRecord>;
+  readonly completeAgentRun: (input: {
+    readonly userId: string;
+    readonly runId: string;
+    readonly status: "completed" | "failed";
+    readonly errorCode?: string;
+    readonly outputs?: ReadonlyArray<{
+      readonly outputType: AgentRunOutputRecord["outputType"];
+      readonly outputId: string;
+    }>;
+  }) => Effect.Effect<AgentRunRecord>;
   readonly markMemoryChunkIndexed: (input: {
     readonly userId: string;
     readonly memoryChunkId: string;
@@ -355,6 +540,18 @@ export interface DbService {
   readonly upsertJournalDocument: (
     input: UpsertJournalDocumentInput,
   ) => Effect.Effect<UpsertJournalDocumentResult>;
+  readonly upsertDailyNote: (input: UpsertDailyNoteInput) => Effect.Effect<UpsertDailyNoteResult>;
+  readonly upsertExtractedItem: (
+    input: UpsertExtractedItemInput,
+  ) => Effect.Effect<ExtractedItemRecord>;
+  readonly updateExtractedItemStatus: (input: {
+    readonly userId: string;
+    readonly itemId: string;
+    readonly status: ExtractedItemStatus;
+  }) => Effect.Effect<ExtractedItemRecord>;
+  readonly upsertSummaryDocument: (
+    input: UpsertSummaryDocumentInput,
+  ) => Effect.Effect<SummaryDocumentRecord>;
   readonly upsertMemoryDocument: (
     input: UpsertMemoryDocumentInput,
   ) => Effect.Effect<UpsertMemoryDocumentResult>;
@@ -486,6 +683,8 @@ const diffSummaryFrom = (previous: string | null, next: string, changedText: str
   return "Updated daily journal document.";
 };
 
+const simpleHash = (value: string) => `${value.length}:${value}`;
+
 const memoryChunkHash = (input: {
   readonly userId: string;
   readonly sourceType: MemorySourceType;
@@ -519,6 +718,97 @@ const toJournalRevisionRecord = (row: typeof journalRevisions.$inferSelect) => (
   bodyText: row.bodyText,
   changedText: row.changedText,
   diffSummary: row.diffSummary,
+  createdAt: row.createdAt,
+});
+
+const toDailyNoteRecord = (row: typeof dailyNotes.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  localDate: row.localDate,
+  title: row.title,
+  bodyText: row.bodyText,
+  ...(row.bodyDocument !== null ? { bodyDocument: row.bodyDocument } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toNoteRevisionRecord = (row: typeof noteRevisions.$inferSelect) => ({
+  id: row.id,
+  noteId: row.noteId,
+  userId: row.userId,
+  revisionNumber: row.revisionNumber,
+  bodyText: row.bodyText,
+  changedText: row.changedText,
+  changeHash: row.changeHash,
+  createdAt: row.createdAt,
+  ...(row.processedAt !== null ? { processedAt: row.processedAt } : {}),
+});
+
+const toExtractedItemRecord = (row: typeof extractedItems.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  sourceRevisionId: row.sourceRevisionId,
+  sourceNoteId: row.sourceNoteId,
+  kind: row.kind as ExtractedItemKind,
+  title: row.title,
+  body: row.body,
+  status: row.status as ExtractedItemStatus,
+  ...(row.dueAt !== null ? { dueAt: row.dueAt } : {}),
+  ...(row.remindAt !== null ? { remindAt: row.remindAt } : {}),
+  ...(row.eventStartsAt !== null ? { eventStartsAt: row.eventStartsAt } : {}),
+  ...(row.eventEndsAt !== null ? { eventEndsAt: row.eventEndsAt } : {}),
+  confidence: row.confidence,
+  dedupeKey: row.dedupeKey,
+  metadata: row.metadata,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toItemEventRecord = (row: typeof itemEvents.$inferSelect) => ({
+  id: row.id,
+  itemId: row.itemId,
+  userId: row.userId,
+  eventType: row.eventType as ItemEventType,
+  payload: row.payload,
+  createdAt: row.createdAt,
+});
+
+const toSummaryDocumentRecord = (row: typeof summaryDocuments.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  periodType: row.periodType as SummaryPeriodType,
+  periodStart: row.periodStart,
+  periodEnd: row.periodEnd,
+  title: row.title,
+  body: row.body,
+  status: row.status as SummaryStatus,
+  generatedAt: row.generatedAt,
+  sourceNoteIds: row.sourceNoteIds,
+  sourceItemIds: row.sourceItemIds,
+  metadata: row.metadata,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const toAgentRunRecord = (row: typeof agentRuns.$inferSelect) => ({
+  id: row.id,
+  userId: row.userId,
+  triggerType: row.triggerType as StartAgentRunInput["triggerType"],
+  sourceType: row.sourceType,
+  sourceId: row.sourceId,
+  status: row.status as AgentRunStatus,
+  ...(row.model !== null ? { model: row.model } : {}),
+  startedAt: row.startedAt,
+  ...(row.completedAt !== null ? { completedAt: row.completedAt } : {}),
+  ...(row.errorCode !== null ? { errorCode: row.errorCode } : {}),
+  metadata: row.metadata,
+});
+
+const toAgentRunOutputRecord = (row: typeof agentRunOutputs.$inferSelect) => ({
+  id: row.id,
+  runId: row.runId,
+  outputType: row.outputType as AgentRunOutputRecord["outputType"],
+  outputId: row.outputId,
   createdAt: row.createdAt,
 });
 
@@ -573,18 +863,25 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
     Db,
     Effect.sync(() => {
       const userStore = new Map<string, DbUser>();
+      const agentRunOutputStore = new Map<string, AgentRunOutputRecord>();
+      const agentRunStore = new Map<string, AgentRunRecord>();
       const commitmentStore = new Map<string, CommitmentRecord>();
+      const dailyNoteStore = new Map<string, DailyNoteRecord>();
       const eventStore = new Map<string, EventRecord>();
+      const extractedItemStore = new Map<string, ExtractedItemRecord>();
       const outcomeStore = new Map<string, OutcomeRecord>();
       const frameStore = new Map<string, FrameRecord>();
+      const itemEventStore = new Map<string, ItemEventRecord>();
       const journalDocumentStore = new Map<string, JournalDocumentRecord>();
       const journalRevisionStore = new Map<string, JournalRevisionRecord>();
       const memoryChunkStore = new Map<string, MemoryChunkRecord>();
       const memoryDocumentStore = new Map<string, MemoryDocumentRecord>();
       const memoryIndexJobStore = new Map<string, MemoryIndexJobRecord>();
       const memoryRetrievalEventStore = new Map<string, MemoryRetrievalEventRecord>();
+      const noteRevisionStore = new Map<string, NoteRevisionRecord>();
       const proposalStore = new Map<string, ProposalRecord>();
       const reviewStore = new Map<string, ReviewRecord>();
+      const summaryDocumentStore = new Map<string, SummaryDocumentRecord>();
       const synthesisStore = new Map<string, SynthesisRecord>();
 
       return Db.of({
@@ -592,23 +889,32 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
         deleteUserData: (input) =>
           Effect.sync(() => {
             for (const store of [
+              agentRunStore,
               commitmentStore,
+              dailyNoteStore,
               eventStore,
+              extractedItemStore,
               outcomeStore,
               frameStore,
+              itemEventStore,
               journalDocumentStore,
               journalRevisionStore,
               memoryChunkStore,
               memoryDocumentStore,
               memoryIndexJobStore,
               memoryRetrievalEventStore,
+              noteRevisionStore,
               proposalStore,
               reviewStore,
+              summaryDocumentStore,
               synthesisStore,
             ]) {
               for (const record of store.values()) {
                 if (record.userId === input.userId) store.delete(record.id);
               }
+            }
+            for (const record of agentRunOutputStore.values()) {
+              if (!agentRunStore.has(record.runId)) agentRunOutputStore.delete(record.id);
             }
             userStore.delete(input.userId);
           }),
@@ -618,12 +924,22 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }).pipe(Effect.withSpan("Db.ensureUser", { attributes: { provider: "memory" } })),
         exportUserData: (user) =>
           Effect.sync(() => ({
+            agentRunOutputs: [...agentRunOutputStore.values()].filter((record) => {
+              const run = agentRunStore.get(record.runId);
+              return run?.userId === user.id;
+            }),
+            agentRuns: [...agentRunStore.values()].filter((record) => record.userId === user.id),
             user,
             commitments: [...commitmentStore.values()].filter(
               (record) => record.userId === user.id,
             ),
+            dailyNotes: [...dailyNoteStore.values()].filter((record) => record.userId === user.id),
             events: [...eventStore.values()].filter((record) => record.userId === user.id),
+            extractedItems: [...extractedItemStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
             frames: [...frameStore.values()].filter((record) => record.userId === user.id),
+            itemEvents: [...itemEventStore.values()].filter((record) => record.userId === user.id),
             journalDocuments: [...journalDocumentStore.values()].filter(
               (record) => record.userId === user.id,
             ),
@@ -642,9 +958,15 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             memoryRetrievalEvents: [...memoryRetrievalEventStore.values()].filter(
               (record) => record.userId === user.id,
             ),
+            noteRevisions: [...noteRevisionStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
             outcomes: [...outcomeStore.values()].filter((record) => record.userId === user.id),
             proposals: [...proposalStore.values()].filter((record) => record.userId === user.id),
             reviews: [...reviewStore.values()].filter((record) => record.userId === user.id),
+            summaryDocuments: [...summaryDocumentStore.values()].filter(
+              (record) => record.userId === user.id,
+            ),
             syntheses: [...synthesisStore.values()].filter((record) => record.userId === user.id),
           })),
         appendEvent: (input) =>
@@ -669,6 +991,172 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               attributes: { provider: "memory", eventType: input.type, userId: input.userId },
             }),
           ),
+        getDailyNote: (input) =>
+          Effect.sync(
+            () =>
+              [...dailyNoteStore.values()].find(
+                (note) => note.userId === input.userId && note.localDate === input.localDate,
+              ) ?? null,
+          ),
+        listExtractedItems: (input) =>
+          Effect.sync(() =>
+            [...extractedItemStore.values()]
+              .filter(
+                (item) =>
+                  item.userId === input.userId &&
+                  (input.status === undefined || item.status === input.status),
+              )
+              .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+              .slice(0, input.limit),
+          ),
+        listSummaryDocuments: (input) =>
+          Effect.sync(() =>
+            [...summaryDocumentStore.values()]
+              .filter(
+                (summary) =>
+                  summary.userId === input.userId &&
+                  (input.periodType === undefined || summary.periodType === input.periodType),
+              )
+              .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt))
+              .slice(0, input.limit),
+          ),
+        listNoteRevisions: (input) =>
+          Effect.sync(() =>
+            [...noteRevisionStore.values()]
+              .filter(
+                (revision) => revision.userId === input.userId && revision.noteId === input.noteId,
+              )
+              .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+              .slice(0, input.limit),
+          ),
+        recordItemEvent: (input) =>
+          Effect.sync(() => {
+            const record = {
+              id: eventId(),
+              createdAt: nowIso(),
+              ...input,
+            } satisfies ItemEventRecord;
+            itemEventStore.set(record.id, record);
+            return record;
+          }),
+        startAgentRun: (input) =>
+          Effect.sync(() => {
+            const record = {
+              ...input,
+              id: eventId(),
+              status: input.status ?? "queued",
+              startedAt: nowIso(),
+            } satisfies AgentRunRecord;
+            agentRunStore.set(record.id, record);
+            return record;
+          }),
+        completeAgentRun: (input) =>
+          Effect.sync(() => {
+            const existing = agentRunStore.get(input.runId);
+            if (!existing || existing.userId !== input.userId)
+              throw new Error("Agent run not found");
+            const updated = {
+              ...existing,
+              status: input.status,
+              completedAt: nowIso(),
+              ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+            } satisfies AgentRunRecord;
+            agentRunStore.set(updated.id, updated);
+            for (const output of input.outputs ?? []) {
+              const record = {
+                id: eventId(),
+                runId: updated.id,
+                outputType: output.outputType,
+                outputId: output.outputId,
+                createdAt: nowIso(),
+              } satisfies AgentRunOutputRecord;
+              agentRunOutputStore.set(record.id, record);
+            }
+            return updated;
+          }),
+        upsertDailyNote: (input) =>
+          Effect.sync(() => {
+            const previous = [...dailyNoteStore.values()].find(
+              (note) => note.userId === input.userId && note.localDate === input.localDate,
+            );
+            const timestamp = nowIso();
+            const existingRevisions = previous
+              ? [...noteRevisionStore.values()].filter(
+                  (revision) => revision.noteId === previous.id,
+                )
+              : [];
+            const changedText = changedTextFrom(previous?.bodyText ?? null, input.bodyText);
+            const note = {
+              ...input,
+              id: previous?.id ?? eventId(),
+              createdAt: previous?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            } satisfies DailyNoteRecord;
+            dailyNoteStore.set(note.id, note);
+            const revisionNumber = existingRevisions.length + 1;
+            const revision = {
+              id: eventId(),
+              noteId: note.id,
+              userId: input.userId,
+              revisionNumber,
+              bodyText: input.bodyText,
+              changedText,
+              changeHash: simpleHash(`${input.userId}:${note.id}:${revisionNumber}:${changedText}`),
+              createdAt: timestamp,
+            } satisfies NoteRevisionRecord;
+            noteRevisionStore.set(revision.id, revision);
+            return { note, revision };
+          }),
+        upsertExtractedItem: (input) =>
+          Effect.sync(() => {
+            const previous = [...extractedItemStore.values()].find(
+              (item) => item.userId === input.userId && item.dedupeKey === input.dedupeKey,
+            );
+            const timestamp = nowIso();
+            const record = {
+              ...input,
+              id: previous?.id ?? eventId(),
+              status: input.status ?? previous?.status ?? "proposed",
+              createdAt: previous?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            } satisfies ExtractedItemRecord;
+            extractedItemStore.set(record.id, record);
+            return record;
+          }),
+        updateExtractedItemStatus: (input) =>
+          Effect.sync(() => {
+            const existing = extractedItemStore.get(input.itemId);
+            if (!existing || existing.userId !== input.userId)
+              throw new Error("Extracted item not found");
+            const updated = {
+              ...existing,
+              status: input.status,
+              updatedAt: nowIso(),
+            } satisfies ExtractedItemRecord;
+            extractedItemStore.set(updated.id, updated);
+            return updated;
+          }),
+        upsertSummaryDocument: (input) =>
+          Effect.sync(() => {
+            const previous = [...summaryDocumentStore.values()].find(
+              (summary) =>
+                summary.userId === input.userId &&
+                summary.periodType === input.periodType &&
+                summary.periodStart === input.periodStart &&
+                summary.periodEnd === input.periodEnd &&
+                summary.status !== "superseded",
+            );
+            const timestamp = nowIso();
+            const record = {
+              ...input,
+              id: previous?.id ?? eventId(),
+              generatedAt: timestamp,
+              createdAt: previous?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            } satisfies SummaryDocumentRecord;
+            summaryDocumentStore.set(record.id, record);
+            return record;
+          }),
         appendCommitment: (input) =>
           Effect.sync(() => {
             const existing = [...commitmentStore.values()].find(
@@ -1039,6 +1527,23 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               await database.batch([
                 database
                   .prepare(
+                    "DELETE FROM daily_agent_run_outputs WHERE run_id IN (SELECT id FROM daily_agent_runs WHERE user_id = ?)",
+                  )
+                  .bind(input.userId),
+                database
+                  .prepare("DELETE FROM daily_agent_runs WHERE user_id = ?")
+                  .bind(input.userId),
+                database
+                  .prepare("DELETE FROM summary_documents WHERE user_id = ?")
+                  .bind(input.userId),
+                database.prepare("DELETE FROM item_events WHERE user_id = ?").bind(input.userId),
+                database
+                  .prepare("DELETE FROM extracted_items WHERE user_id = ?")
+                  .bind(input.userId),
+                database.prepare("DELETE FROM note_revisions WHERE user_id = ?").bind(input.userId),
+                database.prepare("DELETE FROM daily_notes WHERE user_id = ?").bind(input.userId),
+                database
+                  .prepare(
                     "DELETE FROM synthesis_sources WHERE synthesis_id IN (SELECT id FROM syntheses WHERE user_id = ?)",
                   )
                   .bind(input.userId),
@@ -1094,6 +1599,13 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 reviewRows,
                 commitmentRows,
                 outcomeRows,
+                dailyNoteRows,
+                noteRevisionRows,
+                extractedItemRows,
+                itemEventRows,
+                summaryDocumentRows,
+                agentRunRows,
+                agentRunOutputRows,
                 journalDocumentRows,
                 journalRevisionRows,
                 memoryDocumentRows,
@@ -1108,6 +1620,19 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 db.select().from(reviews).where(eq(reviews.userId, user.id)),
                 db.select().from(commitments).where(eq(commitments.userId, user.id)),
                 db.select().from(outcomes).where(eq(outcomes.userId, user.id)),
+                db.select().from(dailyNotes).where(eq(dailyNotes.userId, user.id)),
+                db.select().from(noteRevisions).where(eq(noteRevisions.userId, user.id)),
+                db.select().from(extractedItems).where(eq(extractedItems.userId, user.id)),
+                db.select().from(itemEvents).where(eq(itemEvents.userId, user.id)),
+                db.select().from(summaryDocuments).where(eq(summaryDocuments.userId, user.id)),
+                db.select().from(agentRuns).where(eq(agentRuns.userId, user.id)),
+                database
+                  .prepare(
+                    "SELECT daily_agent_run_outputs.* FROM daily_agent_run_outputs JOIN daily_agent_runs ON daily_agent_run_outputs.run_id = daily_agent_runs.id WHERE daily_agent_runs.user_id = ?",
+                  )
+                  .bind(user.id)
+                  .all<typeof agentRunOutputs.$inferSelect>()
+                  .then((result) => result.results),
                 db.select().from(journalDocuments).where(eq(journalDocuments.userId, user.id)),
                 db.select().from(journalRevisions).where(eq(journalRevisions.userId, user.id)),
                 db.select().from(memoryDocuments).where(eq(memoryDocuments.userId, user.id)),
@@ -1139,19 +1664,26 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               );
 
               return {
+                agentRunOutputs: agentRunOutputRows.map(toAgentRunOutputRecord),
+                agentRuns: agentRunRows.map(toAgentRunRecord),
                 user,
                 commitments: commitmentRows.map(toCommitmentRecord),
+                dailyNotes: dailyNoteRows.map(toDailyNoteRecord),
                 events: eventRows.map(toEventRecord),
+                extractedItems: extractedItemRows.map(toExtractedItemRecord),
                 frames: frameRows.map(toFrameRecord),
+                itemEvents: itemEventRows.map(toItemEventRecord),
                 journalDocuments: journalDocumentRows.map(toJournalDocumentRecord),
                 journalRevisions: journalRevisionRows.map(toJournalRevisionRecord),
                 memoryChunks: memoryChunkRows.map(toMemoryChunkRecord),
                 memoryDocuments: memoryDocumentRows.map(toMemoryDocumentRecord),
                 memoryIndexJobs: memoryIndexJobRows.map(toMemoryIndexJobRecord),
                 memoryRetrievalEvents: memoryRetrievalEventRows.map(toMemoryRetrievalEventRecord),
+                noteRevisions: noteRevisionRows.map(toNoteRevisionRecord),
                 outcomes: outcomeRows.map(toOutcomeRecord),
                 proposals: proposalRows.map(toProposalRecord),
                 reviews: reviewRows.map(toReviewRecord),
+                summaryDocuments: summaryDocumentRows.map(toSummaryDocumentRecord),
                 syntheses: synthesisRecords,
               } satisfies UserDataExport;
             }),
@@ -1234,6 +1766,295 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 attributes: { provider: "d1", eventType: input.type, userId: input.userId },
               }),
             ),
+          getDailyNote: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(dailyNotes)
+                .where(
+                  and(
+                    eq(dailyNotes.userId, input.userId),
+                    eq(dailyNotes.localDate, input.localDate),
+                  ),
+                )
+                .get();
+              return row ? toDailyNoteRecord(row) : null;
+            }),
+          listExtractedItems: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(extractedItems)
+                .where(
+                  input.status
+                    ? and(
+                        eq(extractedItems.userId, input.userId),
+                        eq(extractedItems.status, input.status),
+                      )
+                    : eq(extractedItems.userId, input.userId),
+                )
+                .orderBy(desc(extractedItems.updatedAt))
+                .limit(input.limit);
+              return rows.map(toExtractedItemRecord);
+            }),
+          listSummaryDocuments: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(summaryDocuments)
+                .where(
+                  input.periodType
+                    ? and(
+                        eq(summaryDocuments.userId, input.userId),
+                        eq(summaryDocuments.periodType, input.periodType),
+                      )
+                    : eq(summaryDocuments.userId, input.userId),
+                )
+                .orderBy(desc(summaryDocuments.generatedAt))
+                .limit(input.limit);
+              return rows.map(toSummaryDocumentRecord);
+            }),
+          listNoteRevisions: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(noteRevisions)
+                .where(
+                  and(
+                    eq(noteRevisions.userId, input.userId),
+                    eq(noteRevisions.noteId, input.noteId),
+                  ),
+                )
+                .orderBy(desc(noteRevisions.createdAt))
+                .limit(input.limit);
+              return rows.map(toNoteRevisionRecord);
+            }),
+          recordItemEvent: (input) =>
+            Effect.promise(async () => {
+              const record = {
+                id: eventId(),
+                createdAt: nowIso(),
+                ...input,
+              } satisfies ItemEventRecord;
+              await db.insert(itemEvents).values(record);
+              return record;
+            }),
+          startAgentRun: (input) =>
+            Effect.promise(async () => {
+              const record = {
+                ...input,
+                id: eventId(),
+                status: input.status ?? "queued",
+                startedAt: nowIso(),
+              } satisfies AgentRunRecord;
+              await db.insert(agentRuns).values({
+                id: record.id,
+                userId: record.userId,
+                triggerType: record.triggerType,
+                sourceType: record.sourceType,
+                sourceId: record.sourceId,
+                status: record.status,
+                model: record.model ?? null,
+                startedAt: record.startedAt,
+                completedAt: null,
+                errorCode: null,
+                metadata: record.metadata,
+              });
+              return record;
+            }),
+          completeAgentRun: (input) =>
+            Effect.promise(async () => {
+              const timestamp = nowIso();
+              await db
+                .update(agentRuns)
+                .set({
+                  status: input.status,
+                  completedAt: timestamp,
+                  errorCode: input.errorCode ?? null,
+                })
+                .where(and(eq(agentRuns.id, input.runId), eq(agentRuns.userId, input.userId)));
+              await Promise.all(
+                (input.outputs ?? []).map((output) =>
+                  db.insert(agentRunOutputs).values({
+                    id: eventId(),
+                    runId: input.runId,
+                    outputType: output.outputType,
+                    outputId: output.outputId,
+                    createdAt: timestamp,
+                  }),
+                ),
+              );
+              const row = await db
+                .select()
+                .from(agentRuns)
+                .where(eq(agentRuns.id, input.runId))
+                .get();
+              if (!row) throw new Error("Agent run not found");
+              return toAgentRunRecord(row);
+            }),
+          upsertDailyNote: (input) =>
+            Effect.promise(async () => {
+              const previous = await db
+                .select()
+                .from(dailyNotes)
+                .where(
+                  and(
+                    eq(dailyNotes.userId, input.userId),
+                    eq(dailyNotes.localDate, input.localDate),
+                  ),
+                )
+                .get();
+              const timestamp = nowIso();
+              const changedText = changedTextFrom(previous?.bodyText ?? null, input.bodyText);
+              const note = {
+                ...input,
+                id: previous?.id ?? eventId(),
+                createdAt: previous?.createdAt ?? timestamp,
+                updatedAt: timestamp,
+              } satisfies DailyNoteRecord;
+              await db
+                .insert(dailyNotes)
+                .values({
+                  id: note.id,
+                  userId: note.userId,
+                  localDate: note.localDate,
+                  title: note.title,
+                  bodyText: note.bodyText,
+                  bodyDocument: note.bodyDocument ?? null,
+                  createdAt: note.createdAt,
+                  updatedAt: note.updatedAt,
+                })
+                .onConflictDoUpdate({
+                  target: [dailyNotes.userId, dailyNotes.localDate],
+                  set: {
+                    title: note.title,
+                    bodyText: note.bodyText,
+                    bodyDocument: note.bodyDocument ?? null,
+                    updatedAt: note.updatedAt,
+                  },
+                });
+              const revisions = await db
+                .select()
+                .from(noteRevisions)
+                .where(eq(noteRevisions.noteId, note.id));
+              const revisionNumber = revisions.length + 1;
+              const revision = {
+                id: eventId(),
+                noteId: note.id,
+                userId: input.userId,
+                revisionNumber,
+                bodyText: input.bodyText,
+                changedText,
+                changeHash: simpleHash(
+                  `${input.userId}:${note.id}:${revisionNumber}:${changedText}`,
+                ),
+                createdAt: timestamp,
+              } satisfies NoteRevisionRecord;
+              await db.insert(noteRevisions).values(revision);
+              return { note, revision };
+            }),
+          upsertExtractedItem: (input) =>
+            Effect.promise(async () => {
+              const previous = await db
+                .select()
+                .from(extractedItems)
+                .where(
+                  and(
+                    eq(extractedItems.userId, input.userId),
+                    eq(extractedItems.dedupeKey, input.dedupeKey),
+                  ),
+                )
+                .get();
+              const timestamp = nowIso();
+              const record = {
+                ...input,
+                id: previous?.id ?? eventId(),
+                status:
+                  input.status ??
+                  (previous?.status as ExtractedItemStatus | undefined) ??
+                  "proposed",
+                createdAt: previous?.createdAt ?? timestamp,
+                updatedAt: timestamp,
+              } satisfies ExtractedItemRecord;
+              await db
+                .insert(extractedItems)
+                .values({
+                  ...record,
+                  dueAt: record.dueAt ?? null,
+                  remindAt: record.remindAt ?? null,
+                  eventStartsAt: record.eventStartsAt ?? null,
+                  eventEndsAt: record.eventEndsAt ?? null,
+                })
+                .onConflictDoUpdate({
+                  target: [extractedItems.userId, extractedItems.dedupeKey],
+                  set: {
+                    title: record.title,
+                    body: record.body,
+                    status: record.status,
+                    dueAt: record.dueAt ?? null,
+                    remindAt: record.remindAt ?? null,
+                    eventStartsAt: record.eventStartsAt ?? null,
+                    eventEndsAt: record.eventEndsAt ?? null,
+                    confidence: record.confidence,
+                    metadata: record.metadata,
+                    updatedAt: record.updatedAt,
+                  },
+                });
+              const row = await db
+                .select()
+                .from(extractedItems)
+                .where(
+                  and(
+                    eq(extractedItems.userId, input.userId),
+                    eq(extractedItems.dedupeKey, input.dedupeKey),
+                  ),
+                )
+                .get();
+              if (!row) throw new Error("Extracted item not created");
+              return toExtractedItemRecord(row);
+            }),
+          updateExtractedItemStatus: (input) =>
+            Effect.promise(async () => {
+              await db
+                .update(extractedItems)
+                .set({ status: input.status, updatedAt: nowIso() })
+                .where(
+                  and(eq(extractedItems.id, input.itemId), eq(extractedItems.userId, input.userId)),
+                );
+              const row = await db
+                .select()
+                .from(extractedItems)
+                .where(eq(extractedItems.id, input.itemId))
+                .get();
+              if (!row) throw new Error("Extracted item not found");
+              return toExtractedItemRecord(row);
+            }),
+          upsertSummaryDocument: (input) =>
+            Effect.promise(async () => {
+              const previous = await db
+                .select()
+                .from(summaryDocuments)
+                .where(
+                  and(
+                    eq(summaryDocuments.userId, input.userId),
+                    eq(summaryDocuments.periodType, input.periodType),
+                    eq(summaryDocuments.periodStart, input.periodStart),
+                    eq(summaryDocuments.periodEnd, input.periodEnd),
+                    eq(summaryDocuments.status, input.status),
+                  ),
+                )
+                .get();
+              const timestamp = nowIso();
+              const record = {
+                ...input,
+                id: previous?.id ?? eventId(),
+                generatedAt: timestamp,
+                createdAt: previous?.createdAt ?? timestamp,
+                updatedAt: timestamp,
+              } satisfies SummaryDocumentRecord;
+              await db.insert(summaryDocuments).values(record).onConflictDoNothing();
+              return record;
+            }),
           appendCommitment: (input) =>
             Effect.promise(async () => {
               const existing = await db

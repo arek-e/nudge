@@ -238,4 +238,101 @@ describe("Db", () => {
     expect(result.chunk?.indexedAt).toBe(result.marked.indexedAt);
     expect(result.retrieval.resultChunkIds).toEqual([result.indexed.chunks[0]?.id]);
   });
+
+  test("stores daily notes, extracted items, summaries, and agent run outputs", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const saved = yield* db.upsertDailyNote({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "need to write to mom",
+      });
+      const item = yield* db.upsertExtractedItem({
+        userId: "user-a",
+        sourceRevisionId: saved.revision.id,
+        sourceNoteId: saved.note.id,
+        kind: "task",
+        title: "Write to mom",
+        body: "need to write to mom",
+        status: "proposed",
+        confidence: 0.92,
+        dedupeKey: "task:write-to-mom",
+        metadata: { source: "eval" },
+      });
+      const event = yield* db.recordItemEvent({
+        userId: "user-a",
+        itemId: item.id,
+        eventType: "accepted",
+        payload: { acceptedFrom: "test" },
+      });
+      const reviewed = yield* db.updateExtractedItemStatus({
+        userId: "user-a",
+        itemId: item.id,
+        status: "accepted",
+      });
+      const summary = yield* db.upsertSummaryDocument({
+        userId: "user-a",
+        periodType: "day",
+        periodStart: "2026-06-18",
+        periodEnd: "2026-06-18",
+        title: "Jun 18 summary",
+        body: "User noted one open task: write to mom.",
+        status: "ready",
+        sourceNoteIds: [saved.note.id],
+        sourceItemIds: [item.id],
+        metadata: {},
+      });
+      const run = yield* db.startAgentRun({
+        userId: "user-a",
+        triggerType: "note_inactivity",
+        sourceType: "note_revision",
+        sourceId: saved.revision.id,
+        status: "running",
+        model: "deterministic-test",
+        metadata: {},
+      });
+      const completedRun = yield* db.completeAgentRun({
+        userId: "user-a",
+        runId: run.id,
+        status: "completed",
+        outputs: [
+          { outputType: "extracted_item", outputId: item.id },
+          { outputType: "summary", outputId: summary.id },
+        ],
+      });
+
+      const exportData = yield* db.exportUserData({ id: "user-a", displayName: "User A" });
+      const listedItems = yield* db.listExtractedItems({ userId: "user-a", limit: 10 });
+      const listedSummaries = yield* db.listSummaryDocuments({ userId: "user-a", limit: 10 });
+
+      return {
+        completedRun,
+        event,
+        exportData,
+        listedItems,
+        listedSummaries,
+        reviewed,
+        saved,
+        summary,
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.saved.revision.changedText).toBe("need to write to mom");
+    expect(result.reviewed.status).toBe("accepted");
+    expect(result.event.eventType).toBe("accepted");
+    expect(result.summary.periodType).toBe("day");
+    expect(result.completedRun.status).toBe("completed");
+    expect(result.listedItems).toEqual([expect.objectContaining({ title: "Write to mom" })]);
+    expect(result.listedSummaries).toEqual([expect.objectContaining({ title: "Jun 18 summary" })]);
+    expect(result.exportData.dailyNotes).toHaveLength(1);
+    expect(result.exportData.extractedItems).toHaveLength(1);
+    expect(result.exportData.summaryDocuments).toHaveLength(1);
+    expect(result.exportData.agentRuns).toHaveLength(1);
+    expect(result.exportData.agentRunOutputs).toHaveLength(2);
+  });
 });

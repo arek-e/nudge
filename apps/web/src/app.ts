@@ -5,7 +5,7 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
-import { Db, type DbService } from "@lares/db";
+import { Db, type DbService, type ExtractedItemKind } from "@lares/db";
 import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
 import {
@@ -71,6 +71,45 @@ interface CreateAppOptions {
 const api = implement(apiContract).$context<ApiContext>();
 
 export const apiRouter = api.router({
+  actions: {
+    list: api.actions.list.handler(async ({ context, input }) => {
+      const actions = await Effect.runPromise(
+        context.db.listExtractedItems({
+          limit: input.limit,
+          userId: context.user.id,
+          ...(input.status !== undefined ? { status: input.status } : {}),
+        }),
+      );
+      return { actions: [...actions] };
+    }),
+    updateStatus: api.actions.updateStatus.handler(async ({ context, input }) => {
+      const action = await Effect.runPromise(
+        context.db.updateExtractedItemStatus({
+          itemId: input.itemId,
+          status: input.status,
+          userId: context.user.id,
+        }),
+      );
+      await Effect.runPromise(
+        context.db.recordItemEvent({
+          eventType:
+            input.status === "completed"
+              ? "completed"
+              : input.status === "dismissed"
+                ? "dismissed"
+                : input.status === "archived"
+                  ? "archived"
+                  : input.status === "accepted"
+                    ? "accepted"
+                    : "edited",
+          itemId: action.id,
+          payload: { status: input.status },
+          userId: context.user.id,
+        }),
+      );
+      return { action };
+    }),
+  },
   account: {
     delete: api.account.delete.handler(async ({ context }) => {
       const turbopuffer = context.turbopuffer;
@@ -158,10 +197,15 @@ export const apiRouter = api.router({
   dataExport: api.dataExport.handler(async ({ context }) => {
     const exported = await Effect.runPromise(context.db.exportUserData(context.user));
     return {
+      agentRunOutputs: [...exported.agentRunOutputs],
+      agentRuns: [...exported.agentRuns],
       user: exported.user,
       commitments: [...exported.commitments],
+      dailyNotes: [...exported.dailyNotes],
       events: [...exported.events],
+      extractedItems: [...exported.extractedItems],
       frames: [...exported.frames],
+      itemEvents: [...exported.itemEvents],
       journalDocuments: [...exported.journalDocuments],
       journalRevisions: [...exported.journalRevisions],
       memoryChunks: [...exported.memoryChunks],
@@ -171,9 +215,15 @@ export const apiRouter = api.router({
         ...retrievalEvent,
         resultChunkIds: [...retrievalEvent.resultChunkIds],
       })),
+      noteRevisions: [...exported.noteRevisions],
       outcomes: [...exported.outcomes],
       proposals: [...exported.proposals],
       reviews: [...exported.reviews],
+      summaryDocuments: exported.summaryDocuments.map((summary) => ({
+        ...summary,
+        sourceItemIds: [...summary.sourceItemIds],
+        sourceNoteIds: [...summary.sourceNoteIds],
+      })),
       syntheses: exported.syntheses.map((synthesis) => ({
         ...synthesis,
         openQuestions: [...synthesis.openQuestions],
@@ -228,7 +278,139 @@ export const apiRouter = api.router({
           userId: context.user.id,
         }),
       );
+      const noteResult = await Effect.runPromise(
+        context.db.upsertDailyNote({
+          bodyText: input.bodyText,
+          ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+          localDate: input.localDate,
+          title: input.title,
+          userId: context.user.id,
+        }),
+      );
       if (result.revision.changedText.trim().length > 0) {
+        const agentRun = await Effect.runPromise(
+          context.db.startAgentRun({
+            metadata: { localDate: input.localDate },
+            model: "deterministic-delta-extractor",
+            sourceId: noteResult.revision.id,
+            sourceType: "note_revision",
+            status: "running",
+            triggerType: "note_inactivity",
+            userId: context.user.id,
+          }),
+        );
+        const extractedItems = await Promise.all(
+          extractItemsFromDelta(noteResult.revision.changedText, input.localDate).map(
+            async (extracted) => {
+              const item = await Effect.runPromise(
+                context.db.upsertExtractedItem({
+                  ...extracted,
+                  sourceNoteId: noteResult.note.id,
+                  sourceRevisionId: noteResult.revision.id,
+                  userId: context.user.id,
+                }),
+              );
+              await Promise.all([
+                Effect.runPromise(
+                  context.db.recordItemEvent({
+                    eventType: "created",
+                    itemId: item.id,
+                    payload: { sourceRevisionId: noteResult.revision.id },
+                    userId: context.user.id,
+                  }),
+                ),
+                Effect.runPromise(
+                  context.db.upsertMemoryDocument({
+                    bodyText: `${item.title}\n${item.body}`,
+                    localDate: input.localDate,
+                    sourceId: item.id,
+                    sourceType: "extracted_item",
+                    title: item.title,
+                    userId: context.user.id,
+                  }),
+                ),
+              ]);
+              return item;
+            },
+          ),
+        );
+        const dailySummary = await Effect.runPromise(
+          context.db.upsertSummaryDocument({
+            body: dailySummaryFrom({ items: extractedItems, noteText: input.bodyText }),
+            metadata: { generatedBy: "deterministic-summary" },
+            periodEnd: input.localDate,
+            periodStart: input.localDate,
+            periodType: "day",
+            sourceItemIds: extractedItems.map((item) => item.id),
+            sourceNoteIds: [noteResult.note.id],
+            status: "ready",
+            title: `${input.localDate} summary`,
+            userId: context.user.id,
+          }),
+        );
+        const week = weekRangeFor(input.localDate);
+        const weeklySummary = await Effect.runPromise(
+          context.db.upsertSummaryDocument({
+            body: `Week so far: ${dailySummary.body}`,
+            metadata: { generatedBy: "deterministic-summary" },
+            periodEnd: week.end,
+            periodStart: week.start,
+            periodType: "week",
+            sourceItemIds: extractedItems.map((item) => item.id),
+            sourceNoteIds: [noteResult.note.id],
+            status: "ready",
+            title: `${week.start} week summary`,
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.completeAgentRun({
+            outputs: [
+              ...extractedItems.map((item) => ({
+                outputId: item.id,
+                outputType: "extracted_item" as const,
+              })),
+              { outputId: dailySummary.id, outputType: "summary" as const },
+              { outputId: weeklySummary.id, outputType: "summary" as const },
+            ],
+            runId: agentRun.id,
+            status: "completed",
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: noteResult.note.bodyText,
+            localDate: noteResult.note.localDate,
+            sourceId: noteResult.note.id,
+            sourceType: "daily_note",
+            title: noteResult.note.title,
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: noteResult.revision.changedText,
+            localDate: noteResult.note.localDate,
+            sourceId: noteResult.revision.id,
+            sourceType: "note_revision",
+            title: `${noteResult.note.title} delta`,
+            userId: context.user.id,
+          }),
+        );
+        await Promise.all(
+          [dailySummary, weeklySummary].map((summary) =>
+            Effect.runPromise(
+              context.db.upsertMemoryDocument({
+                bodyText: summary.body,
+                sourceId: summary.id,
+                sourceType: "summary",
+                title: summary.title,
+                userId: context.user.id,
+              }),
+            ),
+          ),
+        );
         await Effect.runPromise(
           context.db.upsertMemoryDocument({
             bodyText: result.revision.changedText,
@@ -307,6 +489,24 @@ export const apiRouter = api.router({
       );
 
       return { signals: [...signals] };
+    }),
+  },
+  summaries: {
+    list: api.summaries.list.handler(async ({ context, input }) => {
+      const summaries = await Effect.runPromise(
+        context.db.listSummaryDocuments({
+          limit: input.limit,
+          userId: context.user.id,
+          ...(input.periodType !== undefined ? { periodType: input.periodType } : {}),
+        }),
+      );
+      return {
+        summaries: summaries.map((summary) => ({
+          ...summary,
+          sourceItemIds: [...summary.sourceItemIds],
+          sourceNoteIds: [...summary.sourceNoteIds],
+        })),
+      };
     }),
   },
   session: api.session.handler(({ context }) => {
@@ -603,6 +803,92 @@ function runMemoryIndex<A, E>(
       Effect.provideService(Db, db),
     ),
   );
+}
+
+function normalizeDedupe(text: string) {
+  return text
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "")
+    .slice(0, 96);
+}
+
+function titleCaseFragment(text: string) {
+  const cleaned = text.replaceAll(/^(need to|i should|should|remember to)\s+/gi, "").trim();
+  if (!cleaned) return "Review note";
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+interface ExtractedItemDraft {
+  readonly kind: ExtractedItemKind;
+  readonly title: string;
+  readonly body: string;
+  readonly status: "proposed";
+  readonly confidence: number;
+  readonly dedupeKey: string;
+  readonly metadata: unknown;
+}
+
+function extractItemsFromDelta(
+  changedText: string,
+  localDate: string,
+): ReadonlyArray<ExtractedItemDraft> {
+  const drafts: Array<ExtractedItemDraft> = [];
+  for (const part of changedText
+    .split(/\n|\.|;|!/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const lower = part.toLowerCase();
+    const base = { body: part, confidence: 0.82, metadata: { localDate } };
+    if (/\b(next week|tomorrow|party|meeting|appointment|birthday)\b/.test(lower)) {
+      drafts.push({
+        ...base,
+        dedupeKey: `reminder:${normalizeDedupe(part)}`,
+        kind: "reminder",
+        status: "proposed",
+        title: titleCaseFragment(part),
+      });
+    } else if (/\b(need to|should|todo|to do|write to|call|send|follow up)\b/.test(lower)) {
+      drafts.push({
+        ...base,
+        dedupeKey: `task:${normalizeDedupe(part)}`,
+        kind: lower.includes("follow up") ? "follow_up" : "task",
+        status: "proposed",
+        title: titleCaseFragment(part),
+      });
+    } else if (/\b(remember|prefers|likes|important)\b/.test(lower)) {
+      drafts.push({
+        ...base,
+        dedupeKey: `memory:${normalizeDedupe(part)}`,
+        kind: "memory",
+        status: "proposed",
+        title: titleCaseFragment(part),
+      });
+    }
+  }
+  return drafts;
+}
+
+function dailySummaryFrom(input: {
+  readonly noteText: string;
+  readonly items: ReadonlyArray<{ readonly title: string }>;
+}) {
+  const itemText =
+    input.items.length > 0
+      ? input.items.map((item) => item.title).join("; ")
+      : "No extracted actions.";
+  return `Executive summary: ${input.noteText.trim().slice(0, 500)}\nActions: ${itemText}`;
+}
+
+function weekRangeFor(localDate: string) {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(date);
+  start.setUTCDate(date.getUTCDate() + mondayOffset);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
 function makeApiHandler() {

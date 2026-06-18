@@ -641,14 +641,14 @@ export function CheckInForm(props: {
 export function BottomNav(props: {
   readonly active: "today" | "loop" | "journey" | "insights";
   readonly onCapture: () => void;
-  readonly onNavigate?: (href: "/" | "/loop" | "/journey" | "/insights") => void;
+  readonly onNavigate?: (href: "/" | "/actions" | "/journey" | "/insights") => void;
 }) {
   const todayActive = props.active === "today";
   const loopActive = props.active === "loop";
   const journeyActive = props.active === "journey";
   const insightsActive = props.active === "insights";
   const navigate = (
-    href: "/" | "/loop" | "/journey" | "/insights",
+    href: "/" | "/actions" | "/journey" | "/insights",
     event: MouseEvent<HTMLAnchorElement>,
   ) => {
     if (!props.onNavigate || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
@@ -674,11 +674,11 @@ export function BottomNav(props: {
       <a
         className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${loopActive ? "text-white" : "text-neutral-500"}`}
         aria-current={loopActive ? "page" : undefined}
-        href="/loop"
-        onClick={(event) => navigate("/loop", event)}
+        href="/actions"
+        onClick={(event) => navigate("/actions", event)}
       >
         <ClipboardList className="size-5" aria-hidden="true" strokeWidth={loopActive ? 2.8 : 2} />
-        Loop
+        Actions
       </a>
       <motion.button
         className="grid size-14 min-h-14 justify-self-center rounded-full bg-[#f4f1eb] text-3xl leading-none text-[#080808] shadow-none"
