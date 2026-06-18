@@ -6,5 +6,7 @@
     "rootDir": "src",
     "tsBuildInfoFile": "../../.tsbuild/packages/evals.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../db" }, { "path": "../effect-services" }]
 }

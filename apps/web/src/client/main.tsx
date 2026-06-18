@@ -21,6 +21,9 @@ import { createRoot } from "react-dom/client";
 import {
   AddActionSheet,
   BottomNav,
+  buildLoopFunnelData,
+  buildOutcomeTrendData,
+  buildSignalCalendarData,
   CheckInForm,
   CommitmentPanel,
   deriveJourneyDayGroups,
@@ -30,7 +33,9 @@ import {
   InsightsPanel,
   JourneyTimeline,
   LaresAppShell,
+  LoopFunnelChart,
   OutcomePanel,
+  OutcomeTrendChart,
   plainTextToRichTextDocument,
   ProposalReviewPanel,
   type RichTextDocument,
@@ -343,6 +348,13 @@ function LoopScreen() {
     pendingProposalCount: proposals.data?.proposals.length ?? 0,
     signalCount: events.data?.events.length ?? 0,
   });
+  const funnelData = buildLoopFunnelData({
+    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
+    closedOutcomeCount: outcomes.data?.outcomes.length ?? 0,
+    pendingProposalCount: proposals.data?.proposals.length ?? 0,
+    signalCount: events.data?.events.length ?? 0,
+    synthesisCount: latestSynthesis.data?.synthesis ? 1 : 0,
+  });
   const generateSynthesis = useMutation({
     mutationFn: async () => {
       await apiClient.syntheses.create({ frameKey: "current_state" });
@@ -439,23 +451,8 @@ function LoopScreen() {
   return (
     <LaresAppShell>
       <Surface eyebrow="Current state" title="Daily Operating Loop">
-        <p className="summary">
-          Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome
-        </p>
-        <div className="mt-4 grid gap-3">
-          {[
-            ["Signals", events.data?.events.length ?? 0],
-            ["Pending proposals", proposals.data?.proposals.length ?? 0],
-            ["Active commitments", commitments.data?.commitments.length ?? 0],
-            ["Closed outcomes", outcomes.data?.outcomes.length ?? 0],
-          ].map(([label, value]) => (
-            <div className="rounded-2xl bg-white/4 p-4" key={label}>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
-                {label}
-              </p>
-              <strong className="mt-1 block text-2xl text-white">{value}</strong>
-            </div>
-          ))}
+        <div className="mt-4">
+          <LoopFunnelChart data={funnelData} />
         </div>
       </Surface>
       <Surface eyebrow="Next" title={nextAction.label} primary>
@@ -713,6 +710,7 @@ function TodayScreen() {
     },
   });
   const recentNotes = (events.data?.events ?? []).slice(0, 4);
+  const weeklyActivity = buildSignalCalendarData(events.data?.events ?? []);
   const openLoopCount =
     (proposals.data?.proposals.length ?? 0) + (commitments.data?.commitments.length ?? 0);
 
@@ -723,6 +721,7 @@ function TodayScreen() {
         hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
         loading={events.isLoading}
         openLoopCount={openLoopCount}
+        weeklyActivity={weeklyActivity}
       />
 
       <Surface id="journal-title" eyebrow="Today" title="Daily note" primary>
@@ -800,9 +799,13 @@ function InsightsScreen() {
     activeCommitmentCount: activeCount,
     outcomes: outcomes.data?.outcomes ?? [],
   });
+  const outcomeTrend = buildOutcomeTrendData(outcomes.data?.outcomes ?? []);
 
   return (
     <LaresAppShell>
+      <Surface id="outcomes-chart-title" eyebrow="Outcomes" title="Closed-loop trend">
+        <OutcomeTrendChart data={outcomeTrend} />
+      </Surface>
       <Surface id="insights-title" eyebrow="Loop intelligence" title="Completion trend">
         <InsightsPanel insights={insights} />
       </Surface>

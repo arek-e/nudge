@@ -24,6 +24,19 @@ import {
 import { motion } from "motion/react";
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
 import { useEffect, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+} from "recharts";
 
 export type RichTextDocument = Value;
 
@@ -89,6 +102,24 @@ export interface JourneyDayGroupViewModel {
     readonly id: string;
     readonly title: string;
   }>;
+}
+
+export interface SignalCalendarDatum {
+  readonly count: number;
+  readonly isToday: boolean;
+  readonly label: string;
+}
+
+export interface LoopFunnelDatum {
+  readonly fill: string;
+  readonly label: string;
+  readonly value: number;
+}
+
+export interface OutcomeTrendDatum {
+  readonly abandoned: number;
+  readonly completed: number;
+  readonly label: string;
 }
 
 export interface TodayLoopState {
@@ -213,6 +244,64 @@ export function deriveLoopInsights(input: {
   ];
 }
 
+export function buildSignalCalendarData(
+  events: ReadonlyArray<EventListItem>,
+  now: Date = new Date(),
+): ReadonlyArray<SignalCalendarDatum> {
+  const start = new Date(now);
+  start.setDate(now.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const next = new Date(date);
+    next.setDate(date.getDate() + 1);
+    const count = events.filter((event) => {
+      const occurred = Date.parse(event.occurredAt ?? "");
+      return occurred >= date.getTime() && occurred < next.getTime();
+    }).length;
+    return {
+      count,
+      isToday: date.toDateString() === now.toDateString(),
+      label: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date).slice(0, 1),
+    };
+  });
+}
+
+export function buildLoopFunnelData(input: {
+  readonly activeCommitmentCount: number;
+  readonly closedOutcomeCount: number;
+  readonly pendingProposalCount: number;
+  readonly signalCount: number;
+  readonly synthesisCount: number;
+}): ReadonlyArray<LoopFunnelDatum> {
+  return [
+    { fill: "#9cc9e8", label: "Signals", value: input.signalCount },
+    { fill: "#c4a76f", label: "Insights", value: input.synthesisCount },
+    { fill: "#e7a5a1", label: "Review", value: input.pendingProposalCount },
+    { fill: "#f4efe8", label: "Commit", value: input.activeCommitmentCount },
+    { fill: "#9fbf9f", label: "Closed", value: input.closedOutcomeCount },
+  ];
+}
+
+export function buildOutcomeTrendData(
+  outcomes: ReadonlyArray<OutcomeViewModel>,
+): ReadonlyArray<OutcomeTrendDatum> {
+  const groups = new Map<string, { abandoned: number; completed: number }>();
+  for (const outcome of outcomes) {
+    const label = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short" }).format(
+      new Date(outcome.recordedAt),
+    );
+    const current = groups.get(label) ?? { abandoned: 0, completed: 0 };
+    groups.set(label, {
+      abandoned: current.abandoned + (outcome.result === "abandoned" ? 1 : 0),
+      completed: current.completed + (outcome.result === "completed" ? 1 : 0),
+    });
+  }
+  return [...groups.entries()].map(([label, value]) => ({ label, ...value }));
+}
+
 export const plainTextToRichTextDocument = (text: string): RichTextDocument => [
   {
     type: "p",
@@ -265,6 +354,7 @@ export function HomeDashboard(props: {
   readonly hasJournalEntry: boolean;
   readonly loading: boolean;
   readonly openLoopCount: number;
+  readonly weeklyActivity: ReadonlyArray<SignalCalendarDatum>;
 }) {
   const today = new Date();
   const dayStart = new Date(today);
@@ -334,8 +424,7 @@ export function HomeDashboard(props: {
         <span className="text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-400 uppercase">
           This week
         </span>
-        <strong>Journal, notes, and loops stay tied to the day.</strong>
-        <span>Use Today for capture. Use Loop when you want to process.</span>
+        <WeeklyActivityChart data={props.weeklyActivity} />
       </DashboardCard>
     </motion.section>
   );
@@ -357,6 +446,113 @@ export function DashboardCard(props: {
         {props.children}
       </div>
     </motion.article>
+  );
+}
+
+const chartFrameClass = "h-28 w-full [&_.recharts-cartesian-axis-tick_text]:fill-neutral-500";
+
+function ChartTooltip(props: {
+  readonly active?: boolean;
+  readonly label?: string;
+  readonly payload?: unknown;
+}) {
+  if (!props.active || !Array.isArray(props.payload) || props.payload.length === 0) return null;
+  const first = props.payload[0] as { readonly name?: string; readonly value?: number };
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#111]/95 px-3 py-2 text-xs text-neutral-200 shadow-xl">
+      <strong className="block text-white">{props.label ?? first.name}</strong>
+      <span>{first.value ?? 0}</span>
+    </div>
+  );
+}
+
+export function WeeklyActivityChart(props: { readonly data: ReadonlyArray<SignalCalendarDatum> }) {
+  return (
+    <div className={chartFrameClass} aria-label="Weekly activity chart">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={props.data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
+          <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={8} fontSize={11} />
+          <Tooltip cursor={false} content={<ChartTooltip />} />
+          <Bar dataKey="count" radius={[8, 8, 8, 8]} minPointSize={6}>
+            {props.data.map((item) => (
+              <Cell key={item.label} fill={item.isToday ? "#f4efe8" : "#6b7280"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function LoopFunnelChart(props: { readonly data: ReadonlyArray<LoopFunnelDatum> }) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr] items-center gap-3" aria-label="Loop funnel chart">
+      <div className="h-28">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={props.data}
+              dataKey="value"
+              nameKey="label"
+              innerRadius={28}
+              outerRadius={52}
+              paddingAngle={4}
+            >
+              {props.data.map((item) => (
+                <Cell key={item.label} fill={item.fill} />
+              ))}
+            </Pie>
+            <Tooltip content={<ChartTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="grid gap-2">
+        {props.data.map((item) => (
+          <div
+            className="grid grid-cols-[0.65rem_1fr_auto] items-center gap-2 text-xs"
+            key={item.label}
+          >
+            <span className="size-2.5 rounded-full" style={{ background: item.fill }} />
+            <span className="text-neutral-400">{item.label}</span>
+            <strong className="text-neutral-100">{item.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeTrendDatum> }) {
+  return (
+    <div className="h-36 w-full" aria-label="Outcome trend chart">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={props.data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
+          <defs>
+            <linearGradient id="lares-completed" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="5%" stopColor="#9fbf9f" stopOpacity={0.55} />
+              <stop offset="95%" stopColor="#9fbf9f" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+          <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={8} fontSize={11} />
+          <Tooltip content={<ChartTooltip />} />
+          <Area
+            type="monotone"
+            dataKey="completed"
+            stroke="#9fbf9f"
+            fill="url(#lares-completed)"
+            strokeWidth={2}
+          />
+          <Area
+            type="monotone"
+            dataKey="abandoned"
+            stroke="#e7a5a1"
+            fill="transparent"
+            strokeWidth={2}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 

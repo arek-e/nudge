@@ -78,11 +78,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect
     .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
     .toBe("still-mounted");
-  await expect(
-    page.getByText(
-      "Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome",
-    ),
-  ).toBeVisible();
+  await expect(page.getByLabel("Loop funnel chart")).toBeVisible();
   await expect(page.getByText("Signals")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Read and write loop" })).toBeVisible();
   await expect(page.getByText("Actions to review")).toBeVisible();

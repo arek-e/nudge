@@ -4,5 +4,13 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "eval": "bun src/run.ts"
+  },
+  "dependencies": {
+    "@lares/db": "workspace:*",
+    "@lares/effect-services": "workspace:*",
+    "effect": "catalog:"
   }
 }

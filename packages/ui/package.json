@@ -12,7 +12,8 @@
     "lucide-react": "catalog:",
     "motion": "catalog:",
     "platejs": "catalog:",
-    "react": "catalog:"
+    "react": "catalog:",
+    "recharts": "catalog:"
   },
   "devDependencies": {
     "@types/react": "catalog:"
