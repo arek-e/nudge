@@ -84,8 +84,14 @@ interface AgentDraftCardState {
   readonly title: string;
 }
 
-const scrollToLoopSection = (id: string) => {
-  document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
+const noteTextFromPayload = (payload: unknown) => {
+  if (payload && typeof payload === "object" && "note" in payload) {
+    return String(payload.note);
+  }
+  if (payload && typeof payload === "object" && "changedText" in payload) {
+    return String(payload.changedText);
+  }
+  return typeof payload === "string" ? payload : JSON.stringify(payload);
 };
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -315,113 +321,12 @@ function LoginScreen() {
 }
 
 function LoopScreen() {
+  const capture = useCapture();
   const events = useEvents();
   const latestSynthesis = useLatestSynthesis();
   const proposals = usePendingProposals();
   const commitments = useActiveCommitments();
   const outcomes = useRecentOutcomes();
-  const nextAction = deriveTodayNextAction({
-    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
-    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
-    pendingProposalCount: proposals.data?.proposals.length ?? 0,
-    signalCount: events.data?.events.length ?? 0,
-  });
-
-  return (
-    <LaresAppShell>
-      <Surface eyebrow="Current state" title="Daily Operating Loop">
-        <p className="summary">
-          Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome
-        </p>
-        <div className="mt-4 grid gap-3">
-          {[
-            ["Signals", events.data?.events.length ?? 0],
-            ["Pending proposals", proposals.data?.proposals.length ?? 0],
-            ["Active commitments", commitments.data?.commitments.length ?? 0],
-            ["Closed outcomes", outcomes.data?.outcomes.length ?? 0],
-          ].map(([label, value]) => (
-            <div className="rounded-2xl bg-white/4 p-4" key={label}>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
-                {label}
-              </p>
-              <strong className="mt-1 block text-2xl text-white">{value}</strong>
-            </div>
-          ))}
-        </div>
-      </Surface>
-      <Surface eyebrow="Next" title={nextAction.label} primary>
-        <p className="summary">{nextAction.detail}</p>
-      </Surface>
-    </LaresAppShell>
-  );
-}
-
-function SettingsScreen() {
-  const session = useSession();
-  const sessionUser = session.data?.user;
-  const workspace = session.data?.workspace;
-  const exportData = useMutation({
-    mutationFn: async () => apiClient.dataExport(),
-    onSuccess: (data) => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `lares-export-${new Date().toISOString()}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-    },
-  });
-  const deleteData = useMutation({
-    mutationFn: async () => apiClient.account.delete(),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries();
-    },
-  });
-
-  return (
-    <LaresAppShell>
-      <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
-        <p className="summary">
-          {sessionUser
-            ? `Signed in as ${sessionUser.displayName}. Auth mode: ${session.data?.authMode}.`
-            : "Loading workspace..."}
-        </p>
-      </Surface>
-      <Surface eyebrow="Data controls" title="Your data">
-        <p className="summary">
-          Export a JSON copy of your current workspace or delete the local MVP data for this user.
-        </p>
-        <div className="mt-4 grid gap-2">
-          <button
-            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
-            type="button"
-            onClick={() => exportData.mutate()}
-          >
-            Export data
-          </button>
-          <button
-            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
-            type="button"
-            onClick={() => deleteData.mutate()}
-          >
-            Delete local data
-          </button>
-        </div>
-      </Surface>
-    </LaresAppShell>
-  );
-}
-
-function TodayScreen() {
-  const capture = useCapture();
-  const localDate = todayLocalDate();
-  const journal = useQuery({
-    queryKey: ["journal", localDate],
-    queryFn: async () => apiClient.journal.get({ localDate }),
-  });
-  const [journalBody, setJournalBody] = useState("");
-  const [journalLoadedId, setJournalLoadedId] = useState<string | null>(null);
   const [agentMessage, setAgentMessage] = useState(
     "Follow up with Maya about the travel plan before lunch.",
   );
@@ -432,17 +337,12 @@ function TodayScreen() {
     readonly body: string;
     readonly bodyDocument: RichTextDocument;
   } | null>(null);
-  const events = useEvents();
-  const latestSynthesis = useLatestSynthesis();
-  const proposals = usePendingProposals();
-  const commitments = useActiveCommitments();
-  const outcomes = useRecentOutcomes();
-  useEffect(() => {
-    if (journal.data?.document && journalLoadedId !== journal.data.document.id) {
-      setJournalLoadedId(journal.data.document.id);
-      setJournalBody(journal.data.document.bodyText);
-    }
-  }, [journal.data?.document, journalLoadedId]);
+  const nextAction = deriveTodayNextAction({
+    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
+    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
+    pendingProposalCount: proposals.data?.proposals.length ?? 0,
+    signalCount: events.data?.events.length ?? 0,
+  });
   const generateSynthesis = useMutation({
     mutationFn: async () => {
       await apiClient.syntheses.create({ frameKey: "current_state" });
@@ -465,7 +365,7 @@ function TodayScreen() {
       await apiClient.outcomes.create({
         commitmentId,
         result: "completed",
-        note: `Marked complete from the Today loop at ${new Date().toISOString()}.`,
+        note: `Marked complete from the Loop view at ${new Date().toISOString()}.`,
       });
     },
     onSuccess: async () => {
@@ -493,7 +393,7 @@ function TodayScreen() {
   const askAgent = useMutation({
     mutationFn: async () => {
       return apiClient.conversations.sendMessage({
-        conversationId: "today",
+        conversationId: "loop",
         message: agentMessage,
       });
     },
@@ -521,96 +421,61 @@ function TodayScreen() {
       await queryClient.invalidateQueries({ queryKey: ["proposals"] });
     },
   });
-  const saveJournal = useMutation({
-    mutationFn: async () => {
-      return apiClient.journal.save({
-        bodyText: journalBody,
-        localDate,
-        title: localDate,
-      });
+  const activity = [
+    {
+      label: "Insights pulled out",
+      value: latestSynthesis.data?.synthesis ? "1 current synthesis" : "None yet",
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
-      await queryClient.invalidateQueries({ queryKey: ["events"] });
-      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    {
+      label: "Actions to review",
+      value: `${proposals.data?.proposals.length ?? 0} proposal${(proposals.data?.proposals.length ?? 0) === 1 ? "" : "s"}`,
     },
-  });
-  const nextAction = deriveTodayNextAction({
-    activeCommitmentCount: commitments.data?.commitments.length ?? 0,
-    hasSynthesis: latestSynthesis.data?.synthesis !== undefined,
-    pendingProposalCount: proposals.data?.proposals.length ?? 0,
-    signalCount: events.data?.events.length ?? 0,
-  });
-  const openNextAction = () => {
-    switch (nextAction.stage) {
-      case "Capture":
-        capture.openCapture();
-        return;
-      case "Synthesis":
-        generateSynthesis.mutate();
-        scrollToLoopSection("synthesis-title");
-        return;
-      case "Proposal":
-        generateProposals.mutate();
-        scrollToLoopSection("proposals-title");
-        return;
-      case "Review":
-        scrollToLoopSection("proposals-title");
-        return;
-      case "Outcome":
-        scrollToLoopSection("commitments-title");
-        return;
-    }
-  };
+    {
+      label: "Active commitments",
+      value: `${commitments.data?.commitments.length ?? 0} open`,
+    },
+  ];
 
   return (
     <LaresAppShell>
-      <HomeDashboard
-        eventCount={events.data?.events.length ?? 0}
-        loading={events.isLoading}
-        nextAction={nextAction}
-        onOpenLoop={openNextAction}
-      />
-
-      <Surface id="journal-title" eyebrow="Daily note" title="Journal" primary>
+      <Surface eyebrow="Current state" title="Daily Operating Loop">
         <p className="summary">
-          Write freely. Lares interprets changes in the background and turns open loops into
-          reviewable action points.
+          Capture → Signal → Frame → Synthesis → Proposal → Review → Commitment → Outcome
         </p>
-        <form
-          className="mt-4 grid gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            saveJournal.mutate();
-          }}
-        >
-          <textarea
-            aria-label="Daily journal"
-            className="min-h-40 resize-y rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base leading-7 text-white outline-none focus:border-white/35"
-            placeholder="need to write to michael..."
-            value={journalBody}
-            onChange={(event) => setJournalBody(event.currentTarget.value)}
-          />
-          <button
-            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
-            disabled={saveJournal.isPending || journalBody.trim().length === 0}
-            type="submit"
-          >
-            {saveJournal.isPending ? "Saving..." : "Save journal"}
-          </button>
-          {saveJournal.isSuccess ? (
-            <p className="m-0 text-sm text-neutral-400" role="status">
-              Saved. Lares will review the changed text.
-            </p>
-          ) : null}
-        </form>
+        <div className="mt-4 grid gap-3">
+          {[
+            ["Signals", events.data?.events.length ?? 0],
+            ["Pending proposals", proposals.data?.proposals.length ?? 0],
+            ["Active commitments", commitments.data?.commitments.length ?? 0],
+            ["Closed outcomes", outcomes.data?.outcomes.length ?? 0],
+          ].map(([label, value]) => (
+            <div className="rounded-2xl bg-white/4 p-4" key={label}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+                {label}
+              </p>
+              <strong className="mt-1 block text-2xl text-white">{value}</strong>
+            </div>
+          ))}
+        </div>
       </Surface>
-
+      <Surface eyebrow="Next" title={nextAction.label} primary>
+        <p className="summary">{nextAction.detail}</p>
+      </Surface>
+      <Surface id="agent-activity-title" eyebrow="Agent activity" title="Read and write loop">
+        <div className="mt-4 grid gap-2">
+          {activity.map((item) => (
+            <div className="rounded-2xl bg-white/5 p-4" key={item.label}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                {item.label}
+              </p>
+              <strong className="mt-1 block text-base text-white">{item.value}</strong>
+            </div>
+          ))}
+        </div>
+      </Surface>
       <Surface id="agent-title" eyebrow="Agent" title="Tell Lares" primary>
         <p className="summary">
-          Say what is happening. Lares will translate it into the loop and ask before turning it
-          into a commitment.
+          Use this when you want Lares to pull out an action, insight, or reviewable next step.
         </p>
         <form
           className="mt-4 grid gap-3"
@@ -678,14 +543,6 @@ function TodayScreen() {
           </p>
         ) : null}
       </Surface>
-
-      <Surface id="today-title" eyebrow="Today" title="Start with the current state">
-        <p className="summary">
-          Capture priorities, constraints, energy, and follow-ups. Lares keeps this as user-owned
-          context for the loop, not as hidden automation.
-        </p>
-      </Surface>
-
       <Surface id="synthesis-title" eyebrow="Synthesis" title="What matters now?">
         <SynthesisPanel
           synthesis={latestSynthesis.data?.synthesis}
@@ -694,7 +551,6 @@ function TodayScreen() {
           onGenerate={() => generateSynthesis.mutate()}
         />
       </Surface>
-
       <Surface id="proposals-title" eyebrow="Review" title="Proposals">
         <ProposalReviewPanel
           proposals={proposals.data?.proposals}
@@ -714,7 +570,6 @@ function TodayScreen() {
           }
         />
       </Surface>
-
       <Surface id="commitments-title" eyebrow="Commit" title="Active commitments">
         <CommitmentPanel
           commitments={commitments.data?.commitments}
@@ -723,11 +578,12 @@ function TodayScreen() {
           onComplete={(commitmentId) => recordOutcome.mutate(commitmentId)}
         />
       </Surface>
-
       <Surface id="closed-loop-title" eyebrow="Outcome" title="Closed loop">
         <OutcomePanel outcomes={outcomes.data?.outcomes} loading={outcomes.isLoading} />
       </Surface>
-
+      <Surface id="check-in-title" title="Capture" primary>
+        <CheckInForm status={capture.status} saving={capture.saving} onOpen={capture.openCapture} />
+      </Surface>
       <WritingDrawer
         eyebrow="Edit proposal"
         drawerTitle="Commit this as your own"
@@ -764,9 +620,160 @@ function TodayScreen() {
           });
         }}
       />
+    </LaresAppShell>
+  );
+}
 
-      <Surface id="check-in-title" title="Capture" primary>
-        <CheckInForm status={capture.status} saving={capture.saving} onOpen={capture.openCapture} />
+function SettingsScreen() {
+  const session = useSession();
+  const sessionUser = session.data?.user;
+  const workspace = session.data?.workspace;
+  const exportData = useMutation({
+    mutationFn: async () => apiClient.dataExport(),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `lares-export-${new Date().toISOString()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+  const deleteData = useMutation({
+    mutationFn: async () => apiClient.account.delete(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
+
+  return (
+    <LaresAppShell>
+      <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
+        <p className="summary">
+          {sessionUser
+            ? `Signed in as ${sessionUser.displayName}. Auth mode: ${session.data?.authMode}.`
+            : "Loading workspace..."}
+        </p>
+      </Surface>
+      <Surface eyebrow="Data controls" title="Your data">
+        <p className="summary">
+          Export a JSON copy of your current workspace or delete the local MVP data for this user.
+        </p>
+        <div className="mt-4 grid gap-2">
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
+            type="button"
+            onClick={() => exportData.mutate()}
+          >
+            Export data
+          </button>
+          <button
+            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
+            type="button"
+            onClick={() => deleteData.mutate()}
+          >
+            Delete local data
+          </button>
+        </div>
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function TodayScreen() {
+  const localDate = todayLocalDate();
+  const journal = useQuery({
+    queryKey: ["journal", localDate],
+    queryFn: async () => apiClient.journal.get({ localDate }),
+  });
+  const [journalBody, setJournalBody] = useState("");
+  const [journalLoadedId, setJournalLoadedId] = useState<string | null>(null);
+  const events = useEvents();
+  const proposals = usePendingProposals();
+  const commitments = useActiveCommitments();
+  useEffect(() => {
+    if (journal.data?.document && journalLoadedId !== journal.data.document.id) {
+      setJournalLoadedId(journal.data.document.id);
+      setJournalBody(journal.data.document.bodyText);
+    }
+  }, [journal.data?.document, journalLoadedId]);
+  const saveJournal = useMutation({
+    mutationFn: async () => {
+      return apiClient.journal.save({
+        bodyText: journalBody,
+        localDate,
+        title: localDate,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
+      await queryClient.invalidateQueries({ queryKey: ["events"] });
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+  });
+  const recentNotes = (events.data?.events ?? []).slice(0, 4);
+  const openLoopCount =
+    (proposals.data?.proposals.length ?? 0) + (commitments.data?.commitments.length ?? 0);
+
+  return (
+    <LaresAppShell>
+      <HomeDashboard
+        eventCount={events.data?.events.length ?? 0}
+        hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
+        loading={events.isLoading}
+        openLoopCount={openLoopCount}
+      />
+
+      <Surface id="journal-title" eyebrow="Today" title="Daily note" primary>
+        <form
+          className="mt-4 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveJournal.mutate();
+          }}
+        >
+          <textarea
+            aria-label="Daily journal"
+            className="min-h-40 resize-y rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base leading-7 text-white outline-none focus:border-white/35"
+            placeholder="What should Lares remember from today?"
+            value={journalBody}
+            onChange={(event) => setJournalBody(event.currentTarget.value)}
+          />
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            disabled={saveJournal.isPending || journalBody.trim().length === 0}
+            type="submit"
+          >
+            {saveJournal.isPending ? "Saving..." : "Save journal"}
+          </button>
+          {saveJournal.isSuccess ? (
+            <p className="m-0 text-sm text-neutral-400" role="status">
+              Saved. Lares will review the changed text.
+            </p>
+          ) : null}
+        </form>
+      </Surface>
+
+      <Surface id="recent-notes-title" eyebrow="Notes" title="Recent notes">
+        <div className="mt-4 grid gap-2">
+          {recentNotes.length > 0 ? (
+            recentNotes.map((event) => (
+              <article className="rounded-2xl bg-white/5 p-4" key={event.id}>
+                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                  {event.occurredAt ? new Date(event.occurredAt).toLocaleDateString() : "Saved"}
+                </p>
+                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-neutral-200">
+                  {noteTextFromPayload(event.payload)}
+                </p>
+              </article>
+            ))
+          ) : (
+            <p className="m-0 text-sm leading-6 text-neutral-400">
+              No notes yet. Write the first daily note above.
+            </p>
+          )}
+        </div>
       </Surface>
     </LaresAppShell>
   );

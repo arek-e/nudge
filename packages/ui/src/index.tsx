@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Home,
-  Lightbulb,
   Moon,
   PenLine,
   Plus,
@@ -263,19 +262,22 @@ export function DashboardHeader(props: { readonly title?: string }) {
 
 export function HomeDashboard(props: {
   readonly eventCount: number;
+  readonly hasJournalEntry: boolean;
   readonly loading: boolean;
-  readonly nextAction: TodayNextActionViewModel;
-  readonly onOpenLoop: () => void;
+  readonly openLoopCount: number;
 }) {
-  const days = [
-    ["Su", "13"],
-    ["Mo", "14"],
-    ["Tu", "15"],
-    ["We", "16"],
-    ["Th", "17"],
-    ["Fr", "18"],
-    ["Sa", "19"],
-  ] as const;
+  const today = new Date();
+  const dayStart = new Date(today);
+  dayStart.setDate(today.getDate() - today.getDay());
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(dayStart);
+    date.setDate(dayStart.getDate() + index);
+    return {
+      day: String(date.getDate()).padStart(2, "0"),
+      isToday: date.toDateString() === today.toDateString(),
+      weekday: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date).slice(0, 2),
+    };
+  });
 
   return (
     <motion.section
@@ -306,44 +308,34 @@ export function HomeDashboard(props: {
         className="grid grid-cols-7 items-center gap-1 text-center text-neutral-500"
         aria-label="Week"
       >
-        {days.map(([weekday, day]) => (
+        {days.map((day) => (
           <span
-            className={`grid min-h-9 place-content-center gap-0.5 rounded-xl ${weekday === "Fr" ? "bg-[#232323] text-white" : ""}`}
-            key={weekday}
+            className={`grid min-h-9 place-content-center gap-0.5 rounded-xl ${day.isToday ? "bg-[#232323] text-white" : ""}`}
+            key={day.weekday}
           >
-            <small className="text-[0.58rem]">{weekday}</small>
-            <strong className="text-[0.7rem] font-semibold">{day}</strong>
+            <small className="text-[0.58rem]">{day.weekday}</small>
+            <strong className="text-[0.7rem] font-semibold">{day.day}</strong>
           </span>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <DashboardCard label="Morning Preparation">
+        <DashboardCard label="Notes">
           <Sun className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
-          <strong>Ready to take on the day?</strong>
-          <span>{props.loading ? "..." : `${props.eventCount} signals in context`}</span>
+          <strong>{props.hasJournalEntry ? "Today is written." : "No note yet."}</strong>
+          <span>{props.loading ? "..." : `${props.eventCount} items in context`}</span>
         </DashboardCard>
-        <DashboardCard label="Evening Reflection">
+        <DashboardCard label="Open loops">
           <Moon className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
-          <strong>Time to clear your mind.</strong>
-          <span>Close the loop before rest.</span>
+          <strong>{props.openLoopCount}</strong>
+          <span>{props.openLoopCount === 0 ? "Nothing waiting." : "Waiting for review."}</span>
         </DashboardCard>
       </div>
-      <DashboardCard label="Daily operating loop" wide>
+      <DashboardCard label="Calendar" wide>
         <span className="text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-400 uppercase">
-          Next: {props.nextAction.stage}
+          This week
         </span>
-        <strong>{props.nextAction.label}</strong>
-        <span>{props.nextAction.detail}</span>
-        <button
-          className="justify-self-center rounded-full bg-[#f4f1eb] px-5 py-2 text-[0.75rem] font-semibold text-[#080808] no-underline"
-          type="button"
-          onClick={props.onOpenLoop}
-        >
-          <span className="inline-flex items-center gap-1.5 text-[#080808]">
-            <Lightbulb className="size-3.5" aria-hidden="true" strokeWidth={2.3} />
-            Open loop
-          </span>
-        </button>
+        <strong>Journal, notes, and loops stay tied to the day.</strong>
+        <span>Use Today for capture. Use Loop when you want to process.</span>
       </DashboardCard>
     </motion.section>
   );
