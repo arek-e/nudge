@@ -130,7 +130,10 @@ export const conversationMetadataSchema = z.object({
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
   recentToolEvents: z.array(conversationToolEventSchema),
+  skills: z.array(z.enum(["intake-loop", "review-commitment", "close-loop"])),
+  subAgents: z.array(z.enum(["loopIntake"])),
   tools: z.array(z.literal("listRecentSignals")),
+  workflows: z.array(z.enum(["dailyDigest"])),
 });
 
 export const listRecentSignalsToolResponseSchema = z.object({
@@ -155,7 +158,10 @@ export const conversationMessageResponseSchema = z.object({
     .nullable(),
   message: z.string(),
   reply: z.string(),
+  skillsApplied: z.array(z.enum(["intake-loop"])),
+  subAgentsUsed: z.array(z.enum(["loopIntake"])),
   usedTools: z.array(z.enum(["appendSignal", "createSynthesis", "generateProposals"])),
+  workflowHooks: z.array(z.enum(["dailyDigest"])),
 });
 
 export const sessionResponseSchema = z.object({

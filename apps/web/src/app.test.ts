@@ -596,7 +596,10 @@ describe("web app", () => {
             createdAt: null,
             updatedAt: null,
             recentToolEvents: [],
+            skills: ["intake-loop", "review-commitment", "close-loop"],
+            subAgents: ["loopIntake"],
             tools: ["listRecentSignals"],
+            workflows: ["dailyDigest"],
           });
         },
       }),
@@ -620,7 +623,10 @@ describe("web app", () => {
       createdAt: null,
       updatedAt: null,
       recentToolEvents: [],
+      skills: ["intake-loop", "review-commitment", "close-loop"],
+      subAgents: ["loopIntake"],
       tools: ["listRecentSignals"],
+      workflows: ["dailyDigest"],
     });
   });
 
@@ -666,7 +672,10 @@ describe("web app", () => {
             },
             message: "What should I do next?",
             reply: "I drafted a reviewable next step from your message.",
+            skillsApplied: ["intake-loop"],
+            subAgentsUsed: ["loopIntake"],
             usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
           });
         },
       }),
@@ -720,7 +729,10 @@ describe("web app", () => {
       },
       message: "What should I do next?",
       reply: "I drafted a reviewable next step from your message.",
+      skillsApplied: ["intake-loop"],
+      subAgentsUsed: ["loopIntake"],
       usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
+      workflowHooks: ["dailyDigest"],
     });
   });
 

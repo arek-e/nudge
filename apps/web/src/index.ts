@@ -28,6 +28,17 @@ interface UserAgentSessionState {
   readonly userId: string;
 }
 
+interface LaresUserRef {
+  readonly displayName: string;
+  readonly id: string;
+}
+
+interface LoopIntakeDraftInput {
+  readonly conversationId: string;
+  readonly message: string;
+  readonly user: LaresUserRef;
+}
+
 const initialUserAgentSessionState = {
   conversationId: null,
   createdAt: null,
@@ -54,8 +65,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json({
       ok: true,
       role: "user-agent-session",
+      skills: ["intake-loop", "review-commitment", "close-loop"],
+      subAgents: ["loopIntake"],
       session: this.state,
       tools: ["listRecentSignals"],
+      workflows: ["dailyDigest"],
     });
   }
 
@@ -76,7 +90,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       recentToolEvents: state.recentToolEvents,
+      skills: ["intake-loop", "review-commitment", "close-loop"],
+      subAgents: ["loopIntake"],
       tools: ["listRecentSignals"],
+      workflows: ["dailyDigest"],
     });
   }
 
@@ -128,34 +145,8 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const user = this.resolveUser(request);
     const body = (await request.json()) as { readonly message?: string };
     const message = String(body.message ?? "").trim();
-    const occurredAt = new Date().toISOString();
-    const signal = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.appendSignal({
-          idempotencyKey: `agent:${conversationId}:${message}`,
-          occurredAt,
-          payload: { note: message },
-          schemaVersion: 1,
-          source: "lares_agent_intake",
-          type: "manual_check_in_submitted",
-          user,
-        }),
-        Db.layerD1(this.env.DB),
-      ),
-    );
-    await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user }),
-        Db.layerD1(this.env.DB),
-      ),
-    );
-    const proposals = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user }),
-        Db.layerD1(this.env.DB),
-      ),
-    );
-    const proposal = proposals[0];
+    const intake = await this.subAgent(LoopIntakeAgent, "current-state");
+    const draft = await intake.draftFromMessage({ conversationId, message, user });
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
 
@@ -163,7 +154,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
       recentToolEvents: [
-        { at: timestamp, resultCount: proposal ? 1 : 0, tool: "reply" as const },
+        { at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" as const },
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -172,6 +163,49 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
     return Response.json({
       conversationId,
+      draft: draft.draft,
+      message,
+      reply: draft.reply,
+      skillsApplied: ["intake-loop"],
+      subAgentsUsed: ["loopIntake"],
+      usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
+      workflowHooks: ["dailyDigest"],
+    });
+  }
+}
+
+export class LoopIntakeAgent extends Agent<Env> {
+  async draftFromMessage(input: LoopIntakeDraftInput) {
+    const occurredAt = new Date().toISOString();
+    const signal = await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+          occurredAt,
+          payload: { note: input.message },
+          schemaVersion: 1,
+          source: "lares_agent_intake",
+          type: "manual_check_in_submitted",
+          user: input.user,
+        }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    const proposals = await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    const proposal = proposals[0];
+
+    return {
       draft: proposal
         ? {
             confidence: 0.82,
@@ -187,7 +221,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
               createdAt: proposal.createdAt,
               updatedAt: proposal.updatedAt,
             },
-            requiresReview: true,
+            requiresReview: true as const,
             signal: {
               id: signal.id,
               userId: signal.userId,
@@ -200,12 +234,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
             },
           }
         : null,
-      message,
       reply: proposal
         ? "I drafted a reviewable next step from your message."
         : "I captured this, but I do not have a reviewable next step yet.",
-      usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
-    });
+    };
   }
 }
 
