@@ -85,6 +85,12 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(primaryNav.getByRole("link", { name: "Docs" })).toHaveCount(0);
   await expect(primaryNav.getByRole("link", { name: "Prompts" })).toHaveCount(0);
 
+  await primaryNav.getByRole("button", { name: "Write capture" }).tap();
+  const addSheetBox = await page.getByRole("dialog", { name: "Add to Lares" }).boundingBox();
+  expect(addSheetBox?.y).toBeGreaterThanOrEqual(0);
+  expect((addSheetBox?.y ?? 0) + (addSheetBox?.height ?? 0)).toBeLessThanOrEqual(viewportHeight);
+  await page.getByRole("button", { name: "Cancel" }).tap();
+
   await page.getByRole("link", { name: "Loop" }).tap();
   await expect(page.getByRole("heading", { name: "Daily Operating Loop" })).toBeVisible();
   await expect(

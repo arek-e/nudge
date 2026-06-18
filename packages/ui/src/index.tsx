@@ -521,9 +521,7 @@ export function AddActionSheet(props: {
       <Drawer.Portal>
         <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-black/55 transition-opacity" />
         <Drawer.Viewport className="fixed inset-0 z-21">
-          <Drawer.Popup
-            className={`${surfaceClass} fixed inset-x-0 bottom-0 mx-auto w-full max-w-[44rem] rounded-t-[2rem] rounded-b-none p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] outline-0`}
-          >
+          <Drawer.Popup className="fixed inset-x-0 bottom-0 mx-auto max-h-[calc(100dvh-1rem)] w-full max-w-[44rem] overflow-y-auto overscroll-contain rounded-t-[2rem] rounded-b-none border border-white/6 bg-[#1f1f1f]/95 p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.02)] outline-0 backdrop-blur-xl">
             <Drawer.Content>
               <div className="mx-auto mb-5 h-1 w-9 rounded-full bg-white/10" aria-hidden="true" />
               <Drawer.Title className="m-0 text-center text-2xl font-semibold tracking-[-0.03em] text-white">
