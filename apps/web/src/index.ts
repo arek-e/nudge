@@ -128,15 +128,34 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const user = this.resolveUser(request);
     const body = (await request.json()) as { readonly message?: string };
     const message = String(body.message ?? "").trim();
-    const signals = await Effect.runPromise(
+    const occurredAt = new Date().toISOString();
+    const signal = await Effect.runPromise(
       Effect.provide(
-        PrimitiveWorkflows.listSignals({
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent:${conversationId}:${message}`,
+          occurredAt,
+          payload: { note: message },
+          schemaVersion: 1,
+          source: "lares_agent_intake",
+          type: "manual_check_in_submitted",
           user,
-          limit: 5,
         }),
         Db.layerD1(this.env.DB),
       ),
     );
+    await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    const proposals = await Effect.runPromise(
+      Effect.provide(
+        PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user }),
+        Db.layerD1(this.env.DB),
+      ),
+    );
+    const proposal = proposals[0];
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
 
@@ -144,23 +163,48 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
       recentToolEvents: [
-        { at: timestamp, resultCount: signals.length, tool: "reply" as const },
+        { at: timestamp, resultCount: proposal ? 1 : 0, tool: "reply" as const },
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
       userId: user.id,
     });
 
-    const nextStep =
-      signals.length === 0
-        ? "Start by capturing one concrete signal from what is on your mind."
-        : "Start by reviewing the newest signal, then choose one next commitment.";
-
     return Response.json({
       conversationId,
+      draft: proposal
+        ? {
+            confidence: 0.82,
+            proposal: {
+              id: proposal.id,
+              userId: proposal.userId,
+              synthesisId: proposal.synthesisId,
+              kind: proposal.kind,
+              status: proposal.status,
+              title: proposal.title,
+              body: proposal.body,
+              rationale: proposal.rationale,
+              createdAt: proposal.createdAt,
+              updatedAt: proposal.updatedAt,
+            },
+            requiresReview: true,
+            signal: {
+              id: signal.id,
+              userId: signal.userId,
+              type: signal.type,
+              source: signal.source,
+              occurredAt: signal.occurredAt,
+              schemaVersion: signal.schemaVersion,
+              payload: signal.payload,
+              createdAt: signal.createdAt,
+            },
+          }
+        : null,
       message,
-      reply: `I found ${signals.length} recent signal${signals.length === 1 ? "" : "s"}. ${nextStep}`,
-      usedTools: ["listRecentSignals"],
+      reply: proposal
+        ? "I drafted a reviewable next step from your message."
+        : "I captured this, but I do not have a reviewable next step yet.",
+      usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
     });
   }
 }

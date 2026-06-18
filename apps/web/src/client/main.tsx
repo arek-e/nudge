@@ -72,6 +72,14 @@ const bodyFromEditorText = (text: string) => {
   return body || text.trim();
 };
 
+interface AgentDraftCardState {
+  readonly body: string;
+  readonly confidence: number;
+  readonly proposalId: string;
+  readonly signalNote: string;
+  readonly title: string;
+}
+
 const scrollToLoopSection = (id: string) => {
   document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
 };
@@ -399,7 +407,10 @@ function SettingsScreen() {
 
 function TodayScreen() {
   const capture = useCapture();
-  const [agentMessage, setAgentMessage] = useState("What should I do next?");
+  const [agentMessage, setAgentMessage] = useState(
+    "Follow up with Maya about the travel plan before lunch.",
+  );
+  const [agentDraft, setAgentDraft] = useState<AgentDraftCardState | null>(null);
   const [agentReply, setAgentReply] = useState("");
   const [proposalEditor, setProposalEditor] = useState<{
     readonly proposalId: string;
@@ -453,6 +464,7 @@ function TodayScreen() {
     },
     onSuccess: async () => {
       setProposalEditor(null);
+      setAgentDraft(null);
       await queryClient.invalidateQueries({ queryKey: ["proposals"] });
       await queryClient.invalidateQueries({ queryKey: ["commitments"] });
     },
@@ -465,7 +477,28 @@ function TodayScreen() {
       });
     },
     onError: () => setAgentReply("Lares could not answer yet. Try again in a moment."),
-    onSuccess: (response) => setAgentReply(response.reply),
+    onSuccess: async (response) => {
+      setAgentReply(response.reply);
+      setAgentDraft(
+        response.draft
+          ? {
+              body: response.draft.proposal.body,
+              confidence: response.draft.confidence,
+              proposalId: response.draft.proposal.id,
+              signalNote:
+                typeof response.draft.signal.payload === "object" &&
+                response.draft.signal.payload !== null &&
+                "note" in response.draft.signal.payload
+                  ? String(response.draft.signal.payload.note)
+                  : response.message,
+              title: response.draft.proposal.title,
+            }
+          : null,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["events"] });
+      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
   });
   const nextAction = deriveTodayNextAction({
     activeCommitmentCount: commitments.data?.commitments.length ?? 0,
@@ -504,9 +537,10 @@ function TodayScreen() {
         onOpenLoop={openNextAction}
       />
 
-      <Surface id="agent-title" eyebrow="Agent" title="Ask Lares" primary>
+      <Surface id="agent-title" eyebrow="Agent" title="Tell Lares" primary>
         <p className="summary">
-          Lares can inspect your recent signals and suggest the next safe, reviewable step.
+          Say what is happening. Lares will translate it into the loop and ask before turning it
+          into a commitment.
         </p>
         <form
           className="mt-4 grid gap-3"
@@ -528,13 +562,50 @@ function TodayScreen() {
             disabled={askAgent.isPending || agentMessage.trim().length === 0}
             type="submit"
           >
-            {askAgent.isPending ? "Asking..." : "Ask Lares"}
+            {askAgent.isPending ? "Drafting..." : "Tell Lares"}
           </button>
         </form>
-        {agentReply ? (
+        {agentDraft ? (
           <div className="mt-4 rounded-2xl bg-black/20 p-4 text-sm leading-6 text-neutral-200">
-            {agentReply}
+            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+              Lares understood
+            </p>
+            <p className="mt-2 mb-0 text-neutral-300">{agentDraft.signalNote}</p>
+            <div className="mt-4 rounded-2xl bg-white/5 p-4">
+              <strong className="block text-base text-white">{agentDraft.title}</strong>
+              <span className="mt-1 block text-sm text-neutral-300">{agentDraft.body}</span>
+              <span className="mt-3 block text-xs text-neutral-500">
+                Confidence {Math.round(agentDraft.confidence * 100)}%. Requires review.
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                className="min-h-11 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+                disabled={reviewProposal.isPending}
+                type="button"
+                onClick={() =>
+                  reviewProposal.mutate({ proposalId: agentDraft.proposalId, decision: "accepted" })
+                }
+              >
+                Accept
+              </button>
+              <button
+                className="min-h-11 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100 disabled:opacity-60"
+                disabled={reviewProposal.isPending}
+                type="button"
+                onClick={() =>
+                  reviewProposal.mutate({ proposalId: agentDraft.proposalId, decision: "rejected" })
+                }
+              >
+                Reject
+              </button>
+            </div>
+            {agentReply ? <p className="mt-4 mb-0 text-neutral-400">{agentReply}</p> : null}
           </div>
+        ) : agentReply ? (
+          <p className="mt-4 mb-0 rounded-2xl bg-black/20 p-4 text-sm leading-6 text-neutral-200">
+            {agentReply}
+          </p>
         ) : null}
       </Surface>
 

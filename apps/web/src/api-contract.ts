@@ -145,9 +145,17 @@ export const conversationMessageInputSchema = z.object({
 
 export const conversationMessageResponseSchema = z.object({
   conversationId: z.string(),
+  draft: z
+    .object({
+      confidence: z.number().min(0).max(1),
+      proposal: proposalRecordSchema,
+      requiresReview: z.literal(true),
+      signal: eventRecordSchema,
+    })
+    .nullable(),
   message: z.string(),
   reply: z.string(),
-  usedTools: z.array(z.literal("listRecentSignals")),
+  usedTools: z.array(z.enum(["appendSignal", "createSynthesis", "generateProposals"])),
 });
 
 export const sessionResponseSchema = z.object({

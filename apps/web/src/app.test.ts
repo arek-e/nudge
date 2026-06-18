@@ -638,9 +638,35 @@ describe("web app", () => {
           expect(await request.json()).toEqual({ message: "What should I do next?" });
           return Response.json({
             conversationId: "focus",
+            draft: {
+              confidence: 0.82,
+              signal: {
+                id: "signal-1",
+                userId: "dev-user",
+                type: "manual_check_in_submitted",
+                source: "lares_agent_intake",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "What should I do next?" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+              proposal: {
+                id: "proposal-1",
+                userId: "dev-user",
+                synthesisId: "synthesis-1",
+                kind: "commit",
+                status: "pending",
+                title: "Clarify the next step",
+                body: "Choose one concrete next action.",
+                rationale: "Generated from the latest user message.",
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-12T10:00:00.000Z",
+              },
+              requiresReview: true,
+            },
             message: "What should I do next?",
-            reply: "I found 2 recent signals. Start by capturing the current state.",
-            usedTools: ["listRecentSignals"],
+            reply: "I drafted a reviewable next step from your message.",
+            usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
           });
         },
       }),
@@ -666,9 +692,35 @@ describe("web app", () => {
     expect(forwardedRequests[0]!.headers.get("x-lares-user-display-name")).toBe("Dev User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
+      draft: {
+        confidence: 0.82,
+        signal: {
+          id: "signal-1",
+          userId: "dev-user",
+          type: "manual_check_in_submitted",
+          source: "lares_agent_intake",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          schemaVersion: 1,
+          payload: { note: "What should I do next?" },
+          createdAt: "2026-06-12T10:00:00.000Z",
+        },
+        proposal: {
+          id: "proposal-1",
+          userId: "dev-user",
+          synthesisId: "synthesis-1",
+          kind: "commit",
+          status: "pending",
+          title: "Clarify the next step",
+          body: "Choose one concrete next action.",
+          rationale: "Generated from the latest user message.",
+          createdAt: "2026-06-12T10:00:00.000Z",
+          updatedAt: "2026-06-12T10:00:00.000Z",
+        },
+        requiresReview: true,
+      },
       message: "What should I do next?",
-      reply: "I found 2 recent signals. Start by capturing the current state.",
-      usedTools: ["listRecentSignals"],
+      reply: "I drafted a reviewable next step from your message.",
+      usedTools: ["appendSignal", "createSynthesis", "generateProposals"],
     });
   });
 
