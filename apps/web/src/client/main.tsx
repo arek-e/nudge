@@ -8,6 +8,8 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
+import { createAuthClient } from "better-auth/client";
+import { magicLinkClient } from "better-auth/client/plugins";
 import { createContext, type FormEvent, StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -28,6 +30,7 @@ import { apiClient } from "./api-client";
 import "./styles.css";
 
 const queryClient = new QueryClient();
+const authClient = createAuthClient({ plugins: [magicLinkClient()] });
 
 interface CaptureContextValue {
   readonly status: string;
@@ -144,7 +147,7 @@ function AppShell() {
   }
 
   if (session.data?.authMode === "unauthenticated") {
-    return <LoginScreen />;
+    return <LoginScreen authMethods={session.data.authMethods} />;
   }
 
   return (
@@ -223,36 +226,49 @@ function LoginFrame(props: { readonly children?: React.ReactNode; readonly title
   );
 }
 
-function LoginScreen() {
+function LoginScreen(props: {
+  readonly authMethods: { readonly emailMagicLink: boolean; readonly google: boolean };
+}) {
   const [email, setEmail] = useState("alek@teampitch.app");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const signIn = useMutation({
+  const [sentTo, setSentTo] = useState("");
+  const continueWithEmail = useMutation({
     mutationFn: async () => {
-      const response = await fetch("/api/auth/sign-in/email", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      const result = await authClient.signIn.magicLink({
+        callbackURL: "/",
+        email,
       });
-      if (!response.ok) throw new Error("Could not sign in");
+      if (result.error) throw new Error("Could not send sign-in link");
     },
-    onError: () => setError("Email or password is incorrect."),
-    onSuccess: async () => {
+    onError: () => setError("Could not send a sign-in link. Try again."),
+    onSuccess: () => {
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["session"] });
+      setSentTo(email);
     },
   });
+  const continueWithGoogle = async () => {
+    await authClient.signIn.social({ callbackURL: "/", provider: "google" });
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    signIn.mutate();
+    continueWithEmail.mutate();
   };
 
   return (
-    <LoginFrame title="Sign in to Lares">
+    <LoginFrame title="Continue to Lares">
       <p className="m-0 text-sm leading-6 text-neutral-300">
-        Private workspace access is limited to invited accounts.
+        Use Google or a one-time email link. New accounts are created the first time you continue.
       </p>
+      {props.authMethods.google ? (
+        <button
+          className="mt-6 rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
+          onClick={continueWithGoogle}
+          type="button"
+        >
+          Continue with Google
+        </button>
+      ) : null}
       <form className="mt-6 grid gap-4" onSubmit={submit}>
         <label className="grid gap-2 text-sm font-medium text-neutral-200">
           Email
@@ -265,23 +281,16 @@ function LoginScreen() {
             onChange={(event) => setEmail(event.currentTarget.value)}
           />
         </label>
-        <label className="grid gap-2 text-sm font-medium text-neutral-200">
-          Password
-          <input
-            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
-            autoComplete="current-password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.currentTarget.value)}
-          />
-        </label>
+        {sentTo ? (
+          <p className="m-0 text-sm text-emerald-300">Check {sentTo} for your sign-in link.</p>
+        ) : null}
         {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
         <button
           className="rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
-          disabled={signIn.isPending}
+          disabled={!props.authMethods.emailMagicLink || continueWithEmail.isPending}
           type="submit"
         >
-          {signIn.isPending ? "Signing in..." : "Sign in"}
+          {continueWithEmail.isPending ? "Sending link..." : "Continue with email"}
         </button>
       </form>
     </LoginFrame>
@@ -448,6 +457,7 @@ function SettingsScreen() {
 }
 
 function TodayScreen() {
+  const navigate = useNavigate();
   const localDate = todayLocalDate();
   const journal = useQuery({
     queryKey: ["journal", localDate],
@@ -461,6 +471,19 @@ function TodayScreen() {
     actions.data?.actions.filter(
       (action) => action.status === "proposed" || action.status === "accepted",
     ).length ?? 0;
+  const signOut = useMutation({
+    mutationFn: async () => {
+      await fetch("/api/auth/sign-out", { method: "POST" });
+    },
+    onSettled: () => {
+      queryClient.setQueryData(["session"], {
+        authMethods: { emailMagicLink: true, google: false },
+        authMode: "unauthenticated",
+        user: null,
+        workspace: null,
+      });
+    },
+  });
 
   return (
     <LaresAppShell>
@@ -468,6 +491,8 @@ function TodayScreen() {
         eventCount={events.data?.events.length ?? 0}
         hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
         loading={events.isLoading}
+        onOpenSettings={() => navigate({ to: "/settings" })}
+        onSignOut={() => signOut.mutate()}
         openLoopCount={openLoopCount}
         weeklyActivity={weeklyActivity}
       />

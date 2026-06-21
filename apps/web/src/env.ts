@@ -11,6 +11,9 @@ export interface Env {
   BETTER_AUTH_URL?: string;
   BETTER_AUTH_ALLOW_SIGN_UP?: string;
   AUTH_SEED_SECRET?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  SEND_EMAIL?: SendEmail;
   AI: Ai;
   THINK_MODEL: string;
   TURBOPUFFER_API_KEY?: string;

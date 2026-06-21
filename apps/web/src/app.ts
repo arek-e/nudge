@@ -39,6 +39,7 @@ interface ApiContext {
   readonly aiModel: string;
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
+  readonly googleAuthConfigured: boolean;
   readonly recordSpan: <A>(
     name: string,
     input: {
@@ -446,6 +447,10 @@ export const apiRouter = api.router({
   },
   session: api.session.handler(({ context }) => {
     return {
+      authMethods: {
+        emailMagicLink: context.session.authMode !== "dev",
+        google: context.session.authMode !== "dev" && context.googleAuthConfigured,
+      },
       authMode: context.session.authMode,
       user: context.session.user,
       workspace: context.session.user
@@ -1011,6 +1016,7 @@ export function createApp(options: CreateAppOptions = {}) {
             aiModel: c.env.THINK_MODEL,
             dailyAnalysisWorkflow: c.env.DAILY_DIGEST_WORKFLOW,
             db,
+            googleAuthConfigured: Boolean(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
             recordSpan,
             session: auth,
             traceDb: c.env.DB,

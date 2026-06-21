@@ -47,6 +47,11 @@
       "bucket_name": "lares-trace-artifacts",
     },
   ],
+  "send_email": [
+    {
+      "name": "SEND_EMAIL",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {
