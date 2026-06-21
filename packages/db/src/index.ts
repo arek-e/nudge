@@ -520,6 +520,11 @@ export interface DbService {
     readonly eventType: ItemEventType;
     readonly payload: unknown;
   }) => Effect.Effect<ItemEventRecord>;
+  readonly listAgentRuns: (input: {
+    readonly userId: string;
+    readonly limit: number;
+    readonly sourceType?: string;
+  }) => Effect.Effect<ReadonlyArray<AgentRunRecord>>;
   readonly startAgentRun: (input: StartAgentRunInput) => Effect.Effect<AgentRunRecord>;
   readonly completeAgentRun: (input: {
     readonly userId: string;
@@ -1039,6 +1044,17 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             itemEventStore.set(record.id, record);
             return record;
           }),
+        listAgentRuns: (input) =>
+          Effect.sync(() =>
+            [...agentRunStore.values()]
+              .filter(
+                (run) =>
+                  run.userId === input.userId &&
+                  (input.sourceType === undefined || run.sourceType === input.sourceType),
+              )
+              .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+              .slice(0, input.limit),
+          ),
         startAgentRun: (input) =>
           Effect.sync(() => {
             const record = {
@@ -1838,6 +1854,23 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               } satisfies ItemEventRecord;
               await db.insert(itemEvents).values(record);
               return record;
+            }),
+          listAgentRuns: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(agentRuns)
+                .where(
+                  input.sourceType
+                    ? and(
+                        eq(agentRuns.userId, input.userId),
+                        eq(agentRuns.sourceType, input.sourceType),
+                      )
+                    : eq(agentRuns.userId, input.userId),
+                )
+                .orderBy(desc(agentRuns.startedAt))
+                .limit(input.limit);
+              return rows.map(toAgentRunRecord);
             }),
           startAgentRun: (input) =>
             Effect.promise(async () => {

@@ -472,7 +472,9 @@ export const apiContract = {
     list: oc
       .route({ method: "GET", path: "/actions" })
       .input(extractedItemListInputSchema)
-      .output(z.object({ actions: z.array(extractedItemSchema) })),
+      .output(
+        z.object({ actions: z.array(extractedItemSchema), latestRun: agentRunSchema.optional() }),
+      ),
     updateStatus: oc
       .route({ method: "POST", path: "/actions/{itemId}/status" })
       .input(extractedItemStatusInputSchema)

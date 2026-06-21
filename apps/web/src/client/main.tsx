@@ -8,14 +8,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import {
-  createContext,
-  type FormEvent,
-  StrictMode,
-  useEffect,
-  useState,
-  useTransition,
-} from "react";
+import { createContext, type FormEvent, StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AddActionSheet,
@@ -111,22 +104,35 @@ function AppShell() {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [isPending, startTransition] = useTransition();
-  const saveCheckIn = useMutation({
+  const saveDailyNote = useMutation({
     mutationFn: async (value: string) => {
-      await apiClient.captures.append({
-        type: "manual_check_in_submitted",
-        source: "today_app",
-        occurredAt: new Date().toISOString(),
-        schemaVersion: 1,
-        payload: { note: value },
-      });
+      const localDate = todayLocalDate();
+      await Promise.all([
+        apiClient.journal.save({
+          bodyDocument: noteDocument,
+          bodyText: value,
+          localDate,
+          title: localDate,
+        }),
+        apiClient.captures.append({
+          type: "manual_check_in_submitted",
+          source: "today_app",
+          occurredAt: new Date().toISOString(),
+          schemaVersion: 1,
+          payload: { note: value },
+        }),
+      ]);
     },
     onSuccess: async () => {
+      const localDate = todayLocalDate();
       setNote("");
       setNoteDocument(plainTextToRichTextDocument(""));
       setCaptureOpen(false);
       setStatus("Saved");
+      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
       await queryClient.invalidateQueries({ queryKey: ["events"] });
+      await queryClient.invalidateQueries({ queryKey: ["actions"] });
+      await queryClient.invalidateQueries({ queryKey: ["summaries"] });
     },
     onError: () => {
       setStatus("Could not save. Check the deployment logs.");
@@ -145,7 +151,7 @@ function AppShell() {
     <CaptureContext.Provider
       value={{
         status,
-        saving: saveCheckIn.isPending || isPending,
+        saving: saveDailyNote.isPending || isPending,
         openCapture: () => setCaptureOpen(true),
       }}
     >
@@ -159,11 +165,11 @@ function AppShell() {
         }}
       />
       <WritingDrawer
-        eyebrow="Capture"
-        drawerTitle="Write capture"
+        eyebrow="Today"
+        drawerTitle="Daily note"
         description=""
-        bodyLabel="Capture body"
-        submitLabel="Save capture"
+        bodyLabel="Daily journal"
+        submitLabel="Save journal"
         open={captureOpen}
         body={note}
         bodyDocument={noteDocument}
@@ -182,7 +188,7 @@ function AppShell() {
             return;
           }
           setStatus("Saving...");
-          startTransition(() => saveCheckIn.mutate(value));
+          startTransition(() => saveDailyNote.mutate(value));
         }}
       />
       {addOpen || captureOpen ? null : (
@@ -285,6 +291,13 @@ function LoginScreen() {
 function ActionsScreen() {
   const actions = useActions();
   const summaries = useSummaries();
+  const latestRun = actions.data?.latestRun;
+  const runMetadata = latestRun?.metadata as
+    | { readonly itemCount?: unknown; readonly provider?: unknown }
+    | undefined;
+  const itemCount = typeof runMetadata?.itemCount === "number" ? runMetadata.itemCount : undefined;
+  const provider =
+    typeof runMetadata?.provider === "string" ? runMetadata.provider : "cloudflare-think";
   const updateStatus = useMutation({
     mutationFn: async (input: {
       readonly itemId: string;
@@ -301,6 +314,25 @@ function ActionsScreen() {
     <LaresAppShell>
       <Surface eyebrow="AI" title="Actions" primary>
         <div className="mt-4 grid gap-3">
+          {latestRun ? (
+            <article className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/8">
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                AI analysis · {latestRun.status}
+              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">
+                {latestRun.status === "completed"
+                  ? itemCount === 0
+                    ? "Analyzed, no actions found"
+                    : `Analyzed ${itemCount ?? actions.data?.actions.length ?? 0} item${(itemCount ?? actions.data?.actions.length ?? 0) === 1 ? "" : "s"}`
+                  : latestRun.status === "failed"
+                    ? "Analysis failed"
+                    : "Analyzing daily note"}
+              </h2>
+              <p className="mt-2 mb-0 text-xs leading-5 text-neutral-400">
+                {provider} · {latestRun.model ?? "model pending"}
+              </p>
+            </article>
+          ) : null}
           {(actions.data?.actions ?? []).length > 0 ? (
             actions.data?.actions.map((action) => (
               <article className="rounded-2xl bg-white/5 p-4" key={action.id}>
@@ -421,31 +453,8 @@ function TodayScreen() {
     queryKey: ["journal", localDate],
     queryFn: async () => apiClient.journal.get({ localDate }),
   });
-  const [journalBody, setJournalBody] = useState("");
-  const [journalLoadedId, setJournalLoadedId] = useState<string | null>(null);
   const events = useEvents();
   const actions = useActions();
-  useEffect(() => {
-    if (journal.data?.document && journalLoadedId !== journal.data.document.id) {
-      setJournalLoadedId(journal.data.document.id);
-      setJournalBody(journal.data.document.bodyText);
-    }
-  }, [journal.data?.document, journalLoadedId]);
-  const saveJournal = useMutation({
-    mutationFn: async () => {
-      return apiClient.journal.save({
-        bodyText: journalBody,
-        localDate,
-        title: localDate,
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
-      await queryClient.invalidateQueries({ queryKey: ["events"] });
-      await queryClient.invalidateQueries({ queryKey: ["actions"] });
-      await queryClient.invalidateQueries({ queryKey: ["summaries"] });
-    },
-  });
   const recentNotes = (events.data?.events ?? []).slice(0, 4);
   const weeklyActivity = buildSignalCalendarData(events.data?.events ?? []);
   const openLoopCount =
@@ -463,37 +472,7 @@ function TodayScreen() {
         weeklyActivity={weeklyActivity}
       />
 
-      <Surface id="journal-title" eyebrow="Today" title="Daily note" primary>
-        <form
-          className="mt-4 grid gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            saveJournal.mutate();
-          }}
-        >
-          <textarea
-            aria-label="Daily journal"
-            className="min-h-40 resize-y rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-base leading-7 text-white outline-none focus:border-white/35"
-            placeholder="Write a note..."
-            value={journalBody}
-            onChange={(event) => setJournalBody(event.currentTarget.value)}
-          />
-          <button
-            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
-            disabled={saveJournal.isPending || journalBody.trim().length === 0}
-            type="submit"
-          >
-            {saveJournal.isPending ? "Saving..." : "Save journal"}
-          </button>
-          {saveJournal.isSuccess ? (
-            <p className="m-0 text-sm text-neutral-400" role="status">
-              Saved
-            </p>
-          ) : null}
-        </form>
-      </Surface>
-
-      <Surface id="recent-notes-title" eyebrow="Notes" title="Recent notes">
+      <Surface id="recent-notes-title" eyebrow="Notes" title="Recent notes" primary>
         <div className="mt-4 grid gap-2">
           {recentNotes.length > 0 ? (
             recentNotes.map((event) => (

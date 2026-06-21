@@ -1,7 +1,8 @@
-import type { LanguageModel } from "ai";
 import { Think } from "@cloudflare/think";
 import { Agent } from "agents";
+import { generateObject, type LanguageModel } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
+import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
 import { Db } from "@lares/db";
@@ -51,6 +52,28 @@ interface LoopIntakeDraftInput {
   readonly user: LaresUserRef;
 }
 
+const thinkExtractedItemSchema = z.object({
+  body: z.string().min(1).max(2_000),
+  confidence: z.number().min(0).max(1).optional(),
+  dueAt: z.string().optional(),
+  eventEndsAt: z.string().optional(),
+  eventStartsAt: z.string().optional(),
+  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
+  remindAt: z.string().optional(),
+  title: z.string().min(1).max(200),
+});
+
+const thinkDailyNoteExtractionSchema = z.object({
+  dailySummary: z.string().max(2_000).optional(),
+  items: z.array(thinkExtractedItemSchema).default([]),
+});
+
+type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> & {
+  readonly fallbackReason?: string;
+  readonly model: string;
+  readonly provider: "cloudflare-think" | "deterministic";
+};
+
 const reasoningHarness = {
   name: "think" as const,
   runtime: "cloudflare-agents" as const,
@@ -64,6 +87,56 @@ const initialUserAgentSessionState = {
   updatedAt: null,
   userId: "dev-user",
 } satisfies UserAgentSessionState;
+
+const normalizeDedupe = (text: string) =>
+  text
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "")
+    .slice(0, 96);
+
+const titleCaseFragment = (text: string) => {
+  const cleaned = text.replaceAll(/^(need to|i should|should|remember to)\s+/gi, "").trim();
+  if (!cleaned) return "Review note";
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+};
+
+const deterministicDailyNoteExtraction = (
+  changedText: string,
+  localDate: string,
+  fallbackReason: string,
+): ThinkDailyNoteExtraction => {
+  const items: ThinkDailyNoteExtraction["items"] = [];
+  for (const part of changedText
+    .split(/\n|\.|;|!/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const lower = part.toLowerCase();
+    const base = { body: part, confidence: 0.82 };
+    if (/\b(next week|tomorrow|party|meeting|appointment|birthday)\b/.test(lower)) {
+      items.push({ ...base, kind: "reminder", title: titleCaseFragment(part) });
+    } else if (/\b(need to|should|todo|to do|write to|call|send|follow up)\b/.test(lower)) {
+      items.push({
+        ...base,
+        kind: lower.includes("follow up") ? "follow_up" : "task",
+        title: titleCaseFragment(part),
+      });
+    } else if (/\b(remember|prefers|likes|important|completed|done|finished)\b/.test(lower)) {
+      items.push({ ...base, kind: "memory", title: titleCaseFragment(part) });
+    }
+  }
+
+  return {
+    dailySummary: `Executive summary: ${changedText.trim().slice(0, 500)}`,
+    fallbackReason,
+    items: items.map((item) => ({
+      ...item,
+      title: item.title || `Review ${normalizeDedupe(item.body)}`,
+    })),
+    model: "deterministic-delta-extractor",
+    provider: "deterministic",
+  };
+};
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   initialState = initialUserAgentSessionState;
@@ -304,14 +377,15 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       readonly revisionId?: string;
     };
     const changedText = String(body.changedText ?? "").trim();
+    const localDate = String(body.localDate ?? "today");
+    let extraction: ThinkDailyNoteExtraction = {
+      items: [],
+      model: this.env.THINK_MODEL,
+      provider: "cloudflare-think",
+    };
     if (changedText.length > 0) {
       const intake = await this.subAgent(LoopIntakeThinkAgent, "journal-current-state");
-      await intake.draftFromMessage({
-        conversationId: `journal:${body.localDate ?? "today"}`,
-        memoryResults: [],
-        message: changedText,
-        user,
-      });
+      extraction = await intake.extractDailyNote({ changedText, localDate });
     }
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -327,7 +401,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       userId: user.id,
     });
 
-    return Response.json({ accepted: true });
+    return Response.json(extraction);
   }
 
   private async retrieveMemoryResults(user: LaresUserRef, query: string, limit: number) {
@@ -381,6 +455,43 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     // Think owns the durable reasoning harness; this RPC seam stays stable while model-produced
     // structured output is introduced behind the same contract.
     return this.deterministicDraftFromMessage(input);
+  }
+
+  async extractDailyNote(input: {
+    readonly changedText: string;
+    readonly localDate: string;
+  }): Promise<ThinkDailyNoteExtraction> {
+    try {
+      const { object } = await generateObject({
+        abortSignal: AbortSignal.timeout(10_000),
+        model: this.getModel(),
+        prompt: [
+          "Extract reviewable tasks, reminders, memories, questions, ideas, events, and follow-ups from this private daily note.",
+          "Return only facts grounded in the note. Do not invent actions.",
+          `Local date: ${input.localDate}`,
+          `Daily note: ${input.changedText}`,
+        ].join("\n"),
+        schema: thinkDailyNoteExtractionSchema,
+      });
+
+      return {
+        ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
+        items: object.items,
+        model: this.env.THINK_MODEL,
+        provider: "cloudflare-think",
+      };
+    } catch (error) {
+      const safeError = error instanceof Error ? error : new Error("Think extraction failed");
+      console.warn(
+        JSON.stringify({
+          event: "daily_note_think_extract_failed",
+          logKind: "wide_event",
+          errorType: safeError.name,
+          model: this.env.THINK_MODEL,
+        }),
+      );
+      return deterministicDailyNoteExtraction(input.changedText, input.localDate, "think_failed");
+    }
   }
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
