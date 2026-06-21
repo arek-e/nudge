@@ -1,0 +1,141 @@
+name: Release Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Leave blank for vYYYY.MM.DD.HHMM."
+        required: false
+        type: string
+      apply_migrations:
+        description: "Apply remote D1 migrations before deploy"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  deployments: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release-production:
+    name: Tag, Release, Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright WebKit
+        run: bunx playwright install --with-deps webkit
+
+      - name: Compute release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="v$(date -u +%Y.%m.%d.%H%M)"
+          fi
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+          previous_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "range<<EOF"
+            if [ -n "$previous_tag" ]; then
+              echo "$previous_tag..HEAD"
+            else
+              echo "HEAD"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PREVIOUS_TAG: ${{ steps.release.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          args=(
+            -f tag_name="$TAG"
+            -f target_commitish="$GITHUB_SHA"
+          )
+          if [ -n "$PREVIOUS_TAG" ]; then
+            args+=( -f previous_tag_name="$PREVIOUS_TAG" )
+          fi
+          gh api repos/${{ github.repository }}/releases/generate-notes "${args[@]}" --jq .body > RELEASE_NOTES.md
+          {
+            echo "body<<EOF"
+            cat RELEASE_NOTES.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply remote D1 migrations
+        if: ${{ inputs.apply_migrations }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: mise exec -- bun run db:migrations:apply:remote
+
+      - name: Deploy production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: mise exec -- bun scripts/deploy-web.ts --version=${{ steps.release.outputs.tag }}
+
+      - name: Create tag
+        run: |
+          set -euo pipefail
+          git tag -a "${{ steps.release.outputs.tag }}" -m "Release ${{ steps.release.outputs.tag }}"
+          git push origin "${{ steps.release.outputs.tag }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.release.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.release.outputs.tag }}" \
+            --notes-file RELEASE_NOTES.md
+
+      - name: Summarize
+        run: |
+          {
+            echo "## Production release"
+            echo ""
+            echo "Tag: ${{ steps.release.outputs.tag }}"
+            echo "Previous tag: ${{ steps.release.outputs.previous_tag || 'none' }}"
+            echo "Range: ${{ steps.release.outputs.range }}"
+            echo ""
+            echo "Release notes:"
+            cat RELEASE_NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"

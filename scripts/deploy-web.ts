@@ -6,6 +6,8 @@ const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
+const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
+const requestedVersion = versionArg?.slice("--version=".length).trim();
 
 const run = (
   command: string,
@@ -48,7 +50,7 @@ if (status && !allowDirty) {
 }
 
 const commit = output("git rev-parse --short HEAD");
-const version = allowDirty && status ? `${commit}-dirty` : commit;
+const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit);
 const deployArgs = [
   env ? `--env ${env}` : "",
   dryRun ? "--dry-run" : "",
