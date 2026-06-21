@@ -3,7 +3,7 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { z } from "zod";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
 import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
@@ -32,6 +32,40 @@ import {
 } from "./observability";
 
 type AppDbLayer = Layer.Layer<Db>;
+
+async function runBetterAuthApi<T>(c: Context, run: () => Promise<T>) {
+  try {
+    return c.json(await run());
+  } catch (error) {
+    const status = readErrorStatus(error);
+    return new Response(JSON.stringify({ error: readErrorMessage(error) }), {
+      headers: { "content-type": "application/json" },
+      status,
+    });
+  }
+}
+
+function readErrorStatus(error: unknown) {
+  if (typeof error === "object" && error !== null) {
+    const record = error as { readonly status?: unknown; readonly statusCode?: unknown };
+    if (typeof record.status === "number" && record.status >= 400 && record.status < 600) {
+      return record.status;
+    }
+    if (
+      typeof record.statusCode === "number" &&
+      record.statusCode >= 400 &&
+      record.statusCode < 600
+    ) {
+      return record.statusCode;
+    }
+  }
+  return 401;
+}
+
+function readErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return "Authentication failed";
+}
 
 interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
@@ -550,8 +584,9 @@ export const apiRouter = api.router({
   session: api.session.handler(({ context }) => {
     return {
       authMethods: {
-        emailMagicLink: context.session.authMode !== "dev",
+        emailOtp: context.session.authMode !== "dev",
         google: context.session.authMode !== "dev" && context.googleAuthConfigured,
+        passkey: context.session.authMode !== "dev",
       },
       authMode: context.session.authMode,
       user: context.session.user,
@@ -1110,10 +1145,85 @@ export function createApp(options: CreateAppOptions = {}) {
     return c.json({ created: true });
   });
 
+  app.get("/api/auth/passkey/generate-register-options", async (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    const auth = createBetterAuth(c.env);
+    return runBetterAuthApi(c, () =>
+      auth.api.generatePasskeyRegistrationOptions({
+        headers: c.req.raw.headers,
+        query: {
+          ...(c.req.query("authenticatorAttachment")
+            ? {
+                authenticatorAttachment: c.req.query("authenticatorAttachment") as
+                  | "platform"
+                  | "cross-platform",
+              }
+            : {}),
+          ...(c.req.query("context") ? { context: c.req.query("context") } : {}),
+          ...(c.req.query("name") ? { name: c.req.query("name") } : {}),
+        },
+      }),
+    );
+  });
+
+  app.post("/api/auth/passkey/verify-registration", async (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    const auth = createBetterAuth(c.env);
+    return runBetterAuthApi(c, async () =>
+      auth.api.verifyPasskeyRegistration({
+        body: await c.req.json(),
+        headers: c.req.raw.headers,
+      }),
+    );
+  });
+
+  app.get("/api/auth/passkey/generate-authenticate-options", async (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    const auth = createBetterAuth(c.env);
+    return runBetterAuthApi(c, () =>
+      auth.api.generatePasskeyAuthenticationOptions({
+        headers: c.req.raw.headers,
+      }),
+    );
+  });
+
+  app.post("/api/auth/passkey/verify-authentication", async (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    const auth = createBetterAuth(c.env);
+    return runBetterAuthApi(c, async () =>
+      auth.api.verifyPasskeyAuthentication({
+        body: await c.req.json(),
+        headers: c.req.raw.headers,
+      }),
+    );
+  });
+
   app.on(["GET", "POST"], "/api/auth/*", (c) => {
     addWideEventFields(c, { routeName: "api.auth" });
     if (!isBetterAuthConfigured(c.env)) {
       return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    if (c.req.path.startsWith("/api/auth/passkey/")) {
+      const url = new URL(c.req.url);
+      url.pathname = url.pathname.replace("/api/auth", "");
+      return createBetterAuth(c.env).handler(new Request(url, c.req.raw));
     }
 
     return createBetterAuth(c.env).handler(c.req.raw);

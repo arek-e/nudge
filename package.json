@@ -9,6 +9,7 @@
     "catalog": {
       "@base-ui/react": "1.5.0",
       "@better-auth/drizzle-adapter": "1.6.18",
+      "@better-auth/passkey": "1.6.18",
       "@cloudflare/think": "0.10.0",
       "@cloudflare/workers-types": "4.20260612.1",
       "@orpc/client": "1.14.6",
