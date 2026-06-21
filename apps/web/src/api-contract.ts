@@ -534,7 +534,13 @@ export const apiContract = {
     save: oc
       .route({ method: "POST", path: "/journal" })
       .input(journalInputSchema)
-      .output(z.object({ document: journalDocumentSchema, revision: journalRevisionSchema })),
+      .output(
+        z.object({
+          analysisRun: agentRunSchema.optional(),
+          document: journalDocumentSchema,
+          revision: journalRevisionSchema,
+        }),
+      ),
   },
   signals: {
     list: oc

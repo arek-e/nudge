@@ -5,7 +5,7 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
-import { Db, type DbService } from "@lares/db";
+import { Db, type AgentRunRecord, type DbService } from "@lares/db";
 import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
 import {
@@ -36,6 +36,8 @@ type AppDbLayer = Layer.Layer<Db>;
 interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
+  readonly aiModel: string;
+  readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
   readonly recordSpan: <A>(
     name: string,
@@ -296,141 +298,50 @@ export const apiRouter = api.router({
           userId: context.user.id,
         }),
       );
+      let analysisRun: AgentRunRecord | null = null;
       if (result.revision.changedText.trim().length > 0) {
-        const extraction = await context.recordSpan(
-          "daily_note.ai_extract",
-          {
-            attributes: {
-              "lares.ai.source_type": "note_revision",
-              "lares.ai.system": "cloudflare-think",
-            },
-            kind: "internal",
-          },
-          async () =>
-            toAiExtractionResult(
-              await proxyConversationRequest(
-                context.agentSessions,
-                context.agentInternalSecret,
-                context.user,
-                "journal",
-                "/journal/interpret",
-                aiExtractionResponseSchema,
-                {
-                  body: JSON.stringify({
-                    changedText: result.revision.changedText,
-                    documentId: result.document.id,
-                    localDate: result.document.localDate,
-                    revisionId: result.revision.id,
-                  }),
-                  method: "POST",
-                },
-              ),
-            ),
-        );
-        console.info(
-          JSON.stringify({
-            event: "daily_note_ai_extract_completed",
-            logKind: "wide_event",
-            fallbackReason: extraction.fallbackReason ?? null,
-            itemCount: extraction.items.length,
-            model: extraction.model,
-            provider: extraction.provider,
-          }),
-        );
-        const agentRun = await Effect.runPromise(
+        analysisRun = await Effect.runPromise(
           context.db.startAgentRun({
             metadata: {
-              fallbackReason: extraction.fallbackReason ?? null,
-              itemCount: extraction.items.length,
               localDate: input.localDate,
-              provider: extraction.provider,
+              provider: "cloudflare-think",
             },
-            model: extraction.model,
+            model: context.aiModel,
             sourceId: noteResult.revision.id,
             sourceType: "note_revision",
-            status: "running",
+            status: "queued",
             triggerType: "note_inactivity",
             userId: context.user.id,
           }),
         );
-        const extractedItems = await Promise.all(
-          extraction.items.map(async (extracted) => {
-            const item = await Effect.runPromise(
-              context.db.upsertExtractedItem({
-                ...extracted,
-                sourceNoteId: noteResult.note.id,
-                sourceRevisionId: noteResult.revision.id,
+        const queuedRun = analysisRun;
+        await context.recordSpan(
+          "daily_note.analysis_workflow.create",
+          {
+            attributes: {
+              "lares.ai.source_type": "note_revision",
+              "lares.ai.system": "cloudflare-think",
+              "workflow.name": "daily-note-analysis",
+            },
+            kind: "client",
+          },
+          () =>
+            context.dailyAnalysisWorkflow.create({
+              id: `daily-note-analysis-${noteResult.revision.id}`,
+              params: {
+                changedText: result.revision.changedText,
+                documentId: result.document.id,
+                kind: "daily-note-analysis",
+                localDate: result.document.localDate,
+                noteId: noteResult.note.id,
+                revisionId: result.revision.id,
+                runId: queuedRun.id,
+                title: result.document.title,
+                userDisplayName: context.user.displayName,
                 userId: context.user.id,
-              }),
-            );
-            await Promise.all([
-              Effect.runPromise(
-                context.db.recordItemEvent({
-                  eventType: "created",
-                  itemId: item.id,
-                  payload: { sourceRevisionId: noteResult.revision.id },
-                  userId: context.user.id,
-                }),
-              ),
-              Effect.runPromise(
-                context.db.upsertMemoryDocument({
-                  bodyText: `${item.title}\n${item.body}`,
-                  localDate: input.localDate,
-                  sourceId: item.id,
-                  sourceType: "extracted_item",
-                  title: item.title,
-                  userId: context.user.id,
-                }),
-              ),
-            ]);
-            return item;
-          }),
-        );
-        const dailySummary = await Effect.runPromise(
-          context.db.upsertSummaryDocument({
-            body:
-              extraction.dailySummary ??
-              dailySummaryFrom({ items: extractedItems, noteText: input.bodyText }),
-            metadata: { generatedBy: extraction.provider, model: extraction.model },
-            periodEnd: input.localDate,
-            periodStart: input.localDate,
-            periodType: "day",
-            sourceItemIds: extractedItems.map((item) => item.id),
-            sourceNoteIds: [noteResult.note.id],
-            status: "ready",
-            title: `${input.localDate} summary`,
-            userId: context.user.id,
-          }),
-        );
-        const week = weekRangeFor(input.localDate);
-        const weeklySummary = await Effect.runPromise(
-          context.db.upsertSummaryDocument({
-            body: `Week so far: ${dailySummary.body}`,
-            metadata: { generatedBy: extraction.provider, model: extraction.model },
-            periodEnd: week.end,
-            periodStart: week.start,
-            periodType: "week",
-            sourceItemIds: extractedItems.map((item) => item.id),
-            sourceNoteIds: [noteResult.note.id],
-            status: "ready",
-            title: `${week.start} week summary`,
-            userId: context.user.id,
-          }),
-        );
-        await Effect.runPromise(
-          context.db.completeAgentRun({
-            outputs: [
-              ...extractedItems.map((item) => ({
-                outputId: item.id,
-                outputType: "extracted_item" as const,
-              })),
-              { outputId: dailySummary.id, outputType: "summary" as const },
-              { outputId: weeklySummary.id, outputType: "summary" as const },
-            ],
-            runId: agentRun.id,
-            status: "completed",
-            userId: context.user.id,
-          }),
+                workflowVersion: 1,
+              },
+            }),
         );
         await Effect.runPromise(
           context.db.upsertMemoryDocument({
@@ -451,19 +362,6 @@ export const apiRouter = api.router({
             title: `${noteResult.note.title} delta`,
             userId: context.user.id,
           }),
-        );
-        await Promise.all(
-          [dailySummary, weeklySummary].map((summary) =>
-            Effect.runPromise(
-              context.db.upsertMemoryDocument({
-                bodyText: summary.body,
-                sourceId: summary.id,
-                sourceType: "summary",
-                title: summary.title,
-                userId: context.user.id,
-              }),
-            ),
-          ),
         );
         await Effect.runPromise(
           context.db.upsertMemoryDocument({
@@ -510,7 +408,7 @@ export const apiRouter = api.router({
           );
         }
       }
-      return result;
+      return { ...result, ...(analysisRun ? { analysisRun } : {}) };
     }),
   },
   signals: {
@@ -842,75 +740,6 @@ function runMemoryIndex<A, E>(
   );
 }
 
-function normalizeDedupe(text: string) {
-  return text
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-|-$/g, "")
-    .slice(0, 96);
-}
-
-const aiExtractedItemSchema = z.object({
-  body: z.string().min(1).max(2_000),
-  confidence: z.number().min(0).max(1).optional(),
-  dueAt: z.string().optional(),
-  eventEndsAt: z.string().optional(),
-  eventStartsAt: z.string().optional(),
-  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
-  remindAt: z.string().optional(),
-  title: z.string().min(1).max(200),
-});
-
-const aiExtractionResponseSchema = z.object({
-  dailySummary: z.string().max(2_000).optional(),
-  fallbackReason: z.string().optional(),
-  items: z.array(aiExtractedItemSchema).default([]),
-  model: z.string(),
-  provider: z.enum(["cloudflare-think", "deterministic"]),
-});
-
-const toAiExtractionResult = (response: z.infer<typeof aiExtractionResponseSchema>) => ({
-  ...(response.dailySummary ? { dailySummary: response.dailySummary } : {}),
-  ...(response.fallbackReason ? { fallbackReason: response.fallbackReason } : {}),
-  items: response.items.map((item) => ({
-    body: item.body,
-    confidence: item.confidence ?? 0.74,
-    dedupeKey: `${item.kind}:${normalizeDedupe(`${item.title}:${item.body}`)}`,
-    ...(item.dueAt ? { dueAt: item.dueAt } : {}),
-    ...(item.eventEndsAt ? { eventEndsAt: item.eventEndsAt } : {}),
-    ...(item.eventStartsAt ? { eventStartsAt: item.eventStartsAt } : {}),
-    kind: item.kind,
-    metadata: { extractor: response.provider },
-    ...(item.remindAt ? { remindAt: item.remindAt } : {}),
-    status: "proposed" as const,
-    title: item.title,
-  })),
-  model: response.model,
-  provider: response.provider,
-});
-
-function dailySummaryFrom(input: {
-  readonly noteText: string;
-  readonly items: ReadonlyArray<{ readonly title: string }>;
-}) {
-  const itemText =
-    input.items.length > 0
-      ? input.items.map((item) => item.title).join("; ")
-      : "No extracted actions.";
-  return `Executive summary: ${input.noteText.trim().slice(0, 500)}\nActions: ${itemText}`;
-}
-
-function weekRangeFor(localDate: string) {
-  const date = new Date(`${localDate}T00:00:00.000Z`);
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const start = new Date(date);
-  start.setUTCDate(date.getUTCDate() + mondayOffset);
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
-}
-
 function makeApiHandler() {
   return new OpenAPIHandler(apiRouter, {
     interceptors: [
@@ -1179,6 +1008,8 @@ export function createApp(options: CreateAppOptions = {}) {
             ...((c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET)
               ? { agentInternalSecret: c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET }
               : {}),
+            aiModel: c.env.THINK_MODEL,
+            dailyAnalysisWorkflow: c.env.DAILY_DIGEST_WORKFLOW,
             db,
             recordSpan,
             session: auth,
