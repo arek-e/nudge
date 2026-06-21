@@ -69,9 +69,8 @@ const thinkDailyNoteExtractionSchema = z.object({
 });
 
 type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> & {
-  readonly fallbackReason?: string;
   readonly model: string;
-  readonly provider: "cloudflare-think" | "deterministic";
+  readonly provider: "cloudflare-think";
 };
 
 const reasoningHarness = {
@@ -95,47 +94,25 @@ const normalizeDedupe = (text: string) =>
     .replaceAll(/^-|-$/g, "")
     .slice(0, 96);
 
-const titleCaseFragment = (text: string) => {
-  const cleaned = text.replaceAll(/^(need to|i should|should|remember to)\s+/gi, "").trim();
-  if (!cleaned) return "Review note";
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+const weekRangeFor = (localDate: string) => {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(date);
+  start.setUTCDate(date.getUTCDate() + mondayOffset);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return { end: end.toISOString().slice(0, 10), start: start.toISOString().slice(0, 10) };
 };
 
-const deterministicDailyNoteExtraction = (
-  changedText: string,
-  localDate: string,
-  fallbackReason: string,
-): ThinkDailyNoteExtraction => {
-  const items: ThinkDailyNoteExtraction["items"] = [];
-  for (const part of changedText
-    .split(/\n|\.|;|!/)
-    .map((value) => value.trim())
-    .filter(Boolean)) {
-    const lower = part.toLowerCase();
-    const base = { body: part, confidence: 0.82 };
-    if (/\b(next week|tomorrow|party|meeting|appointment|birthday)\b/.test(lower)) {
-      items.push({ ...base, kind: "reminder", title: titleCaseFragment(part) });
-    } else if (/\b(need to|should|todo|to do|write to|call|send|follow up)\b/.test(lower)) {
-      items.push({
-        ...base,
-        kind: lower.includes("follow up") ? "follow_up" : "task",
-        title: titleCaseFragment(part),
-      });
-    } else if (/\b(remember|prefers|likes|important|completed|done|finished)\b/.test(lower)) {
-      items.push({ ...base, kind: "memory", title: titleCaseFragment(part) });
-    }
-  }
-
-  return {
-    dailySummary: `Executive summary: ${changedText.trim().slice(0, 500)}`,
-    fallbackReason,
-    items: items.map((item) => ({
-      ...item,
-      title: item.title || `Review ${normalizeDedupe(item.body)}`,
-    })),
-    model: "deterministic-delta-extractor",
-    provider: "deterministic",
-  };
+const dailySummaryFrom = (input: {
+  readonly items: ReadonlyArray<{ readonly kind: string; readonly title: string }>;
+  readonly noteText: string;
+}) => {
+  const actionText = input.items.length
+    ? input.items.map((item) => `${item.kind}: ${item.title}`).join("; ")
+    : "No extracted actions.";
+  return [`Actions: ${actionText}`, `Context: ${input.noteText.slice(0, 500)}`].join("\n");
 };
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
@@ -461,37 +438,24 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     readonly changedText: string;
     readonly localDate: string;
   }): Promise<ThinkDailyNoteExtraction> {
-    try {
-      const { object } = await generateObject({
-        abortSignal: AbortSignal.timeout(10_000),
-        model: this.getModel(),
-        prompt: [
-          "Extract reviewable tasks, reminders, memories, questions, ideas, events, and follow-ups from this private daily note.",
-          "Return only facts grounded in the note. Do not invent actions.",
-          `Local date: ${input.localDate}`,
-          `Daily note: ${input.changedText}`,
-        ].join("\n"),
-        schema: thinkDailyNoteExtractionSchema,
-      });
+    const { object } = await generateObject({
+      abortSignal: AbortSignal.timeout(10_000),
+      model: this.getModel(),
+      prompt: [
+        "Extract reviewable tasks, reminders, memories, questions, ideas, events, and follow-ups from this private daily note.",
+        "Return only facts grounded in the note. Do not invent actions.",
+        `Local date: ${input.localDate}`,
+        `Daily note: ${input.changedText}`,
+      ].join("\n"),
+      schema: thinkDailyNoteExtractionSchema,
+    });
 
-      return {
-        ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
-        items: object.items,
-        model: this.env.THINK_MODEL,
-        provider: "cloudflare-think",
-      };
-    } catch (error) {
-      const safeError = error instanceof Error ? error : new Error("Think extraction failed");
-      console.warn(
-        JSON.stringify({
-          event: "daily_note_think_extract_failed",
-          logKind: "wide_event",
-          errorType: safeError.name,
-          model: this.env.THINK_MODEL,
-        }),
-      );
-      return deterministicDailyNoteExtraction(input.changedText, input.localDate, "think_failed");
-    }
+    return {
+      ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
+      items: object.items,
+      model: this.env.THINK_MODEL,
+      provider: "cloudflare-think",
+    };
   }
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
@@ -579,15 +543,36 @@ async function signAgentRequest(secret: string, userId: string, conversationId: 
 }
 
 export interface DailyDigestWorkflowParams {
+  kind?: "daily-digest";
   userId: string;
   requestedBy: "api" | "cron";
   workflowVersion?: WorkflowVersion;
 }
 
-export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, DailyDigestWorkflowParams> {
-  async run(event: WorkflowEvent<DailyDigestWorkflowParams>, step: WorkflowStep) {
+export interface DailyNoteAnalysisWorkflowParams {
+  changedText: string;
+  documentId: string;
+  kind: "daily-note-analysis";
+  localDate: string;
+  noteId: string;
+  revisionId: string;
+  runId: string;
+  title: string;
+  userDisplayName: string;
+  userId: string;
+  workflowVersion?: WorkflowVersion;
+}
+
+type LaresWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
+
+export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowParams> {
+  async run(event: WorkflowEvent<LaresWorkflowParams>, step: WorkflowStep) {
     const input = event.payload;
     const workflowVersion = input.workflowVersion ?? currentWorkflowVersion;
+
+    if (input.kind === "daily-note-analysis") {
+      return this.runDailyNoteAnalysis(input, workflowVersion, step);
+    }
 
     return await step.do(
       workflowStepName(workflowVersion, "daily-digest-health-check"),
@@ -600,5 +585,208 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, DailyDigestWork
         requestedBy: input.requestedBy,
       }),
     );
+  }
+
+  private async runDailyNoteAnalysis(
+    input: DailyNoteAnalysisWorkflowParams,
+    workflowVersion: WorkflowVersion,
+    step: WorkflowStep,
+  ) {
+    try {
+      const extraction = await step.do(
+        workflowStepName(workflowVersion, "daily-note-analysis-extract-with-think"),
+        durableWorkflowStepConfig,
+        async () => {
+          const agentId = this.env.USER_AGENT_SESSION.idFromName(`${input.userId}:journal`);
+          const agent = this.env.USER_AGENT_SESSION.get(agentId);
+          const internalSecret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+          const internalSignature = internalSecret
+            ? await signAgentRequest(internalSecret, input.userId, "journal")
+            : undefined;
+          const response = await agent.fetch(
+            new Request("https://lares.local/journal/interpret", {
+              body: JSON.stringify({
+                changedText: input.changedText,
+                documentId: input.documentId,
+                localDate: input.localDate,
+                revisionId: input.revisionId,
+              }),
+              headers: {
+                "content-type": "application/json",
+                "x-lares-conversation-id": "journal",
+                ...(internalSignature ? { "x-lares-internal-signature": internalSignature } : {}),
+                "x-lares-user-display-name": input.userDisplayName,
+                "x-lares-user-id": input.userId,
+              },
+              method: "POST",
+            }),
+          );
+          if (!response.ok) throw new Error(`Think extraction failed with ${response.status}`);
+          return thinkDailyNoteExtractionSchema
+            .extend({ model: z.string(), provider: z.literal("cloudflare-think") })
+            .parse(await response.json());
+        },
+      );
+
+      return await step.do(
+        workflowStepName(workflowVersion, "daily-note-analysis-persist-results"),
+        durableWorkflowStepConfig,
+        async () => {
+          const layer = Db.layerD1(this.env.DB);
+          const extractedItems = await Promise.all(
+            extraction.items.map(async (extracted) =>
+              Effect.runPromise(
+                Effect.provide(
+                  Effect.gen(function* () {
+                    const database = yield* Db;
+                    const item = yield* database.upsertExtractedItem({
+                      body: extracted.body,
+                      confidence: extracted.confidence ?? 0.74,
+                      dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
+                      ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
+                      ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
+                      ...(extracted.eventStartsAt
+                        ? { eventStartsAt: extracted.eventStartsAt }
+                        : {}),
+                      kind: extracted.kind,
+                      metadata: { extractor: "cloudflare-think" },
+                      ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
+                      sourceNoteId: input.noteId,
+                      sourceRevisionId: input.revisionId,
+                      status: "proposed",
+                      title: extracted.title,
+                      userId: input.userId,
+                    });
+                    yield* database.recordItemEvent({
+                      eventType: "created",
+                      itemId: item.id,
+                      payload: { sourceRevisionId: input.revisionId },
+                      userId: input.userId,
+                    });
+                    yield* database.upsertMemoryDocument({
+                      bodyText: `${item.title}\n${item.body}`,
+                      localDate: input.localDate,
+                      sourceId: item.id,
+                      sourceType: "extracted_item",
+                      title: item.title,
+                      userId: input.userId,
+                    });
+                    return item;
+                  }),
+                  layer,
+                ),
+              ),
+            ),
+          );
+          const dailySummary = await Effect.runPromise(
+            Effect.provide(
+              Effect.gen(function* () {
+                const database = yield* Db;
+                return yield* database.upsertSummaryDocument({
+                  body:
+                    extraction.dailySummary ??
+                    dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
+                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
+                  periodEnd: input.localDate,
+                  periodStart: input.localDate,
+                  periodType: "day",
+                  sourceItemIds: extractedItems.map((item) => item.id),
+                  sourceNoteIds: [input.noteId],
+                  status: "ready",
+                  title: `${input.localDate} summary`,
+                  userId: input.userId,
+                });
+              }),
+              layer,
+            ),
+          );
+          const week = weekRangeFor(input.localDate);
+          const weeklySummary = await Effect.runPromise(
+            Effect.provide(
+              Effect.gen(function* () {
+                const database = yield* Db;
+                return yield* database.upsertSummaryDocument({
+                  body: `Week so far: ${dailySummary.body}`,
+                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
+                  periodEnd: week.end,
+                  periodStart: week.start,
+                  periodType: "week",
+                  sourceItemIds: extractedItems.map((item) => item.id),
+                  sourceNoteIds: [input.noteId],
+                  status: "ready",
+                  title: `${week.start} week summary`,
+                  userId: input.userId,
+                });
+              }),
+              layer,
+            ),
+          );
+          await Effect.runPromise(
+            Effect.provide(
+              Effect.gen(function* () {
+                const database = yield* Db;
+                yield* database.completeAgentRun({
+                  outputs: [
+                    ...extractedItems.map((item) => ({
+                      outputId: item.id,
+                      outputType: "extracted_item" as const,
+                    })),
+                    { outputId: dailySummary.id, outputType: "summary" as const },
+                    { outputId: weeklySummary.id, outputType: "summary" as const },
+                  ],
+                  runId: input.runId,
+                  status: "completed",
+                  userId: input.userId,
+                });
+              }),
+              layer,
+            ),
+          );
+          console.info(
+            JSON.stringify({
+              event: "daily_note_ai_extract_completed",
+              itemCount: extractedItems.length,
+              logKind: "wide_event",
+              model: extraction.model,
+              provider: "cloudflare-think",
+            }),
+          );
+          return { itemCount: extractedItems.length, ok: true, userId: input.userId };
+        },
+      );
+    } catch (error) {
+      const safeError = error instanceof Error ? error : new Error("Daily note analysis failed");
+      await step.do(
+        workflowStepName(workflowVersion, "daily-note-analysis-mark-failed"),
+        durableWorkflowStepConfig,
+        async () => {
+          await Effect.runPromise(
+            Effect.provide(
+              Effect.gen(function* () {
+                const database = yield* Db;
+                yield* database.completeAgentRun({
+                  errorCode: safeError.name,
+                  runId: input.runId,
+                  status: "failed",
+                  userId: input.userId,
+                });
+              }),
+              Db.layerD1(this.env.DB),
+            ),
+          );
+          console.warn(
+            JSON.stringify({
+              event: "daily_note_ai_extract_failed",
+              errorType: safeError.name,
+              logKind: "wide_event",
+              model: this.env.THINK_MODEL,
+              provider: "cloudflare-think",
+            }),
+          );
+          return { errorType: safeError.name, ok: false, userId: input.userId };
+        },
+      );
+      throw error;
+    }
   }
 }

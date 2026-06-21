@@ -5,11 +5,14 @@ import type { Env } from "./env";
 import { createApp } from "./app";
 
 const testAi = (() => ({ provider: "test" })) as Ai;
+const testWorkflow = {
+  create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "test-workflow-id" }),
+} as Workflow;
 
 const env = {
   DB: {} as D1Database,
   TRACE_ARTIFACTS: {} as R2Bucket,
-  DAILY_DIGEST_WORKFLOW: {} as Workflow,
+  DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
@@ -1034,28 +1037,14 @@ describe("web app", () => {
     expect(init?.method).toBe("DELETE");
   });
 
-  test("custom integrations can save a daily journal and trigger agent interpretation", async () => {
-    const forwardedRequests: Array<Request> = [];
-    const agentNamespace = {
-      idFromName: (name: string) => ({ name }),
-      get: () => ({
-        fetch: async (request: Request) => {
-          forwardedRequests.push(request);
-          return Response.json({
-            items: [
-              {
-                body: "need to write to michael",
-                confidence: 0.82,
-                kind: "task",
-                title: "Write to michael",
-              },
-            ],
-            model: "deterministic-delta-extractor",
-            provider: "deterministic",
-          });
-        },
-      }),
-    } as DurableObjectNamespace;
+  test("custom integrations can save a daily journal and queue agent interpretation", async () => {
+    const workflowCreates: Array<{ readonly id?: string; readonly params?: unknown }> = [];
+    const workflow = {
+      create: async (input?: { readonly id?: string; readonly params?: unknown }) => {
+        workflowCreates.push(input ?? {});
+        return { id: input?.id ?? "test-workflow-id" };
+      },
+    } as Workflow;
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const firstSave = await app.request(
@@ -1069,7 +1058,7 @@ describe("web app", () => {
           title: "June 18",
         }),
       },
-      { ...env, USER_AGENT_SESSION: agentNamespace },
+      { ...env, DAILY_DIGEST_WORKFLOW: workflow },
     );
 
     expect(firstSave.status).toBe(200);
@@ -1077,15 +1066,10 @@ describe("web app", () => {
     expect(saved.document.bodyText).toBe("need to write to michael");
     expect(saved.revision.changedText).toBe("need to write to michael");
 
-    const forwarded = forwardedRequests[0]!;
-    expect(new URL(forwarded.url).pathname).toBe("/journal/interpret");
-    expect(forwarded.headers.get("x-lares-user-id")).toBe("dev-user");
-    expect(await forwarded.json()).toEqual({
-      changedText: "need to write to michael",
-      documentId: saved.document.id,
-      localDate: "2026-06-18",
-      revisionId: saved.revision.id,
-    });
+    expect(saved.analysisRun).toEqual(
+      expect.objectContaining({ sourceType: "note_revision", status: "queued" }),
+    );
+    expect(workflowCreates).toHaveLength(1);
 
     const documentResponse = await app.request("/api/journal/2026-06-18", {}, env);
     expect(documentResponse.status).toBe(200);
@@ -1106,28 +1090,14 @@ describe("web app", () => {
         changedText: "need to write to michael",
       }),
     ]);
-    expect(exported.extractedItems).toEqual([
-      expect.objectContaining({
-        body: "need to write to michael",
-        kind: "task",
-        status: "proposed",
-        title: "Write to michael",
-      }),
-    ]);
-    expect(exported.summaryDocuments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ periodType: "day", status: "ready" }),
-        expect.objectContaining({ periodType: "week", status: "ready" }),
-      ]),
-    );
-    expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "completed" })]);
-    expect(exported.agentRunOutputs.length).toBeGreaterThanOrEqual(3);
+    expect(exported.extractedItems).toEqual([]);
+    expect(exported.summaryDocuments).toEqual([]);
+    expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "queued" })]);
+    expect(exported.agentRunOutputs).toEqual([]);
     expect(exported.memoryDocuments).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ sourceType: "daily_note" }),
         expect.objectContaining({ sourceType: "note_revision" }),
-        expect.objectContaining({ sourceType: "extracted_item" }),
-        expect.objectContaining({ sourceType: "summary" }),
         expect.objectContaining({ sourceType: "journal_revision" }),
       ]),
     );
@@ -1143,100 +1113,97 @@ describe("web app", () => {
     );
 
     const actionsResponse = await app.request("/api/actions", {}, env);
-    expect((await actionsResponse.json()).actions).toEqual([
-      expect.objectContaining({ title: "Write to michael", kind: "task" }),
-    ]);
+    const actions = await actionsResponse.json();
+    expect(actions.actions).toEqual([]);
+    expect(actions.latestRun).toEqual(expect.objectContaining({ status: "queued" }));
     const summariesResponse = await app.request("/api/summaries", {}, env);
-    expect((await summariesResponse.json()).summaries).toEqual(
-      expect.arrayContaining([expect.objectContaining({ periodType: "day" })]),
-    );
+    expect((await summariesResponse.json()).summaries).toEqual([]);
   });
 
-  test("custom integrations save daily journals with Think-backed AI extraction status", async () => {
+  test("custom integrations enqueue durable AI analysis instead of extracting synchronously", async () => {
+    const workflowCreates: Array<{ readonly id?: string; readonly params?: unknown }> = [];
+    const workflow = {
+      create: async (input?: { readonly id?: string; readonly params?: unknown }) => {
+        workflowCreates.push(input ?? {});
+        return { id: input?.id ?? "generated-workflow-id" };
+      },
+    } as Workflow;
     const agentNamespace = {
       idFromName: (name: string) => ({ name }),
       get: () => ({
-        fetch: async () =>
-          Response.json({
-            dailySummary: "AI summary: the user completed the Michael follow-up.",
-            items: [
-              {
-                body: "The user has completed writing to Michael.",
-                confidence: 0.91,
-                kind: "memory",
-                title: "Michael follow-up completed",
-              },
-            ],
-            model: "@cf/moonshotai/kimi-k2.6",
-            provider: "cloudflare-think",
-          }),
+        fetch: async () => {
+          throw new Error("journal save should not call the agent synchronously");
+        },
       }),
     } as DurableObjectNamespace;
-    const info = spyOn(console, "info").mockImplementation(() => {});
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    try {
-      const response = await app.request(
-        "/api/journal",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            bodyText: "I have now written to michael",
-            localDate: "2026-06-21",
-            title: "June 21",
-          }),
-        },
-        { ...env, USER_AGENT_SESSION: agentNamespace },
-      );
-
-      expect(response.status).toBe(200);
-
-      const exported = await (await app.request("/api/export", {}, env)).json();
-      expect(exported.extractedItems).toEqual([
-        expect.objectContaining({
-          body: "The user has completed writing to Michael.",
-          kind: "memory",
-          title: "Michael follow-up completed",
+    const response = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "Ask AI to extract this action durably",
+          localDate: "2026-06-22",
+          title: "June 22",
         }),
-      ]);
-      expect(exported.summaryDocuments).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            body: "AI summary: the user completed the Michael follow-up.",
-            metadata: { generatedBy: "cloudflare-think", model: "@cf/moonshotai/kimi-k2.6" },
-            periodType: "day",
-          }),
-        ]),
-      );
-      expect(exported.agentRuns).toEqual([
-        expect.objectContaining({
-          metadata: expect.objectContaining({ itemCount: 1, provider: "cloudflare-think" }),
-          model: "@cf/moonshotai/kimi-k2.6",
-          status: "completed",
-        }),
-      ]);
+      },
+      { ...env, DAILY_DIGEST_WORKFLOW: workflow, USER_AGENT_SESSION: agentNamespace },
+    );
 
-      const actions = await (await app.request("/api/actions", {}, env)).json();
-      expect(actions.latestRun).toEqual(
-        expect.objectContaining({ model: "@cf/moonshotai/kimi-k2.6", status: "completed" }),
-      );
-      expect(actions.actions).toEqual([
-        expect.objectContaining({ title: "Michael follow-up completed" }),
-      ]);
-      const safeLog = JSON.parse(String(info.mock.calls.at(-1)?.[0]));
-      expect(safeLog).toEqual({
-        event: "daily_note_ai_extract_completed",
-        fallbackReason: null,
-        itemCount: 1,
-        logKind: "wide_event",
+    expect(response.status).toBe(200);
+    const saved = await response.json();
+    expect(saved.analysisRun).toEqual(
+      expect.objectContaining({
         model: "@cf/moonshotai/kimi-k2.6",
-        provider: "cloudflare-think",
-      });
-      expect(JSON.stringify(safeLog)).not.toContain("michael");
-    } finally {
-      info.mockRestore();
-    }
+        sourceType: "note_revision",
+        status: "queued",
+      }),
+    );
+    expect(workflowCreates).toEqual([
+      expect.objectContaining({
+        id: `daily-note-analysis-${saved.analysisRun.sourceId}`,
+        params: expect.objectContaining({
+          changedText: "Ask AI to extract this action durably",
+          kind: "daily-note-analysis",
+          localDate: "2026-06-22",
+          runId: saved.analysisRun.id,
+          userId: "dev-user",
+          workflowVersion: 1,
+        }),
+      }),
+    ]);
+
+    const exported = await (await app.request("/api/export", {}, env)).json();
+    expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "queued" })]);
+    expect(exported.extractedItems).toEqual([]);
+    expect(exported.summaryDocuments).toEqual([]);
+  });
+
+  test("custom integrations expose queued AI analysis status after saving a daily journal", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "I have now written to michael",
+          localDate: "2026-06-21",
+          title: "June 21",
+        }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const actions = await (await app.request("/api/actions", {}, env)).json();
+    expect(actions.latestRun).toEqual(
+      expect.objectContaining({ model: "@cf/moonshotai/kimi-k2.6", status: "queued" }),
+    );
+    expect(actions.actions).toEqual([]);
   });
 
   test("custom integrations can capture and list signals using primitive routes", async () => {
