@@ -73,6 +73,26 @@ export const authVerifications = sqliteTable("auth_verification", {
   updatedAt: integer("updated_at", { mode: "timestamp" }),
 });
 
+export const authPasskeys = sqliteTable(
+  "passkey",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").notNull(),
+    deviceType: text("device_type").notNull(),
+    backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
+    transports: text("transports"),
+    createdAt: integer("created_at", { mode: "timestamp" }),
+    aaguid: text("aaguid"),
+  },
+  (table) => [index("passkey_user_idx").on(table.userId)],
+);
+
 export const events = sqliteTable(
   "events",
   {
@@ -605,6 +625,7 @@ export const schema = {
   agentRunOutputs,
   agentRuns,
   authAccounts,
+  authPasskeys,
   authSessions,
   authUsers,
   authVerifications,

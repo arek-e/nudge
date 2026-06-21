@@ -22,7 +22,9 @@ export default defineConfig({
       manifest: false,
       registerType: "autoUpdate",
       workbox: {
+        clientsClaim: true,
         globPatterns: ["**/*.{css,html,ico,js,png,svg,webmanifest}"],
+        skipWaiting: true,
       },
     }),
   ],

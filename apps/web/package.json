@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "catalog:",
+    "@better-auth/passkey": "catalog:",
     "@cloudflare/think": "catalog:",
     "@lares/db": "workspace:*",
     "@lares/domain": "workspace:*",

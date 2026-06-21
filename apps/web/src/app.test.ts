@@ -133,6 +133,50 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
   });
 
+  test("POST /api/auth/email-otp/send-verification-otp is unavailable until Better Auth is configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/api/auth/email-otp/send-verification-otp",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "lana@example.com", type: "sign-in" }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
+  });
+
+  test("POST /api/auth/sign-out clears Better Auth cookies", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/api/auth/sign-out",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      { ...env, BETTER_AUTH_SECRET: "test-secret" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain("better-auth.session_token=; Max-Age=0");
+  });
+
+  test("GET /api/auth/passkey/generate-register-options returns an auth error instead of 404 or 500", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/api/auth/passkey/generate-register-options?name=Lares%20passkey",
+      {},
+      { ...env, BETTER_AUTH_SECRET: "test-secret", BETTER_AUTH_URL: "https://lares.test" },
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
   test("GET /api/auth/sign-up/email does not expose public sign-up by default", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(
@@ -922,7 +966,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailMagicLink: false, google: false },
+      authMethods: { emailOtp: false, google: false, passkey: false },
       authMode: "dev",
       user: { id: "dev-user", displayName: "Dev User" },
       workspace: { id: "dev-user", label: "Dev User's workspace" },
@@ -936,7 +980,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailMagicLink: true, google: false },
+      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "unauthenticated",
       user: null,
       workspace: null,
@@ -959,7 +1003,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailMagicLink: true, google: true },
+      authMethods: { emailOtp: true, google: true, passkey: true },
       authMode: "unauthenticated",
       user: null,
       workspace: null,
@@ -998,7 +1042,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailMagicLink: true, google: false },
+      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "better-auth",
       user: { id: "auth-user-1", displayName: "Lana" },
       workspace: { id: "auth-user-1", label: "Lana's workspace" },

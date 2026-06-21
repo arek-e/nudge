@@ -1,3 +1,4 @@
+import { passkeyClient } from "@better-auth/passkey/client";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
   createRootRoute,
@@ -9,7 +10,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { createAuthClient } from "better-auth/client";
-import { magicLinkClient } from "better-auth/client/plugins";
+import { emailOTPClient } from "better-auth/client/plugins";
 import { createContext, type FormEvent, StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -30,7 +31,7 @@ import { apiClient } from "./api-client";
 import "./styles.css";
 
 const queryClient = new QueryClient();
-const authClient = createAuthClient({ plugins: [magicLinkClient()] });
+const authClient = createAuthClient({ plugins: [emailOTPClient(), passkeyClient()] });
 
 interface CaptureContextValue {
   readonly status: string;
@@ -227,29 +228,62 @@ function LoginFrame(props: { readonly children?: React.ReactNode; readonly title
 }
 
 function LoginScreen(props: {
-  readonly authMethods: { readonly emailMagicLink: boolean; readonly google: boolean };
+  readonly authMethods: {
+    readonly emailOtp: boolean;
+    readonly google: boolean;
+    readonly passkey: boolean;
+  };
 }) {
   const [email, setEmail] = useState("alek@teampitch.app");
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [sentTo, setSentTo] = useState("");
   const continueWithEmail = useMutation({
     mutationFn: async () => {
-      const result = await authClient.signIn.magicLink({
-        callbackURL: "/",
+      if (sentTo) {
+        const result = await authClient.signIn.emailOtp({
+          email,
+          name: email,
+          otp,
+        });
+        if (result.error) throw new Error("Could not verify sign-in code");
+        return "signed-in" as const;
+      }
+
+      const result = await authClient.emailOtp.sendVerificationOtp({
         email,
+        type: "sign-in",
       });
-      if (result.error) throw new Error("Could not send sign-in link");
+      if (result.error) throw new Error("Could not send sign-in code");
+      return "sent" as const;
     },
-    onError: () => setError("Could not send a sign-in link. Try again."),
-    onSuccess: () => {
+    onError: () =>
+      setError(
+        sentTo ? "Code is incorrect or expired." : "Could not send a sign-in code. Try again.",
+      ),
+    onSuccess: async (result) => {
       setError("");
+      if (result === "signed-in") {
+        await queryClient.invalidateQueries({ queryKey: ["session"] });
+        return;
+      }
       setSentTo(email);
     },
   });
   const continueWithGoogle = async () => {
     await authClient.signIn.social({ callbackURL: "/", provider: "google" });
   };
-
+  const continueWithPasskey = useMutation({
+    mutationFn: async () => {
+      const result = await authClient.signIn.passkey();
+      if (result.error) throw new Error("Could not sign in with passkey");
+    },
+    onError: () => setError("Could not sign in with passkey."),
+    onSuccess: async () => {
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+  });
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     continueWithEmail.mutate();
@@ -258,11 +292,22 @@ function LoginScreen(props: {
   return (
     <LoginFrame title="Continue to Lares">
       <p className="m-0 text-sm leading-6 text-neutral-300">
-        Use Google or a one-time email link. New accounts are created the first time you continue.
+        Use a passkey, Google, or an email code. New accounts are created the first time you
+        continue.
       </p>
-      {props.authMethods.google ? (
+      {props.authMethods.passkey ? (
         <button
           className="mt-6 rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
+          disabled={continueWithPasskey.isPending}
+          onClick={() => continueWithPasskey.mutate()}
+          type="button"
+        >
+          {continueWithPasskey.isPending ? "Opening passkey..." : "Continue with passkey"}
+        </button>
+      ) : null}
+      {props.authMethods.google ? (
+        <button
+          className="mt-3 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
           onClick={continueWithGoogle}
           type="button"
         >
@@ -282,15 +327,34 @@ function LoginScreen(props: {
           />
         </label>
         {sentTo ? (
-          <p className="m-0 text-sm text-emerald-300">Check {sentTo} for your sign-in link.</p>
+          <label className="grid gap-2 text-sm font-medium text-neutral-200">
+            Code
+            <input
+              className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              type="text"
+              value={otp}
+              onChange={(event) => setOtp(event.currentTarget.value)}
+            />
+          </label>
+        ) : null}
+        {sentTo ? (
+          <p className="m-0 text-sm text-emerald-300">Enter the code sent to {sentTo}.</p>
         ) : null}
         {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
         <button
           className="rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
-          disabled={!props.authMethods.emailMagicLink || continueWithEmail.isPending}
+          disabled={!props.authMethods.emailOtp || continueWithEmail.isPending}
           type="submit"
         >
-          {continueWithEmail.isPending ? "Sending link..." : "Continue with email"}
+          {continueWithEmail.isPending
+            ? sentTo
+              ? "Verifying code..."
+              : "Sending code..."
+            : sentTo
+              ? "Verify code"
+              : "Continue with email"}
         </button>
       </form>
     </LoginFrame>
@@ -428,12 +492,38 @@ function SettingsScreen() {
       await queryClient.invalidateQueries();
     },
   });
-
+  const addPasskey = useMutation({
+    mutationFn: async () => {
+      const result = await authClient.passkey.addPasskey({ name: "Lares passkey" });
+      if (result.error) throw new Error("Could not add passkey");
+    },
+  });
   return (
     <LaresAppShell>
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
       </Surface>
+      {session.data?.authMethods.passkey ? (
+        <Surface eyebrow="Security" title="Passkeys">
+          <p className="summary">
+            Add a passkey to sign in with Face ID, Touch ID, your device PIN, or a security key.
+          </p>
+          <button
+            className="mt-4 min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            disabled={addPasskey.isPending}
+            type="button"
+            onClick={() => addPasskey.mutate()}
+          >
+            {addPasskey.isPending ? "Opening passkey..." : "Add passkey"}
+          </button>
+          {addPasskey.isError ? (
+            <p className="m-0 mt-3 text-sm text-red-300">Could not add a passkey.</p>
+          ) : null}
+          {addPasskey.isSuccess ? (
+            <p className="m-0 mt-3 text-sm text-emerald-300">Passkey added.</p>
+          ) : null}
+        </Surface>
+      ) : null}
       <Surface eyebrow="Data controls" title="Your data">
         <div className="mt-4 grid gap-2">
           <button
@@ -473,11 +563,16 @@ function TodayScreen() {
     ).length ?? 0;
   const signOut = useMutation({
     mutationFn: async () => {
-      await fetch("/api/auth/sign-out", { method: "POST" });
+      const response = await fetch("/api/auth/sign-out", {
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Could not sign out");
     },
     onSettled: () => {
       queryClient.setQueryData(["session"], {
-        authMethods: { emailMagicLink: true, google: false },
+        authMethods: { emailOtp: true, google: false, passkey: true },
         authMode: "unauthenticated",
         user: null,
         workspace: null,
