@@ -26,6 +26,28 @@ Deploys set `APP_VERSION` to the short Git SHA with Wrangler `--var`. Wide reque
 
 The deploy command also sets the Cloudflare Worker version tag and message to the same SHA.
 
+`scripts/deploy-web.ts --version=<tag>` overrides the version stamp. The production release workflow uses this so `/api/version`, Worker version metadata, the Git tag, and the GitHub Release all share the same release tag.
+
+## Production Releases
+
+Production releases are created manually from GitHub Actions via **Release Production**.
+
+The workflow:
+
+1. Computes a tag, defaulting to UTC CalVer `vYYYY.MM.DD.HHMM`.
+2. Generates GitHub release notes from merged changes since the previous tag.
+3. Optionally applies remote D1 migrations.
+4. Runs the normal production deploy with `APP_VERSION=<tag>`.
+5. Creates and pushes the Git tag.
+6. Creates a GitHub Release with the generated notes.
+
+Required repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Use the optional `tag` input for a specific release tag. Leave it blank for automatic UTC CalVer, for example `v2026.06.21.1430`.
+
 ## Prototype Override
 
 For explicit prototype deploys from a dirty tree:
