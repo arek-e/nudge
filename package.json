@@ -64,7 +64,7 @@
     "deploy:dry-run": "bun scripts/deploy-web.ts --dry-run",
     "deploy:production": "bun scripts/deploy-web.ts --env=production",
     "deploy:staging": "bun scripts/deploy-web.ts --env=staging",
-    "dev": "bun run --cwd apps/web dev",
+    "dev": "bun scripts/dev-web.ts",
     "eval:agent": "bun run --cwd packages/evals eval",
     "format": "bun run format:write",
     "format:check": "oxfmt --check .",
