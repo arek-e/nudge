@@ -21,6 +21,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "catalog:",
+    "@cloudflare/think": "catalog:",
     "@lares/db": "workspace:*",
     "@lares/domain": "workspace:*",
     "@lares/effect-services": "workspace:*",
@@ -36,17 +38,25 @@
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
     "agents": "catalog:",
+    "ai": "catalog:",
+    "better-auth": "catalog:",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:",
+    "evlog": "catalog:",
     "hono": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "workers-ai-provider": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",
+    "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
-    "vite": "catalog:"
+    "tailwindcss": "catalog:",
+    "vite": "catalog:",
+    "vite-plugin-pwa": "catalog:"
   }
 }

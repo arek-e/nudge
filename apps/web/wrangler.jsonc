@@ -9,16 +9,29 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/health", "/__test/*"],
+    "run_worker_first": ["/api/*", "/health", "/__test/*", "/__internal/*"],
   },
   "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
   },
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
+    "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
     "LOG_HTTP_REQUESTS": "true",
+    "THINK_MODEL": "@cf/moonshotai/kimi-k2.6",
+    "TURBOPUFFER_REGION": "aws-eu-west-1",
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true,
   },
   "d1_databases": [
     {

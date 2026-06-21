@@ -6,7 +6,8 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-        command: "bun run build && wrangler dev --port 8787",
+        command:
+          "bun run build && wrangler d1 migrations apply DB --local && wrangler dev --port 8787",
         reuseExistingServer: true,
         url: "http://127.0.0.1:8787",
       },

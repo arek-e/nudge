@@ -1,21 +1,55 @@
+import { initLogger } from "evlog";
+import { evlog, type EvlogVariables } from "evlog/hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { timing } from "hono/timing";
 import { Effect } from "effect";
 import {
+  buildRootServerSpan,
+  buildTraceSpanRow,
+  createSpanId,
+  createTraceId,
+  finalizeRequestWideEvent,
+  persistTraceCacheEvent,
+  persistTraceCacheSpan,
+  pruneTraceCache,
   recordHttpRequestTelemetry,
+  retryAfterSecondsFor,
   safeErrorFields,
-  shouldSampleWideEvent,
-  statusGroup,
 } from "@lares/observability";
 import type { Env } from "./env";
 
-type AppContext = Context<{ Bindings: Env }>;
-type AppMiddleware = MiddlewareHandler<{ Bindings: Env }>;
+export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
+
+export { retryAfterSecondsFor };
+
+type AppContext = Context<ObservabilityHonoEnv>;
+type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;
+
+initLogger({
+  drain: () => {},
+  env: { service: "lares-web" },
+  redact: true,
+  silent: true,
+});
 
 declare module "hono" {
   interface ContextVariableMap {
+    traceContext?: RequestTraceContext;
     wideEvent?: Record<string, unknown>;
   }
+}
+
+interface RequestTraceContext {
+  readonly cacheable: boolean;
+  readonly parentSpanId: string | null;
+  readonly rootSpanId: string;
+  readonly traceId: string;
+}
+
+interface RequestSpanInput {
+  readonly attributes?: Readonly<Record<string, unknown>>;
+  readonly kind?: "server" | "client" | "internal" | "producer" | "consumer";
+  readonly name: string;
 }
 
 const now = () => {
@@ -30,18 +64,52 @@ const requestId = (request: Request) => {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
 };
 
+const parseTraceparent = (value: string | null) => {
+  const match = value?.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/);
+  if (!match) return null;
+  return { flags: match[3], parentSpanId: match[2], traceId: match[1] };
+};
+
+const isTraceCacheRoute = (path: string) => path.startsWith("/api/traces");
+
 export const addWideEventFields = (c: AppContext, fields: Record<string, unknown>) => {
   const current = c.get("wideEvent") ?? {};
   c.set("wideEvent", { ...current, ...fields });
+  c.get("log").set(fields);
+};
+
+export const evlogWideEvents = (): AppMiddleware => {
+  return (c, next) =>
+    evlog({
+      drain: (event) => {
+        if (c.env.LOG_HTTP_REQUESTS !== "false") console.log(JSON.stringify(event));
+      },
+      keep: (ctx) => {
+        if (ctx.status && ctx.status >= 400) ctx.shouldKeep = true;
+        if (ctx.duration && ctx.duration >= 2_000) ctx.shouldKeep = true;
+      },
+    })(c, next);
 };
 
 export const requestObservability = (): AppMiddleware => {
   return async (c, next) => {
     const startedAt = now();
+    const startedAtIso = new Date().toISOString();
     const id = requestId(c.req.raw);
+    const incomingTrace = parseTraceparent(c.req.header("traceparent") ?? null);
+    const traceId = incomingTrace?.traceId ?? createTraceId();
+    const spanId = createSpanId();
     const path = new URL(c.req.url).pathname;
+    const cacheable = !isTraceCacheRoute(path);
 
     c.header("x-request-id", id);
+    c.header("traceparent", `00-${traceId}-${spanId}-${incomingTrace?.flags ?? "01"}`);
+    c.set("traceContext", {
+      cacheable,
+      parentSpanId: incomingTrace?.parentSpanId ?? null,
+      rootSpanId: spanId,
+      traceId,
+    });
     c.set("wideEvent", {
       event: "http_request_completed",
       logKind: "wide_event",
@@ -49,11 +117,14 @@ export const requestObservability = (): AppMiddleware => {
       environment: c.env.ENVIRONMENT ?? "unknown",
       version: c.env.APP_VERSION ?? "0.0.0",
       requestId: id,
+      spanId,
+      traceId,
       cfRay: c.req.header("cf-ray"),
       method: c.req.method,
       path,
       userAgent: c.req.header("user-agent"),
     });
+    c.get("log").set(c.get("wideEvent") ?? {});
 
     try {
       await next();
@@ -63,11 +134,12 @@ export const requestObservability = (): AppMiddleware => {
         outcome: "error",
         ...safeErrorFields(cause),
       });
+      c.get("log").error(cause instanceof Error ? cause : new Error(String(cause)));
       c.res = Response.json({ error: "Internal Server Error" }, { status: 500 });
     } finally {
       const durationMs = now() - startedAt;
+      const endedAtIso = new Date().toISOString();
       const status = c.res.status;
-      const outcome = status >= 500 ? "error" : "success";
 
       await Effect.runPromise(
         recordHttpRequestTelemetry({
@@ -78,23 +150,94 @@ export const requestObservability = (): AppMiddleware => {
         }),
       );
 
-      const wideEvent = {
-        ...c.get("wideEvent"),
-        timestamp: new Date().toISOString(),
+      const wideEvent = finalizeRequestWideEvent({
+        base: c.get("wideEvent") ?? {},
+        durationMs,
+        now: new Date().toISOString(),
         status,
-        statusGroup: statusGroup(status),
-        outcome,
-        durationMs: Number(durationMs.toFixed(2)),
-      };
-      const sampling = shouldSampleWideEvent(wideEvent);
+      });
 
-      if (c.env.LOG_HTTP_REQUESTS !== "false" && sampling.sampled) {
-        console.log(JSON.stringify({ ...wideEvent, ...sampling }));
+      c.get("log").set(wideEvent);
+
+      if (cacheable && typeof c.env.DB?.prepare === "function") {
+        runBackgroundEffect(
+          c,
+          Effect.gen(function* () {
+            yield* persistTraceEvent(c, wideEvent);
+            yield* persistRootTraceSpan(c, {
+              ...wideEvent,
+              durationMs,
+              endedAt: endedAtIso,
+              parentSpanId: incomingTrace?.parentSpanId ?? null,
+              startedAt: startedAtIso,
+              traceId,
+            });
+            yield* pruneTraceCache(c.env.DB).pipe(
+              Effect.catch((cause) =>
+                Effect.sync(() => {
+                  console.warn(
+                    JSON.stringify({
+                      event: "trace_cache_prune_failed",
+                      logKind: "wide_event",
+                      service: "lares-web",
+                      requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+                      ...safeErrorFields(cause),
+                    }),
+                  );
+                }),
+              ),
+            );
+          }),
+        );
       }
-
-      await persistTraceEvent(c, { ...wideEvent, ...sampling });
     }
   };
+};
+
+export const runWithRequestSpan = async <A>(
+  c: AppContext,
+  input: RequestSpanInput,
+  task: () => Promise<A>,
+) => {
+  const traceContext = c.get("traceContext");
+  const startedAt = now();
+  const startedAtIso = new Date().toISOString();
+  const spanId = createSpanId();
+  let spanStatus: "ok" | "error" = "ok";
+
+  try {
+    return await task();
+  } catch (cause) {
+    spanStatus = "error";
+    throw cause;
+  } finally {
+    if (traceContext?.cacheable && typeof c.env.DB?.prepare === "function") {
+      const event = c.get("wideEvent") ?? {};
+      const row = buildTraceSpanRow({
+        attributes: input.attributes ?? {},
+        durationMs: Number((now() - startedAt).toFixed(2)),
+        endedAt: new Date().toISOString(),
+        environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
+        httpStatus: numberField(event, "status"),
+        kind: input.kind ?? "internal",
+        method: nullableStringField(event, "method"),
+        name: input.name,
+        outcome: spanStatus === "error" ? "error" : "success",
+        parentSpanId: traceContext.rootSpanId,
+        path: nullableStringField(event, "path"),
+        requestId: nullableStringField(event, "requestId"),
+        routeName: nullableStringField(event, "routeName"),
+        service: stringField(event, "service", "lares-web"),
+        spanId,
+        startedAt: startedAtIso,
+        status: spanStatus,
+        traceId: traceContext.traceId,
+        version: stringField(event, "version", c.env.APP_VERSION ?? "0.0.0"),
+      });
+
+      runBackgroundEffect(c, persistTraceSpanRow(c, row));
+    }
+  }
 };
 
 export const serverTiming = () => {
@@ -119,66 +262,82 @@ const numberField = (event: Record<string, unknown>, key: string) => {
   return typeof value === "number" ? value : null;
 };
 
-const persistTraceEvent = async (c: AppContext, event: Record<string, unknown>) => {
-  if (typeof c.env.DB?.prepare !== "function") return;
+const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
+  if (typeof c.env.DB?.prepare !== "function") return Effect.void;
 
-  const id = crypto.randomUUID();
-  const timestamp = stringField(event, "timestamp", new Date().toISOString());
-  const payload = JSON.stringify(event);
-
-  try {
-    await c.env.DB.prepare(
-      `INSERT INTO trace_events (
-        id,
-        timestamp,
-        event,
-        log_kind,
-        service,
-        environment,
-        version,
-        request_id,
-        route_name,
-        method,
-        path,
-        status,
-        outcome,
-        duration_ms,
-        sample_reason,
-        artifact_key,
-        payload,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        id,
-        timestamp,
-        stringField(event, "event", "unknown"),
-        stringField(event, "logKind", "wide_event"),
-        stringField(event, "service", "lares-web"),
-        stringField(event, "environment", "unknown"),
-        stringField(event, "version", "0.0.0"),
-        nullableStringField(event, "requestId"),
-        nullableStringField(event, "routeName"),
-        nullableStringField(event, "method"),
-        nullableStringField(event, "path"),
-        numberField(event, "status"),
-        nullableStringField(event, "outcome"),
-        numberField(event, "durationMs"),
-        nullableStringField(event, "sampleReason"),
-        nullableStringField(event, "artifactKey"),
-        payload,
-        new Date().toISOString(),
-      )
-      .run();
-  } catch (cause) {
-    console.warn(
-      JSON.stringify({
-        event: "trace_event_persist_failed",
-        logKind: "wide_event",
-        service: "lares-web",
-        requestId: nullableStringField(event, "requestId"),
-        ...safeErrorFields(cause),
+  return persistTraceCacheEvent(c.env.DB, {
+    event,
+    id: crypto.randomUUID(),
+    now: new Date().toISOString(),
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() => {
+        console.warn(
+          JSON.stringify({
+            event: "trace_event_persist_failed",
+            logKind: "wide_event",
+            service: "lares-web",
+            requestId: nullableStringField(event, "requestId"),
+            ...safeErrorFields(cause),
+          }),
+        );
       }),
-    );
+    ),
+    Effect.asVoid,
+  );
+};
+
+const persistRootTraceSpan = (c: AppContext, event: Record<string, unknown>) => {
+  if (typeof c.env.DB?.prepare !== "function") return Effect.void;
+
+  const row = buildRootServerSpan({
+    durationMs: numberField(event, "durationMs") ?? 0,
+    endedAt: stringField(event, "endedAt", new Date().toISOString()),
+    event,
+    parentSpanId: nullableStringField(event, "parentSpanId"),
+    spanId: stringField(event, "spanId", createSpanId()),
+    startedAt: stringField(event, "startedAt", new Date().toISOString()),
+    traceId: stringField(event, "traceId", createTraceId()),
+  });
+
+  return persistTraceSpanRow(c, row);
+};
+
+const persistTraceSpanRow = (
+  c: AppContext,
+  row: { readonly sql: string; readonly values: ReadonlyArray<unknown> },
+) => {
+  return persistTraceCacheSpan(c.env.DB, row).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() => {
+        console.warn(
+          JSON.stringify({
+            event: "trace_span_persist_failed",
+            logKind: "wide_event",
+            service: "lares-web",
+            requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+            ...safeErrorFields(cause),
+          }),
+        );
+      }),
+    ),
+    Effect.asVoid,
+  );
+};
+
+const safeExecutionContext = (c: AppContext) => {
+  try {
+    return typeof c.executionCtx?.waitUntil === "function" ? c.executionCtx : null;
+  } catch {
+    return null;
+  }
+};
+
+const runBackgroundEffect = (c: AppContext, effect: Effect.Effect<void, unknown>) => {
+  const persistence = Effect.runPromise(effect);
+  const executionCtx = safeExecutionContext(c);
+  if (executionCtx) {
+    executionCtx.waitUntil(persistence);
+    return;
   }
 };

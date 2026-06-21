@@ -2,18 +2,61 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
+import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type DbService } from "@lares/db";
-import { AuthService } from "@lares/effect-services";
+import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
-import { apiContract } from "./api-contract";
-import { addWideEventFields, requestObservability, serverTiming } from "./observability";
+import {
+  apiContract,
+  conversationMessageResponseSchema,
+  conversationMetadataSchema,
+  listRecentSignalsToolResponseSchema,
+  retrieveMemoryToolResponseSchema,
+} from "./api-contract";
+import {
+  createBetterAuth,
+  isBetterAuthConfigured,
+  resolveBetterAuthSession,
+  type AuthSessionResolver,
+} from "./auth";
+import {
+  addWideEventFields,
+  evlogWideEvents,
+  type ObservabilityHonoEnv,
+  requestObservability,
+  retryAfterSecondsFor,
+  runWithRequestSpan,
+  serverTiming,
+} from "./observability";
 
 type AppDbLayer = Layer.Layer<Db>;
 
 interface ApiContext {
+  readonly agentSessions: DurableObjectNamespace;
+  readonly agentInternalSecret?: string;
   readonly db: DbService;
+  readonly recordSpan: <A>(
+    name: string,
+    input: {
+      readonly attributes?: Readonly<Record<string, unknown>>;
+      readonly kind?: "client" | "internal";
+    },
+    task: () => Promise<A>,
+  ) => Promise<A>;
+  readonly traceDb?: D1Database;
+  readonly turbopuffer?: {
+    readonly apiKey: string;
+    readonly region: string;
+  };
+  readonly session: {
+    readonly authMode: "better-auth" | "dev" | "unauthenticated";
+    readonly user: {
+      readonly id: string;
+      readonly displayName: string;
+    } | null;
+  };
   readonly user: {
     readonly id: string;
     readonly displayName: string;
@@ -21,152 +64,733 @@ interface ApiContext {
 }
 
 interface CreateAppOptions {
+  readonly authSessionResolver?: AuthSessionResolver;
   readonly dbLayer?: AppDbLayer;
 }
 
 const api = implement(apiContract).$context<ApiContext>();
 
 export const apiRouter = api.router({
-  captures: {
-    append: api.captures.append.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.appendEvent({ ...input, userId: context.user.id });
-      });
+  actions: {
+    list: api.actions.list.handler(async ({ context, input }) => {
+      const [actions, latestRuns] = await Promise.all([
+        Effect.runPromise(
+          context.db.listExtractedItems({
+            limit: input.limit,
+            userId: context.user.id,
+            ...(input.status !== undefined ? { status: input.status } : {}),
+          }),
+        ),
+        Effect.runPromise(
+          context.db.listAgentRuns({
+            limit: 1,
+            sourceType: "note_revision",
+            userId: context.user.id,
+          }),
+        ),
+      ]);
+      return { actions: [...actions], ...(latestRuns[0] ? { latestRun: latestRuns[0] } : {}) };
+    }),
+    updateStatus: api.actions.updateStatus.handler(async ({ context, input }) => {
+      const action = await Effect.runPromise(
+        context.db.updateExtractedItemStatus({
+          itemId: input.itemId,
+          status: input.status,
+          userId: context.user.id,
+        }),
+      );
+      await Effect.runPromise(
+        context.db.recordItemEvent({
+          eventType:
+            input.status === "completed"
+              ? "completed"
+              : input.status === "dismissed"
+                ? "dismissed"
+                : input.status === "archived"
+                  ? "archived"
+                  : input.status === "accepted"
+                    ? "accepted"
+                    : "edited",
+          itemId: action.id,
+          payload: { status: input.status },
+          userId: context.user.id,
+        }),
+      );
+      return { action };
     }),
   },
+  account: {
+    delete: api.account.delete.handler(async ({ context }) => {
+      const turbopuffer = context.turbopuffer;
+      if (turbopuffer) {
+        await runMemoryIndex(
+          context.db,
+          turbopuffer,
+          Effect.gen(function* () {
+            const memoryIndex = yield* MemoryIndex;
+            return yield* memoryIndex.deleteUserNamespace({ user: context.user });
+          }),
+        );
+      }
+      await Effect.runPromise(context.db.deleteUserData({ userId: context.user.id }));
+      return { deleted: true };
+    }),
+  },
+  conversations: {
+    get: api.conversations.get.handler(async ({ context, input }) => {
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.agentInternalSecret,
+        context.user,
+        input.conversationId,
+        "/metadata",
+        conversationMetadataSchema,
+      );
+    }),
+    listRecentSignals: api.conversations.listRecentSignals.handler(async ({ context, input }) => {
+      const url = new URL("https://lares.local/tools/list-recent-signals");
+      url.searchParams.set("limit", String(input.limit ?? 10));
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.agentInternalSecret,
+        context.user,
+        input.conversationId,
+        url,
+        listRecentSignalsToolResponseSchema,
+      );
+    }),
+    retrieveMemory: api.conversations.retrieveMemory.handler(async ({ context, input }) => {
+      const url = new URL("https://lares.local/tools/retrieve-memory");
+      url.searchParams.set("query", input.query);
+      url.searchParams.set("limit", String(input.limit ?? 5));
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.agentInternalSecret,
+        context.user,
+        input.conversationId,
+        url,
+        retrieveMemoryToolResponseSchema,
+      );
+    }),
+    sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
+      return proxyConversationRequest(
+        context.agentSessions,
+        context.agentInternalSecret,
+        context.user,
+        input.conversationId,
+        "/messages",
+        conversationMessageResponseSchema,
+        {
+          body: JSON.stringify({ message: input.message }),
+          method: "POST",
+        },
+      );
+    }),
+  },
+  captures: {
+    append: api.captures.append.handler(async ({ context, input }) => {
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.appendSignal({
+          occurredAt: input.occurredAt,
+          payload: input.payload,
+          schemaVersion: input.schemaVersion,
+          source: input.source,
+          type: input.type,
+          user: context.user,
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+        }),
+      );
+    }),
+  },
+  dataExport: api.dataExport.handler(async ({ context }) => {
+    const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+    return {
+      agentRunOutputs: [...exported.agentRunOutputs],
+      agentRuns: [...exported.agentRuns],
+      user: exported.user,
+      commitments: [...exported.commitments],
+      dailyNotes: [...exported.dailyNotes],
+      events: [...exported.events],
+      extractedItems: [...exported.extractedItems],
+      frames: [...exported.frames],
+      itemEvents: [...exported.itemEvents],
+      journalDocuments: [...exported.journalDocuments],
+      journalRevisions: [...exported.journalRevisions],
+      memoryChunks: [...exported.memoryChunks],
+      memoryDocuments: [...exported.memoryDocuments],
+      memoryIndexJobs: [...exported.memoryIndexJobs],
+      memoryRetrievalEvents: exported.memoryRetrievalEvents.map((retrievalEvent) => ({
+        ...retrievalEvent,
+        resultChunkIds: [...retrievalEvent.resultChunkIds],
+      })),
+      noteRevisions: [...exported.noteRevisions],
+      outcomes: [...exported.outcomes],
+      proposals: [...exported.proposals],
+      reviews: [...exported.reviews],
+      summaryDocuments: exported.summaryDocuments.map((summary) => ({
+        ...summary,
+        sourceItemIds: [...summary.sourceItemIds],
+        sourceNoteIds: [...summary.sourceNoteIds],
+      })),
+      syntheses: exported.syntheses.map((synthesis) => ({
+        ...synthesis,
+        openQuestions: [...synthesis.openQuestions],
+        sourceSignalIds: [...synthesis.sourceSignalIds],
+        themes: [...synthesis.themes],
+      })),
+    };
+  }),
   events: {
     append: api.events.append.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.appendEvent({ ...input, userId: context.user.id });
-      });
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.appendSignal({
+          occurredAt: input.occurredAt,
+          payload: input.payload,
+          schemaVersion: input.schemaVersion,
+          source: input.source,
+          type: input.type,
+          user: context.user,
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+        }),
+      );
     }),
     list: api.events.list.handler(async ({ context, input }) => {
-      const events = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const query = {
-          userId: context.user.id,
-          limit: input.limit,
-          ...(input.from ? { occurredFrom: input.from } : {}),
-          ...(input.to ? { occurredTo: input.to } : {}),
-        };
-        return yield* context.db.listRecentEvents(query);
-      });
+      const events = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listSignals({
+          limit: input.limit ?? 50,
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.to ? { to: input.to } : {}),
+          user: context.user,
+        }),
+      );
 
       return { events: [...events] };
     }),
   },
+  journal: {
+    get: api.journal.get.handler(async ({ context, input }) => {
+      const document = await Effect.runPromise(
+        context.db.getJournalDocument({ localDate: input.localDate, userId: context.user.id }),
+      );
+      return { document };
+    }),
+    save: api.journal.save.handler(async ({ context, input }) => {
+      const result = await Effect.runPromise(
+        context.db.upsertJournalDocument({
+          bodyText: input.bodyText,
+          ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+          localDate: input.localDate,
+          title: input.title,
+          userId: context.user.id,
+        }),
+      );
+      const noteResult = await Effect.runPromise(
+        context.db.upsertDailyNote({
+          bodyText: input.bodyText,
+          ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+          localDate: input.localDate,
+          title: input.title,
+          userId: context.user.id,
+        }),
+      );
+      if (result.revision.changedText.trim().length > 0) {
+        const extraction = await context.recordSpan(
+          "daily_note.ai_extract",
+          {
+            attributes: {
+              "lares.ai.source_type": "note_revision",
+              "lares.ai.system": "cloudflare-think",
+            },
+            kind: "internal",
+          },
+          async () =>
+            toAiExtractionResult(
+              await proxyConversationRequest(
+                context.agentSessions,
+                context.agentInternalSecret,
+                context.user,
+                "journal",
+                "/journal/interpret",
+                aiExtractionResponseSchema,
+                {
+                  body: JSON.stringify({
+                    changedText: result.revision.changedText,
+                    documentId: result.document.id,
+                    localDate: result.document.localDate,
+                    revisionId: result.revision.id,
+                  }),
+                  method: "POST",
+                },
+              ),
+            ),
+        );
+        console.info(
+          JSON.stringify({
+            event: "daily_note_ai_extract_completed",
+            logKind: "wide_event",
+            fallbackReason: extraction.fallbackReason ?? null,
+            itemCount: extraction.items.length,
+            model: extraction.model,
+            provider: extraction.provider,
+          }),
+        );
+        const agentRun = await Effect.runPromise(
+          context.db.startAgentRun({
+            metadata: {
+              fallbackReason: extraction.fallbackReason ?? null,
+              itemCount: extraction.items.length,
+              localDate: input.localDate,
+              provider: extraction.provider,
+            },
+            model: extraction.model,
+            sourceId: noteResult.revision.id,
+            sourceType: "note_revision",
+            status: "running",
+            triggerType: "note_inactivity",
+            userId: context.user.id,
+          }),
+        );
+        const extractedItems = await Promise.all(
+          extraction.items.map(async (extracted) => {
+            const item = await Effect.runPromise(
+              context.db.upsertExtractedItem({
+                ...extracted,
+                sourceNoteId: noteResult.note.id,
+                sourceRevisionId: noteResult.revision.id,
+                userId: context.user.id,
+              }),
+            );
+            await Promise.all([
+              Effect.runPromise(
+                context.db.recordItemEvent({
+                  eventType: "created",
+                  itemId: item.id,
+                  payload: { sourceRevisionId: noteResult.revision.id },
+                  userId: context.user.id,
+                }),
+              ),
+              Effect.runPromise(
+                context.db.upsertMemoryDocument({
+                  bodyText: `${item.title}\n${item.body}`,
+                  localDate: input.localDate,
+                  sourceId: item.id,
+                  sourceType: "extracted_item",
+                  title: item.title,
+                  userId: context.user.id,
+                }),
+              ),
+            ]);
+            return item;
+          }),
+        );
+        const dailySummary = await Effect.runPromise(
+          context.db.upsertSummaryDocument({
+            body:
+              extraction.dailySummary ??
+              dailySummaryFrom({ items: extractedItems, noteText: input.bodyText }),
+            metadata: { generatedBy: extraction.provider, model: extraction.model },
+            periodEnd: input.localDate,
+            periodStart: input.localDate,
+            periodType: "day",
+            sourceItemIds: extractedItems.map((item) => item.id),
+            sourceNoteIds: [noteResult.note.id],
+            status: "ready",
+            title: `${input.localDate} summary`,
+            userId: context.user.id,
+          }),
+        );
+        const week = weekRangeFor(input.localDate);
+        const weeklySummary = await Effect.runPromise(
+          context.db.upsertSummaryDocument({
+            body: `Week so far: ${dailySummary.body}`,
+            metadata: { generatedBy: extraction.provider, model: extraction.model },
+            periodEnd: week.end,
+            periodStart: week.start,
+            periodType: "week",
+            sourceItemIds: extractedItems.map((item) => item.id),
+            sourceNoteIds: [noteResult.note.id],
+            status: "ready",
+            title: `${week.start} week summary`,
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.completeAgentRun({
+            outputs: [
+              ...extractedItems.map((item) => ({
+                outputId: item.id,
+                outputType: "extracted_item" as const,
+              })),
+              { outputId: dailySummary.id, outputType: "summary" as const },
+              { outputId: weeklySummary.id, outputType: "summary" as const },
+            ],
+            runId: agentRun.id,
+            status: "completed",
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: noteResult.note.bodyText,
+            localDate: noteResult.note.localDate,
+            sourceId: noteResult.note.id,
+            sourceType: "daily_note",
+            title: noteResult.note.title,
+            userId: context.user.id,
+          }),
+        );
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: noteResult.revision.changedText,
+            localDate: noteResult.note.localDate,
+            sourceId: noteResult.revision.id,
+            sourceType: "note_revision",
+            title: `${noteResult.note.title} delta`,
+            userId: context.user.id,
+          }),
+        );
+        await Promise.all(
+          [dailySummary, weeklySummary].map((summary) =>
+            Effect.runPromise(
+              context.db.upsertMemoryDocument({
+                bodyText: summary.body,
+                sourceId: summary.id,
+                sourceType: "summary",
+                title: summary.title,
+                userId: context.user.id,
+              }),
+            ),
+          ),
+        );
+        await Effect.runPromise(
+          context.db.upsertMemoryDocument({
+            bodyText: result.revision.changedText,
+            localDate: result.document.localDate,
+            sourceId: result.revision.id,
+            sourceType: "journal_revision",
+            title: result.document.title,
+            userId: context.user.id,
+          }),
+        );
+        const turbopuffer = context.turbopuffer;
+        if (turbopuffer) {
+          await context.recordSpan(
+            "memory.index_pending",
+            {
+              attributes: {
+                "lares.memory_index.provider": "turbopuffer",
+                "turbopuffer.region": turbopuffer.region,
+              },
+              kind: "client",
+            },
+            async () => {
+              await runMemoryIndex(
+                context.db,
+                turbopuffer,
+                Effect.gen(function* () {
+                  const memoryIndex = yield* MemoryIndex;
+                  return yield* memoryIndex.indexPending({ limit: 20, user: context.user });
+                }),
+              ).catch((error: unknown) => {
+                const safeError = error instanceof Error ? error : new Error("Memory index failed");
+                console.warn(
+                  JSON.stringify({
+                    event: "memory_index_failed",
+                    logKind: "wide_event",
+                    provider: "turbopuffer",
+                    region: turbopuffer.region,
+                    errorType: safeError.name,
+                  }),
+                );
+              });
+            },
+          );
+        }
+      }
+      return result;
+    }),
+  },
   signals: {
     list: api.signals.list.handler(async ({ context, input }) => {
-      const signals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const query = {
-          userId: context.user.id,
-          limit: input.limit,
-          ...(input.from ? { occurredFrom: input.from } : {}),
-          ...(input.to ? { occurredTo: input.to } : {}),
-        };
-        return yield* context.db.listRecentEvents(query);
-      });
+      const signals = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listSignals({
+          limit: input.limit ?? 50,
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.to ? { to: input.to } : {}),
+          user: context.user,
+        }),
+      );
 
       return { signals: [...signals] };
     }),
   },
+  summaries: {
+    list: api.summaries.list.handler(async ({ context, input }) => {
+      const summaries = await Effect.runPromise(
+        context.db.listSummaryDocuments({
+          limit: input.limit,
+          userId: context.user.id,
+          ...(input.periodType !== undefined ? { periodType: input.periodType } : {}),
+        }),
+      );
+      return {
+        summaries: summaries.map((summary) => ({
+          ...summary,
+          sourceItemIds: [...summary.sourceItemIds],
+          sourceNoteIds: [...summary.sourceNoteIds],
+        })),
+      };
+    }),
+  },
+  session: api.session.handler(({ context }) => {
+    return {
+      authMode: context.session.authMode,
+      user: context.session.user,
+      workspace: context.session.user
+        ? {
+            id: context.session.user.id,
+            label: `${context.session.user.displayName}'s workspace`,
+          }
+        : null,
+    };
+  }),
   proposals: {
     generate: api.proposals.generate.handler(async ({ context, input }) => {
-      const proposals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* ensureFrame(context.db, context.user.id, input.frameKey);
-        const synthesis = yield* context.db.getLatestSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-        });
-        if (!synthesis) return [];
-
-        const proposalInputs = buildDeterministicProposals({
-          userId: context.user.id,
-          synthesisId: synthesis.id,
-          openQuestions: synthesis.openQuestions,
-          themes: synthesis.themes,
-        });
-        const created = [];
-        for (const proposalInput of proposalInputs) {
-          created.push(yield* context.db.appendProposal(proposalInput));
-        }
-        return created;
-      });
+      const proposals = await context.recordSpan(
+        "proposals.generate",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.generateProposals({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
+          ),
+      );
 
       return { proposals: proposals.map(toProposalResponse) };
     }),
     list: api.proposals.list.handler(async ({ context, input }) => {
-      const proposals = await runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.listPendingProposals({
-          userId: context.user.id,
-          limit: input.limit,
-        });
-      });
+      const proposals = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listPendingProposals({ limit: input.limit ?? 20, user: context.user }),
+      );
 
       return { proposals: proposals.map(toProposalResponse) };
     }),
   },
+  commitments: {
+    list: api.commitments.list.handler(async ({ context, input }) => {
+      const commitments = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listCommitments({ limit: input.limit ?? 20, user: context.user }),
+      );
+
+      return { commitments: [...commitments] };
+    }),
+  },
   reviews: {
     create: api.reviews.create.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        return yield* context.db.reviewProposal({
-          userId: context.user.id,
-          proposalId: input.proposalId,
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.reviewProposal({
           decision: input.decision,
-          ...(input.editedTitle ? { editedTitle: input.editedTitle } : {}),
-          ...(input.editedBody ? { editedBody: input.editedBody } : {}),
-        });
-      });
+          ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
+          ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+          ...(input.editedBodyDocument !== undefined
+            ? { editedBodyDocument: input.editedBodyDocument }
+            : {}),
+          proposalId: input.proposalId,
+          user: context.user,
+        }),
+      );
+    }),
+  },
+  outcomes: {
+    list: api.outcomes.list.handler(async ({ context, input }) => {
+      const outcomes = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.listOutcomes({ limit: input.limit ?? 20, user: context.user }),
+      );
+
+      return { outcomes: [...outcomes] };
+    }),
+    create: api.outcomes.create.handler(async ({ context, input }) => {
+      return runWorkflow(
+        context.db,
+        PrimitiveWorkflows.recordOutcome({
+          commitmentId: input.commitmentId,
+          ...(input.note !== undefined ? { note: input.note } : {}),
+          result: input.result,
+          user: context.user,
+        }),
+      );
     }),
   },
   syntheses: {
     create: api.syntheses.create.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* context.db.upsertCurrentFrame(
-          defaultFrame(context.user.id, input.frameKey),
-        );
-        const signals = yield* context.db.listRecentEvents({
-          userId: context.user.id,
-          limit: 20,
-        });
-        const synthesisInput = buildDeterministicSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-          signals,
-        });
-        const synthesis = yield* context.db.appendSynthesis(synthesisInput);
-        return { frame, synthesis: toSynthesisResponse(synthesis) };
-      });
+      return context.recordSpan(
+        "syntheses.create",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.createSynthesis({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
+          ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
+      );
     }),
     latest: api.syntheses.latest.handler(async ({ context, input }) => {
-      return runWithDb(context.db, function* () {
-        yield* context.db.ensureUser(context.user);
-        const frame = yield* ensureFrame(context.db, context.user.id, input.frameKey);
-        const latest = yield* context.db.getLatestSynthesis({
-          userId: context.user.id,
-          frameId: frame.id,
-        });
-        if (latest) return { frame, synthesis: toSynthesisResponse(latest) };
-
-        const signals = yield* context.db.listRecentEvents({
-          userId: context.user.id,
-          limit: 20,
-        });
-        const synthesis = yield* context.db.appendSynthesis(
-          buildDeterministicSynthesis({ userId: context.user.id, frameId: frame.id, signals }),
-        );
-        return { frame, synthesis: toSynthesisResponse(synthesis) };
-      });
+      return context.recordSpan(
+        "syntheses.latest",
+        { attributes: { "lares.frame_key": input.frameKey } },
+        () =>
+          runWorkflow(
+            context.db,
+            PrimitiveWorkflows.latestSynthesis({
+              frameKey: input.frameKey ?? "current_state",
+              user: context.user,
+            }),
+          ).then(({ frame, synthesis }) => ({ frame, synthesis: toSynthesisResponse(synthesis) })),
+      );
+    }),
+  },
+  traces: {
+    recent: api.traces.recent.handler(async ({ context, input }) => {
+      const rows = await Effect.runPromise(
+        listRecentTraceSpans(context.traceDb, input.limit ?? 20),
+      );
+      return { spans: rows.map(toTraceSpanSummary) };
     }),
   },
 });
+
+async function proxyConversationRequest<Schema extends z.ZodType>(
+  agentSessions: DurableObjectNamespace,
+  internalSecret: string | undefined,
+  user: { readonly id: string; readonly displayName: string },
+  conversationId: string,
+  pathOrUrl: string | URL,
+  schema: Schema,
+  init: { readonly body?: BodyInit; readonly method?: string } = {},
+): Promise<z.infer<Schema>> {
+  const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
+  const agent = agentSessions.get(agentId);
+  const url =
+    typeof pathOrUrl === "string" ? new URL(`https://lares.local${pathOrUrl}`) : pathOrUrl;
+  const internalSignature = internalSecret
+    ? await signAgentRequest(internalSecret, user.id, conversationId)
+    : undefined;
+  const requestInit = {
+    headers: {
+      "content-type": "application/json",
+      "x-lares-conversation-id": conversationId,
+      "x-lares-user-display-name": user.displayName,
+      "x-lares-user-id": user.id,
+      ...(internalSignature !== undefined
+        ? { "x-lares-internal-signature": internalSignature }
+        : {}),
+    },
+    method: init.method ?? "GET",
+    ...(init.body !== undefined ? { body: init.body } : {}),
+  } satisfies RequestInit;
+  const response = await agent.fetch(new Request(url.toString(), requestInit));
+
+  if (!response.ok) {
+    throw new Error(`Conversation agent request failed with ${response.status}`);
+  }
+
+  return schema.parse(await response.json());
+}
+
+async function signAgentRequest(secret: string, userId: string, conversationId: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${userId}:${conversationId}`),
+  );
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+interface TraceSpanRow {
+  readonly id: string;
+  readonly trace_id: string;
+  readonly parent_span_id: string | null;
+  readonly name: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly duration_ms: number | null;
+  readonly route_name: string | null;
+  readonly method: string | null;
+  readonly path: string | null;
+}
+
+function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
+  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
+
+  return Effect.tryPromise({
+    try: async () => {
+      const result = await traceDb
+        .prepare(
+          `SELECT
+            span_id AS id,
+            trace_id,
+            parent_span_id,
+            name,
+            kind,
+            status,
+            started_at,
+            ended_at,
+            duration_ms,
+            route_name,
+            method,
+            path
+          FROM trace_spans
+          WHERE route_name IS NULL OR route_name != 'api.traces'
+          ORDER BY started_at DESC
+          LIMIT ?`,
+        )
+        .bind(limit)
+        .all<TraceSpanRow>();
+
+      return result.results ?? [];
+    },
+    catch: (cause) => cause,
+  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
+}
+
+function toTraceSpanSummary(row: TraceSpanRow) {
+  return {
+    id: row.id,
+    traceId: row.trace_id,
+    parentSpanId: row.parent_span_id,
+    name: row.name,
+    kind: row.kind,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    durationMs: row.duration_ms,
+    routeName: row.route_name,
+    method: row.method,
+    path: row.path,
+  };
+}
 
 function toSynthesisResponse(synthesis: {
   readonly id: string;
@@ -202,117 +826,89 @@ function toProposalResponse(proposal: {
   return proposal;
 }
 
-function defaultFrame(userId: string, key: string) {
-  return {
-    userId,
-    key,
-    title: key === "current_state" ? "What matters now?" : key,
-    prompt: "Synthesize recent signals into current context.",
-  };
+function runWorkflow<A, E>(db: DbService, workflow: Effect.Effect<A, E, Db>) {
+  return Effect.runPromise(Effect.provideService(workflow, Db, db));
 }
 
-function ensureFrame(db: DbService, userId: string, key: string) {
-  return Effect.gen(function* () {
-    const current = yield* db.getCurrentFrame({ userId, key });
-    if (current) return current;
-    return yield* db.upsertCurrentFrame(defaultFrame(userId, key));
-  });
+function runMemoryIndex<A, E>(
+  db: DbService,
+  turbopuffer: { readonly apiKey: string; readonly region: string },
+  workflow: Effect.Effect<A, E, Db | MemoryIndex>,
+) {
+  return Effect.runPromise(
+    Effect.provide(workflow, MemoryIndex.layerTurbopuffer(turbopuffer)).pipe(
+      Effect.provideService(Db, db),
+    ),
+  );
 }
 
-function buildDeterministicSynthesis(input: {
-  readonly userId: string;
-  readonly frameId: string;
-  readonly signals: ReadonlyArray<{
-    readonly id: string;
-    readonly payload: unknown;
-    readonly type: string;
-  }>;
+function normalizeDedupe(text: string) {
+  return text
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "")
+    .slice(0, 96);
+}
+
+const aiExtractedItemSchema = z.object({
+  body: z.string().min(1).max(2_000),
+  confidence: z.number().min(0).max(1).optional(),
+  dueAt: z.string().optional(),
+  eventEndsAt: z.string().optional(),
+  eventStartsAt: z.string().optional(),
+  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
+  remindAt: z.string().optional(),
+  title: z.string().min(1).max(200),
+});
+
+const aiExtractionResponseSchema = z.object({
+  dailySummary: z.string().max(2_000).optional(),
+  fallbackReason: z.string().optional(),
+  items: z.array(aiExtractedItemSchema).default([]),
+  model: z.string(),
+  provider: z.enum(["cloudflare-think", "deterministic"]),
+});
+
+const toAiExtractionResult = (response: z.infer<typeof aiExtractionResponseSchema>) => ({
+  ...(response.dailySummary ? { dailySummary: response.dailySummary } : {}),
+  ...(response.fallbackReason ? { fallbackReason: response.fallbackReason } : {}),
+  items: response.items.map((item) => ({
+    body: item.body,
+    confidence: item.confidence ?? 0.74,
+    dedupeKey: `${item.kind}:${normalizeDedupe(`${item.title}:${item.body}`)}`,
+    ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+    ...(item.eventEndsAt ? { eventEndsAt: item.eventEndsAt } : {}),
+    ...(item.eventStartsAt ? { eventStartsAt: item.eventStartsAt } : {}),
+    kind: item.kind,
+    metadata: { extractor: response.provider },
+    ...(item.remindAt ? { remindAt: item.remindAt } : {}),
+    status: "proposed" as const,
+    title: item.title,
+  })),
+  model: response.model,
+  provider: response.provider,
+});
+
+function dailySummaryFrom(input: {
+  readonly noteText: string;
+  readonly items: ReadonlyArray<{ readonly title: string }>;
 }) {
-  const latestNote = noteFromPayload(input.signals[0]?.payload);
-  const themes = [...new Set(input.signals.flatMap((signal) => themesFromSignal(signal)))];
-
-  return {
-    userId: input.userId,
-    frameId: input.frameId,
-    summary:
-      input.signals.length === 0
-        ? "No recent signals captured."
-        : `${input.signals.length} signal${input.signals.length === 1 ? "" : "s"} captured. Latest: ${latestNote}`,
-    themes: themes.length > 0 ? themes : ["current-context"],
-    openQuestions: ["What needs attention next?"],
-    sourceSignalIds: input.signals.map((signal) => signal.id),
-  };
+  const itemText =
+    input.items.length > 0
+      ? input.items.map((item) => item.title).join("; ")
+      : "No extracted actions.";
+  return `Executive summary: ${input.noteText.trim().slice(0, 500)}\nActions: ${itemText}`;
 }
 
-function buildDeterministicProposals(input: {
-  readonly userId: string;
-  readonly synthesisId: string;
-  readonly openQuestions: ReadonlyArray<string>;
-  readonly themes: ReadonlyArray<string>;
-}) {
-  const [firstQuestion] = input.openQuestions;
-  if (firstQuestion) {
-    return [
-      {
-        userId: input.userId,
-        synthesisId: input.synthesisId,
-        kind: "clarify" as const,
-        title: "Clarify next attention point",
-        body: `Answer: ${firstQuestion}`,
-        rationale: "Created from an open question in the synthesis.",
-      },
-    ];
-  }
-
-  if (input.themes.includes("travel")) {
-    return [
-      {
-        userId: input.userId,
-        synthesisId: input.synthesisId,
-        kind: "follow_up" as const,
-        title: "Review travel constraints",
-        body: "Check whether travel changes what needs attention next.",
-        rationale: "Created from a travel theme in the synthesis.",
-      },
-    ];
-  }
-
-  return [
-    {
-      userId: input.userId,
-      synthesisId: input.synthesisId,
-      kind: "clarify" as const,
-      title: "Capture more context",
-      body: "Add another capture so Lares has enough context to help.",
-      rationale: "Created because there were no open questions or specific themes.",
-    },
-  ];
-}
-
-function noteFromPayload(payload: unknown) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "note" in payload &&
-    typeof payload.note === "string"
-  ) {
-    return payload.note;
-  }
-
-  return "No note available";
-}
-
-function themesFromSignal(signal: { readonly payload: unknown; readonly type: string }) {
-  const note = noteFromPayload(signal.payload).toLowerCase();
-  const themes = [];
-  if (note.includes("travel") || note.includes("traveling")) themes.push("travel");
-  if (note.includes("follow up") || note.includes("follow-up")) themes.push("follow-up");
-  if (note.includes("work") || signal.type.includes("work")) themes.push("work");
-  return themes;
-}
-
-function runWithDb<A>(db: DbService, f: () => Generator<Effect.Effect<any>, A, any>) {
-  return Effect.runPromise(Effect.provideService(Effect.gen(f), Db, db));
+function weekRangeFor(localDate: string) {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(date);
+  start.setUTCDate(date.getUTCDate() + mondayOffset);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
 function makeApiHandler() {
@@ -359,8 +955,34 @@ function resolveDb(layer: AppDbLayer) {
   );
 }
 
-function resolveCurrentUser() {
-  return Effect.runPromise(Effect.provide(currentUser, AuthService.layerDev));
+async function resolveCurrentUser(input: {
+  readonly env: Env;
+  readonly headers: Headers;
+  readonly resolveSession: AuthSessionResolver;
+}) {
+  const session = await input.resolveSession({ env: input.env, headers: input.headers });
+  if (session) {
+    const user = {
+      displayName: session.user.name ?? session.user.email ?? "Lares User",
+      id: session.user.id,
+    };
+    return {
+      authMode: "better-auth" as const,
+      user,
+    };
+  }
+
+  if (isBetterAuthConfigured(input.env)) {
+    return {
+      authMode: "unauthenticated" as const,
+      user: null,
+    };
+  }
+
+  return {
+    authMode: "dev" as const,
+    user: await Effect.runPromise(Effect.provide(currentUser, AuthService.layerDev)),
+  };
 }
 
 const currentUser = Effect.gen(function* () {
@@ -369,34 +991,211 @@ const currentUser = Effect.gen(function* () {
 });
 
 export function createApp(options: CreateAppOptions = {}) {
-  const app = new Hono<{ Bindings: Env }>();
+  const app = new Hono<ObservabilityHonoEnv>();
   const apiHandler = makeApiHandler();
   const sharedDb = options.dbLayer ? resolveDb(options.dbLayer) : undefined;
+  const resolveSession = options.authSessionResolver ?? resolveBetterAuthSession;
 
+  app.use("*", evlogWideEvents());
   app.use("*", requestObservability());
   app.use("*", serverTiming());
+
+  app.get("/api/version", (c) => {
+    addWideEventFields(c, { routeName: "api.version" });
+    return c.json({
+      service: "lares-web",
+      version: c.env.APP_VERSION ?? "0.0.0",
+    });
+  });
+
+  app.get("/manifest.webmanifest", (c) => {
+    addWideEventFields(c, { routeName: "manifest" });
+    return c.json({
+      name: "Lares",
+      short_name: "Lares",
+      description: "A private daily operating loop for personal context and follow-through.",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      display_override: ["standalone", "minimal-ui"],
+      background_color: "#111111",
+      theme_color: "#111111",
+      categories: ["productivity", "lifestyle"],
+      icons: [
+        {
+          src: "/icons/icon-192.png",
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+        {
+          src: "/icons/icon-512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+        {
+          src: "/icons/icon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "any maskable",
+        },
+      ],
+      shortcuts: [
+        {
+          name: "Today",
+          short_name: "Today",
+          description: "Open today's operating loop.",
+          url: "/",
+          icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
+      ],
+    });
+  });
+
+  app.get("/offline.html", (c) => {
+    addWideEventFields(c, { routeName: "pwa.offline" });
+    return c.html(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lares" />
+    <title>Lares Offline</title>
+  </head>
+  <body><main><p>Lares</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Lares.</p></main></body>
+</html>`);
+  });
+
+  app.get("/icons/icon.svg", (c) => {
+    addWideEventFields(c, { routeName: "pwa.icon" });
+    c.header("content-type", "image/svg+xml; charset=utf-8");
+    return c.body(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111111"/><path d="M256 96c70.7 0 128 57.3 128 128 0 96-128 192-128 192S128 320 128 224c0-70.7 57.3-128 128-128Z" fill="#f4f1eb"/><circle cx="256" cy="224" r="56" fill="#111111"/></svg>`,
+    );
+  });
+
+  app.post("/__internal/auth/test-account", async (c) => {
+    addWideEventFields(c, { routeName: "internal.auth.seed" });
+    const configuredSecret = c.env.AUTH_SEED_SECRET;
+    const providedSecret = c.req.header("x-lares-seed-secret");
+    if (!configuredSecret || providedSecret !== configuredSecret) {
+      return c.notFound();
+    }
+
+    const body = await c.req.json<{
+      readonly email?: string;
+      readonly name?: string;
+      readonly password?: string;
+    }>();
+    if (!body.email || !body.name || !body.password) {
+      return c.json({ error: "email, name, and password are required" }, 400);
+    }
+
+    await createBetterAuth(c.env, { allowSignUpForSeed: true }).api.signUpEmail({
+      body: {
+        email: body.email,
+        name: body.name,
+        password: body.password,
+      },
+    });
+
+    return c.json({ created: true });
+  });
+
+  app.on(["GET", "POST"], "/api/auth/*", (c) => {
+    addWideEventFields(c, { routeName: "api.auth" });
+    if (!isBetterAuthConfigured(c.env)) {
+      return c.json({ error: "Better Auth is not configured" }, 503);
+    }
+
+    return createBetterAuth(c.env).handler(c.req.raw);
+  });
 
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
+    } else if (c.req.path.startsWith("/api/conversations")) {
+      addWideEventFields(c, { routeName: "api.conversations" });
+      if (c.req.path.includes("/tools/list-recent-signals")) {
+        addWideEventFields(c, { agentTool: "listRecentSignals" });
+      } else if (c.req.path.includes("/tools/retrieve-memory")) {
+        addWideEventFields(c, { agentTool: "retrieveMemory" });
+      }
     } else if (c.req.path.startsWith("/api/signals")) {
       addWideEventFields(c, { routeName: "api.signals" });
     } else if (c.req.path.startsWith("/api/syntheses")) {
       addWideEventFields(c, { routeName: "api.syntheses" });
     } else if (c.req.path.startsWith("/api/proposals")) {
       addWideEventFields(c, { routeName: "api.proposals" });
+    } else if (c.req.path.startsWith("/api/commitments")) {
+      addWideEventFields(c, { routeName: "api.commitments" });
     } else if (c.req.path.startsWith("/api/reviews")) {
       addWideEventFields(c, { routeName: "api.reviews" });
+    } else if (c.req.path.startsWith("/api/outcomes")) {
+      addWideEventFields(c, { routeName: "api.outcomes" });
+    } else if (c.req.path.startsWith("/api/traces")) {
+      addWideEventFields(c, { routeName: "api.traces" });
     } else if (c.req.path.startsWith("/api/events")) {
       addWideEventFields(c, { routeName: "api.events" });
+    } else if (c.req.path.startsWith("/api/session")) {
+      addWideEventFields(c, { routeName: "api.session" });
+    } else if (c.req.path.startsWith("/api/export")) {
+      addWideEventFields(c, { routeName: "api.export" });
+    } else if (c.req.path.startsWith("/api/account")) {
+      addWideEventFields(c, { routeName: "api.account" });
     }
 
-    const db = sharedDb ? await sharedDb : await resolveDb(Db.layerD1(c.env.DB));
-    const user = await resolveCurrentUser();
-    const result = await apiHandler.handle(c.req.raw, {
-      context: { db, user },
-      prefix: "/api",
-    });
+    const db = await runWithRequestSpan(
+      c,
+      {
+        attributes: { "db.system.name": "cloudflare-d1" },
+        kind: "client",
+        name: "db.resolve",
+      },
+      () => (sharedDb ? sharedDb : resolveDb(Db.layerD1(c.env.DB))),
+    );
+    const auth = await runWithRequestSpan(
+      c,
+      { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
+      () => resolveCurrentUser({ env: c.env, headers: c.req.raw.headers, resolveSession }),
+    );
+    if (!auth.user && !c.req.path.startsWith("/api/session")) {
+      return c.json({ error: "Authentication required" }, 401);
+    }
+
+    const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
+    const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
+      runWithRequestSpan(c, { ...input, name }, task);
+    const result = await runWithRequestSpan(
+      c,
+      { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
+      () =>
+        apiHandler.handle(c.req.raw, {
+          context: {
+            agentSessions: c.env.USER_AGENT_SESSION,
+            ...((c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET)
+              ? { agentInternalSecret: c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET }
+              : {}),
+            db,
+            recordSpan,
+            session: auth,
+            traceDb: c.env.DB,
+            ...(c.env.TURBOPUFFER_API_KEY
+              ? {
+                  turbopuffer: {
+                    apiKey: c.env.TURBOPUFFER_API_KEY,
+                    region: c.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
+                  },
+                }
+              : {}),
+            user,
+          },
+          prefix: "/api",
+        }),
+    );
 
     if (result.matched) {
       return c.newResponse(result.response.body, result.response);
@@ -406,14 +1205,24 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.onError((error, c) => {
+    const retryAfterSeconds = retryAfterSecondsFor(error);
+    const status = retryAfterSeconds === null ? 500 : 503;
     addWideEventFields(c, {
-      status: 500,
+      status,
       outcome: "error",
       errorType: error.name,
       errorMessage: error.message,
+      ...(retryAfterSeconds !== null
+        ? { retryAfterSeconds, resilienceKind: "transient_backpressure" }
+        : {}),
     });
 
-    return c.json({ error: "Internal Server Error" }, 500);
+    if (retryAfterSeconds !== null) {
+      c.header("Retry-After", String(retryAfterSeconds));
+      return c.json({ error: "Service temporarily unavailable", retryAfterSeconds }, 503);
+    }
+
+    return c.json({ error: "Internal Server Error" }, status);
   });
 
   app.get("/", (c) => {
@@ -424,6 +1233,14 @@ export function createApp(options: CreateAppOptions = {}) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lares" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Lares Daily Operating Loop</title>
     <style>
       :root {
@@ -592,6 +1409,12 @@ export function createApp(options: CreateAppOptions = {}) {
       const status = document.querySelector('#status');
       const events = document.querySelector('#events');
 
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+        });
+      }
+
       async function loadEvents() {
         const response = await fetch('/api/events');
         const body = await response.json();
@@ -663,20 +1486,15 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
-  app.get("/api/version", (c) => {
-    addWideEventFields(c, { routeName: "api.version" });
-    return c.json({
-      service: "lares-web",
-      version: c.env.APP_VERSION ?? "0.0.0",
-    });
-  });
-
   app.get("/__test/error", (c) => {
     if (c.env.ENVIRONMENT !== "test") {
       return c.notFound();
     }
 
     addWideEventFields(c, { routeName: "test.error" });
+    if (c.req.query("kind") === "transient") {
+      throw new Error("D1_ERROR: database is locked");
+    }
     throw new Error("test failure");
   });
 

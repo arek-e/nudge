@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@source "../../../../packages/ui/src";
+
+@theme {
+  --font-sans:
+    "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #111111;
+    color: #eeeeee;
+    font-family: var(--font-sans);
+  }
+}

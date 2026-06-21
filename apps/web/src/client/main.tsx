@@ -5,24 +5,49 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useNavigate,
+  useRouterState,
 } from "@tanstack/react-router";
-import { StrictMode, useState, useTransition } from "react";
+import { createContext, type FormEvent, StrictMode, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  CheckInForm,
-  DashboardHeader,
-  EventTable,
+  AddActionSheet,
+  BottomNav,
+  buildSignalCalendarData,
+  deriveJourneyDayGroups,
   HomeDashboard,
-  injectStyles,
+  JourneyTimeline,
   LaresAppShell,
-  ProposalReviewPanel,
+  plainTextToRichTextDocument,
+  type RichTextDocument,
   Surface,
-  SynthesisPanel,
+  WritingDrawer,
 } from "@lares/ui";
-import styles from "@lares/ui/styles.css?inline";
 import { apiClient } from "./api-client";
+// oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
+import "./styles.css";
 
 const queryClient = new QueryClient();
+
+interface CaptureContextValue {
+  readonly status: string;
+  readonly saving: boolean;
+  readonly openCapture: () => void;
+}
+
+const CaptureContext = createContext<CaptureContextValue | null>(null);
+
+const todayLocalDate = () => new Date().toISOString().slice(0, 10);
+
+const noteTextFromPayload = (payload: unknown) => {
+  if (payload && typeof payload === "object" && "note" in payload) {
+    return String(payload.note);
+  }
+  if (payload && typeof payload === "object" && "changedText" in payload) {
+    return String(payload.changedText);
+  }
+  return typeof payload === "string" ? payload : JSON.stringify(payload);
+};
 
 const rootRoute = createRootRoute({ component: AppShell });
 const indexRoute = createRoute({
@@ -32,11 +57,34 @@ const indexRoute = createRoute({
 });
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/events",
-  component: EventsScreen,
+  path: "/journey",
+  component: JourneyScreen,
+});
+const actionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/actions",
+  component: ActionsScreen,
+});
+const insightsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/insights",
+  component: InsightsScreen,
+});
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsScreen,
 });
 
-const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, eventsRoute]) });
+const router = createRouter({
+  routeTree: rootRoute.addChildren([
+    indexRoute,
+    eventsRoute,
+    actionsRoute,
+    insightsRoute,
+    settingsRoute,
+  ]),
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -45,143 +93,437 @@ declare module "@tanstack/react-router" {
 }
 
 function AppShell() {
-  return <Outlet />;
-}
-
-function TodayScreen() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const navigate = useNavigate();
+  const session = useSession();
   const [note, setNote] = useState("");
+  const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
+    plainTextToRichTextDocument(""),
+  );
+  const [addOpen, setAddOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const events = useEvents();
-  const latestSynthesis = useLatestSynthesis();
-  const proposals = usePendingProposals();
-  const saveCheckIn = useMutation({
+  const saveDailyNote = useMutation({
     mutationFn: async (value: string) => {
-      await apiClient.captures.append({
-        type: "manual_check_in_submitted",
-        source: "today_app",
-        occurredAt: new Date().toISOString(),
-        schemaVersion: 1,
-        payload: { note: value },
-      });
+      const localDate = todayLocalDate();
+      await Promise.all([
+        apiClient.journal.save({
+          bodyDocument: noteDocument,
+          bodyText: value,
+          localDate,
+          title: localDate,
+        }),
+        apiClient.captures.append({
+          type: "manual_check_in_submitted",
+          source: "today_app",
+          occurredAt: new Date().toISOString(),
+          schemaVersion: 1,
+          payload: { note: value },
+        }),
+      ]);
     },
     onSuccess: async () => {
+      const localDate = todayLocalDate();
       setNote("");
-      setStatus("Saved. This is now in the user-owned event log.");
+      setNoteDocument(plainTextToRichTextDocument(""));
+      setCaptureOpen(false);
+      setStatus("Saved");
+      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
       await queryClient.invalidateQueries({ queryKey: ["events"] });
+      await queryClient.invalidateQueries({ queryKey: ["actions"] });
+      await queryClient.invalidateQueries({ queryKey: ["summaries"] });
     },
     onError: () => {
       setStatus("Could not save. Check the deployment logs.");
     },
   });
-  const generateSynthesis = useMutation({
+
+  if (!session.data) {
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
+  }
+
+  if (session.data?.authMode === "unauthenticated") {
+    return <LoginScreen />;
+  }
+
+  return (
+    <CaptureContext.Provider
+      value={{
+        status,
+        saving: saveDailyNote.isPending || isPending,
+        openCapture: () => setCaptureOpen(true),
+      }}
+    >
+      <Outlet />
+      <AddActionSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCaptureNote={() => {
+          setAddOpen(false);
+          setCaptureOpen(true);
+        }}
+      />
+      <WritingDrawer
+        eyebrow="Today"
+        drawerTitle="Daily note"
+        description=""
+        bodyLabel="Daily journal"
+        submitLabel="Save journal"
+        open={captureOpen}
+        body={note}
+        bodyDocument={noteDocument}
+        onBodyChange={setNote}
+        onBodyDocumentChange={setNoteDocument}
+        onAiDraft={() => {
+          const draft = "Today I need to clarify priorities, constraints, and the next follow-up.";
+          setNote(draft);
+          setNoteDocument(plainTextToRichTextDocument(draft));
+        }}
+        onCancel={() => setCaptureOpen(false)}
+        onCommit={() => {
+          const value = note.trim();
+          if (!value) {
+            setStatus("Write a short check-in first.");
+            return;
+          }
+          setStatus("Saving...");
+          startTransition(() => saveDailyNote.mutate(value));
+        }}
+      />
+      {addOpen || captureOpen ? null : (
+        <BottomNav
+          active={
+            pathname === "/actions"
+              ? "loop"
+              : pathname === "/journey"
+                ? "journey"
+                : pathname === "/insights"
+                  ? "insights"
+                  : "today"
+          }
+          onCapture={() => setAddOpen(true)}
+          onNavigate={(to) => {
+            void navigate({ to });
+          }}
+        />
+      )}
+    </CaptureContext.Provider>
+  );
+}
+
+function LoginFrame(props: { readonly children?: React.ReactNode; readonly title: string }) {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[#111] px-5 py-10 text-white">
+      <section className="w-full max-w-sm rounded-[2rem] bg-white/[0.06] p-6 shadow-2xl ring-1 shadow-black/30 ring-white/10">
+        <h1 className="m-0 mb-2 text-3xl font-semibold tracking-[-0.04em]">{props.title}</h1>
+        {props.children}
+      </section>
+    </main>
+  );
+}
+
+function LoginScreen() {
+  const [email, setEmail] = useState("alek@teampitch.app");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const signIn = useMutation({
     mutationFn: async () => {
-      await apiClient.syntheses.create({ frameKey: "current_state" });
+      const response = await fetch("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!response.ok) throw new Error("Could not sign in");
     },
+    onError: () => setError("Email or password is incorrect."),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["synthesis", "current_state"] });
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["session"] });
     },
   });
-  const generateProposals = useMutation({
-    mutationFn: async () => {
-      await apiClient.proposals.generate({ frameKey: "current_state" });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
-    },
-  });
-  const reviewProposal = useMutation({
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    signIn.mutate();
+  };
+
+  return (
+    <LoginFrame title="Sign in to Lares">
+      <p className="m-0 text-sm leading-6 text-neutral-300">
+        Private workspace access is limited to invited accounts.
+      </p>
+      <form className="mt-6 grid gap-4" onSubmit={submit}>
+        <label className="grid gap-2 text-sm font-medium text-neutral-200">
+          Email
+          <input
+            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+            autoComplete="email"
+            inputMode="email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.currentTarget.value)}
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-medium text-neutral-200">
+          Password
+          <input
+            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
+            autoComplete="current-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.currentTarget.value)}
+          />
+        </label>
+        {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
+        <button
+          className="rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
+          disabled={signIn.isPending}
+          type="submit"
+        >
+          {signIn.isPending ? "Signing in..." : "Sign in"}
+        </button>
+      </form>
+    </LoginFrame>
+  );
+}
+
+function ActionsScreen() {
+  const actions = useActions();
+  const summaries = useSummaries();
+  const latestRun = actions.data?.latestRun;
+  const runMetadata = latestRun?.metadata as
+    | { readonly itemCount?: unknown; readonly provider?: unknown }
+    | undefined;
+  const itemCount = typeof runMetadata?.itemCount === "number" ? runMetadata.itemCount : undefined;
+  const provider =
+    typeof runMetadata?.provider === "string" ? runMetadata.provider : "cloudflare-think";
+  const updateStatus = useMutation({
     mutationFn: async (input: {
-      readonly proposalId: string;
-      readonly decision: "accepted" | "rejected";
+      readonly itemId: string;
+      readonly status: "accepted" | "dismissed" | "completed";
     }) => {
-      await apiClient.reviews.create(input);
+      await apiClient.actions.updateStatus(input);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      await queryClient.invalidateQueries({ queryKey: ["actions"] });
     },
   });
 
   return (
     <LaresAppShell>
-      <DashboardHeader
-        title="Home"
-        menuOpen={menuOpen}
-        onMenuToggle={() => setMenuOpen((open) => !open)}
-        onMenuClose={() => setMenuOpen(false)}
-      />
-
-      <HomeDashboard eventCount={events.data?.events.length ?? 0} loading={events.isLoading} />
-
-      <Surface id="today-title" eyebrow="Today" title="Start with the current state">
-        <p className="summary">
-          Capture priorities, constraints, energy, and follow-ups. Lares keeps this as user-owned
-          context for the loop, not as hidden automation.
-        </p>
+      <Surface eyebrow="AI" title="Actions" primary>
+        <div className="mt-4 grid gap-3">
+          {latestRun ? (
+            <article className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/8">
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                AI analysis · {latestRun.status}
+              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">
+                {latestRun.status === "completed"
+                  ? itemCount === 0
+                    ? "Analyzed, no actions found"
+                    : `Analyzed ${itemCount ?? actions.data?.actions.length ?? 0} item${(itemCount ?? actions.data?.actions.length ?? 0) === 1 ? "" : "s"}`
+                  : latestRun.status === "failed"
+                    ? "Analysis failed"
+                    : "Analyzing daily note"}
+              </h2>
+              <p className="mt-2 mb-0 text-xs leading-5 text-neutral-400">
+                {provider} · {latestRun.model ?? "model pending"}
+              </p>
+            </article>
+          ) : null}
+          {(actions.data?.actions ?? []).length > 0 ? (
+            actions.data?.actions.map((action) => (
+              <article className="rounded-2xl bg-white/5 p-4" key={action.id}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                      {action.kind} · {action.status}
+                    </p>
+                    <h2 className="mt-1 mb-0 text-base font-semibold text-white">{action.title}</h2>
+                    <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{action.body}</p>
+                  </div>
+                  <span className="text-xs text-neutral-500">
+                    {Math.round(action.confidence * 100)}%
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <button
+                    className="min-h-10 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
+                  >
+                    Done
+                  </button>
+                  <button
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    type="button"
+                    onClick={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <p className="m-0 text-sm text-neutral-400">No actions.</p>
+          )}
+        </div>
       </Surface>
-
-      <Surface id="synthesis-title" eyebrow="Synthesis" title="What matters now?">
-        <SynthesisPanel
-          synthesis={latestSynthesis.data?.synthesis}
-          loading={latestSynthesis.isLoading}
-          generating={generateSynthesis.isPending}
-          onGenerate={() => generateSynthesis.mutate()}
-        />
-      </Surface>
-
-      <Surface id="proposals-title" eyebrow="Review" title="Proposals">
-        <ProposalReviewPanel
-          proposals={proposals.data?.proposals}
-          loading={proposals.isLoading}
-          generating={generateProposals.isPending}
-          reviewingId={reviewProposal.variables?.proposalId}
-          onGenerate={() => generateProposals.mutate()}
-          onAccept={(proposalId) => reviewProposal.mutate({ proposalId, decision: "accepted" })}
-          onReject={(proposalId) => reviewProposal.mutate({ proposalId, decision: "rejected" })}
-        />
-      </Surface>
-
-      <Surface id="check-in-title" title="Capture" primary>
-        <CheckInForm
-          note={note}
-          status={status}
-          saving={saveCheckIn.isPending || isPending}
-          onNoteChange={setNote}
-          onSubmit={() => {
-            const value = note.trim();
-            if (!value) {
-              setStatus("Write a short check-in first.");
-              return;
-            }
-            setStatus("Saving...");
-            startTransition(() => saveCheckIn.mutate(value));
-          }}
-        />
+      <Surface eyebrow="Summaries" title="Latest">
+        <div className="mt-4 grid gap-3">
+          {(summaries.data?.summaries ?? []).slice(0, 3).map((summary) => (
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                {summary.periodType} · {summary.periodStart}
+              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-neutral-300">
+                {summary.body}
+              </p>
+            </article>
+          ))}
+        </div>
       </Surface>
     </LaresAppShell>
   );
 }
 
-function EventsScreen() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const events = useEvents();
+function SettingsScreen() {
+  const session = useSession();
+  const sessionUser = session.data?.user;
+  const workspace = session.data?.workspace;
+  const exportData = useMutation({
+    mutationFn: async () => apiClient.dataExport(),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `lares-export-${new Date().toISOString()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+  const deleteData = useMutation({
+    mutationFn: async () => apiClient.account.delete(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
 
   return (
     <LaresAppShell>
-      <DashboardHeader
-        title="Events"
-        menuOpen={menuOpen}
-        onMenuToggle={() => setMenuOpen((open) => !open)}
-        onMenuClose={() => setMenuOpen(false)}
+      <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
+        <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
+      </Surface>
+      <Surface eyebrow="Data controls" title="Your data">
+        <div className="mt-4 grid gap-2">
+          <button
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
+            type="button"
+            onClick={() => exportData.mutate()}
+          >
+            Export data
+          </button>
+          <button
+            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
+            type="button"
+            onClick={() => deleteData.mutate()}
+          >
+            Delete local data
+          </button>
+        </div>
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function TodayScreen() {
+  const localDate = todayLocalDate();
+  const journal = useQuery({
+    queryKey: ["journal", localDate],
+    queryFn: async () => apiClient.journal.get({ localDate }),
+  });
+  const events = useEvents();
+  const actions = useActions();
+  const recentNotes = (events.data?.events ?? []).slice(0, 4);
+  const weeklyActivity = buildSignalCalendarData(events.data?.events ?? []);
+  const openLoopCount =
+    actions.data?.actions.filter(
+      (action) => action.status === "proposed" || action.status === "accepted",
+    ).length ?? 0;
+
+  return (
+    <LaresAppShell>
+      <HomeDashboard
+        eventCount={events.data?.events.length ?? 0}
+        hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
+        loading={events.isLoading}
+        openLoopCount={openLoopCount}
+        weeklyActivity={weeklyActivity}
       />
 
-      <Surface id="events-title" eyebrow="Signals" title="Signal log">
-        <EventTable
-          events={events.data?.events}
-          loading={events.isLoading}
-          error={events.isError}
-        />
+      <Surface id="recent-notes-title" eyebrow="Notes" title="Recent notes" primary>
+        <div className="mt-4 grid gap-2">
+          {recentNotes.length > 0 ? (
+            recentNotes.map((event) => (
+              <article className="rounded-2xl bg-white/5 p-4" key={event.id}>
+                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                  {event.occurredAt ? new Date(event.occurredAt).toLocaleDateString() : "Saved"}
+                </p>
+                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-neutral-200">
+                  {noteTextFromPayload(event.payload)}
+                </p>
+              </article>
+            ))
+          ) : (
+            <p className="m-0 text-sm leading-6 text-neutral-400">No notes yet.</p>
+          )}
+        </div>
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function JourneyScreen() {
+  const events = useEvents();
+  const groups = events.data ? deriveJourneyDayGroups(events.data.events) : undefined;
+
+  return (
+    <LaresAppShell>
+      <Surface id="events-title" eyebrow="Loop history" title="Journey timeline">
+        <JourneyTimeline groups={groups} loading={events.isLoading} error={events.isError} />
+      </Surface>
+    </LaresAppShell>
+  );
+}
+
+function InsightsScreen() {
+  const summaries = useSummaries();
+
+  return (
+    <LaresAppShell>
+      <Surface id="insights-title" eyebrow="Archive" title="Summaries">
+        <div className="mt-4 grid gap-3">
+          {(summaries.data?.summaries ?? []).map((summary) => (
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                {summary.periodType} · {summary.periodStart}
+              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{summary.body}</p>
+            </article>
+          ))}
+        </div>
       </Surface>
     </LaresAppShell>
   );
@@ -197,25 +539,28 @@ function useEvents() {
   });
 }
 
-function useLatestSynthesis() {
+function useActions() {
   return useQuery({
-    queryKey: ["synthesis", "current_state"],
-    queryFn: async () => {
-      return apiClient.syntheses.latest({ frameKey: "current_state" });
-    },
+    queryKey: ["actions"],
+    queryFn: async () => apiClient.actions.list({ limit: 100 }),
   });
 }
 
-function usePendingProposals() {
+function useSummaries() {
   return useQuery({
-    queryKey: ["proposals"],
-    queryFn: async () => {
-      return apiClient.proposals.list({ limit: 20 });
-    },
+    queryKey: ["summaries"],
+    queryFn: async () => apiClient.summaries.list({ limit: 20 }),
   });
 }
 
-injectStyles(styles);
+function useSession() {
+  return useQuery({
+    queryKey: ["session"],
+    queryFn: async () => apiClient.session(),
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
