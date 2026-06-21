@@ -114,6 +114,22 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
   });
 
+  test("POST /api/auth/sign-in/magic-link is unavailable until Better Auth is configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/api/auth/sign-in/magic-link",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "lana@example.com" }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
+  });
+
   test("GET /api/auth/sign-up/email does not expose public sign-up by default", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(
@@ -903,6 +919,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      authMethods: { emailMagicLink: false, google: false },
       authMode: "dev",
       user: { id: "dev-user", displayName: "Dev User" },
       workspace: { id: "dev-user", label: "Dev User's workspace" },
@@ -916,6 +933,30 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      authMethods: { emailMagicLink: true, google: false },
+      authMode: "unauthenticated",
+      user: null,
+      workspace: null,
+    });
+  });
+
+  test("custom integrations expose Google as an auth method when OAuth credentials are configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/session",
+      {},
+      {
+        ...env,
+        BETTER_AUTH_SECRET: "test",
+        GOOGLE_CLIENT_ID: "google-client-id",
+        GOOGLE_CLIENT_SECRET: "google-client-secret",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMethods: { emailMagicLink: true, google: true },
       authMode: "unauthenticated",
       user: null,
       workspace: null,
@@ -954,6 +995,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      authMethods: { emailMagicLink: true, google: false },
       authMode: "better-auth",
       user: { id: "auth-user-1", displayName: "Lana" },
       workspace: { id: "auth-user-1", label: "Lana's workspace" },

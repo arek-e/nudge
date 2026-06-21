@@ -13,9 +13,11 @@ import {
   BookOpen,
   ClipboardList,
   Home,
+  LogOut,
   Moon,
   PenLine,
   Plus,
+  Settings,
   Sparkles,
   Sun,
   UserRound,
@@ -352,9 +354,12 @@ export function HomeDashboard(props: {
   readonly eventCount: number;
   readonly hasJournalEntry: boolean;
   readonly loading: boolean;
+  readonly onOpenSettings?: () => void;
+  readonly onSignOut?: () => void;
   readonly openLoopCount: number;
   readonly weeklyActivity: ReadonlyArray<SignalCalendarDatum>;
 }) {
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const today = new Date();
   const dayStart = new Date(today);
   dayStart.setDate(today.getDate() - today.getDay());
@@ -386,12 +391,50 @@ export function HomeDashboard(props: {
         <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
           good afternoon.
         </h1>
-        <span
-          className="grid size-8 place-content-center justify-self-end rounded-full bg-[#232323]"
-          aria-hidden="true"
-        >
-          <UserRound className="size-4 text-[#f4f1eb]" strokeWidth={2.2} />
-        </span>
+        <div className="relative justify-self-end">
+          <button
+            className="grid size-8 place-content-center rounded-full border-0 bg-[#232323] text-[#f4f1eb]"
+            type="button"
+            aria-expanded={accountMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Account"
+            onClick={() => setAccountMenuOpen((open) => !open)}
+          >
+            <UserRound className="size-4" aria-hidden="true" strokeWidth={2.2} />
+          </button>
+          {accountMenuOpen ? (
+            <div
+              className="absolute top-10 right-0 z-10 grid min-w-44 gap-1 rounded-2xl border border-white/8 bg-[#272727] p-1.5 shadow-2xl"
+              role="menu"
+              aria-label="Account actions"
+            >
+              <button
+                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-neutral-100"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAccountMenuOpen(false);
+                  props.onOpenSettings?.();
+                }}
+              >
+                <Settings className="size-4 text-neutral-400" aria-hidden="true" strokeWidth={2} />
+                Settings
+              </button>
+              <button
+                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-neutral-100"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAccountMenuOpen(false);
+                  props.onSignOut?.();
+                }}
+              >
+                <LogOut className="size-4 text-neutral-400" aria-hidden="true" strokeWidth={2} />
+                Sign out
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
       <div
         className="grid grid-cols-7 items-center gap-1 text-center text-neutral-500"

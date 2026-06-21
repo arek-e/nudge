@@ -393,6 +393,10 @@ export const conversationMessageResponseSchema = z.object({
 });
 
 export const sessionResponseSchema = z.object({
+  authMethods: z.object({
+    emailMagicLink: z.boolean(),
+    google: z.boolean(),
+  }),
   authMode: z.enum(["better-auth", "dev", "unauthenticated"]),
   user: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   workspace: z.object({ id: z.string(), label: z.string() }).nullable(),

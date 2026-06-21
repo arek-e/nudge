@@ -4,19 +4,68 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
   await page.route("**/api/session", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      json: { authMode: "unauthenticated", user: null, workspace: null },
+      json: {
+        authMethods: { emailMagicLink: true, google: false },
+        authMode: "unauthenticated",
+        user: null,
+        workspace: null,
+      },
       status: 200,
     });
   });
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Sign in to Lares" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Continue to Lares" })).toBeVisible();
   await expect(
-    page.getByText("Private workspace access is limited to invited accounts."),
+    page.getByText("Use Google or a one-time email link. New accounts are created"),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue with email" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "good afternoon." })).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toHaveCount(0);
+});
+
+test("today avatar opens account actions", async ({ page }) => {
+  let signedOut = false;
+  await page.route("**/api/session", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: signedOut
+        ? {
+            authMethods: { emailMagicLink: true, google: false },
+            authMode: "unauthenticated",
+            user: null,
+            workspace: null,
+          }
+        : {
+            authMethods: { emailMagicLink: true, google: false },
+            authMode: "better-auth",
+            user: { displayName: "Lana", id: "auth-user-1" },
+            workspace: { id: "auth-user-1", label: "Lana's workspace" },
+          },
+      status: 200,
+    });
+  });
+  await page.route("**/api/auth/sign-out**", async (route) => {
+    signedOut = true;
+    await route.fulfill({ contentType: "application/json", json: { success: true }, status: 200 });
+  });
+
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Account" }).tap();
+  await expect(page.getByRole("menu", { name: "Account actions" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+
+  await page.getByRole("menuitem", { name: "Settings" }).tap();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByText("Lana's workspace")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Account" }).tap();
+  await page.getByRole("menuitem", { name: "Sign out" }).tap();
+  await expect(page.getByRole("heading", { name: "Continue to Lares" })).toBeVisible();
 });
 
 test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
