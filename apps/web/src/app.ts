@@ -5,7 +5,7 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { z } from "zod";
 import { Hono } from "hono";
 import { Effect, type Layer } from "effect";
-import { Db, type DbService, type ExtractedItemKind } from "@lares/db";
+import { Db, type DbService } from "@lares/db";
 import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
 import type { Env } from "./env";
 import {
@@ -73,14 +73,23 @@ const api = implement(apiContract).$context<ApiContext>();
 export const apiRouter = api.router({
   actions: {
     list: api.actions.list.handler(async ({ context, input }) => {
-      const actions = await Effect.runPromise(
-        context.db.listExtractedItems({
-          limit: input.limit,
-          userId: context.user.id,
-          ...(input.status !== undefined ? { status: input.status } : {}),
-        }),
-      );
-      return { actions: [...actions] };
+      const [actions, latestRuns] = await Promise.all([
+        Effect.runPromise(
+          context.db.listExtractedItems({
+            limit: input.limit,
+            userId: context.user.id,
+            ...(input.status !== undefined ? { status: input.status } : {}),
+          }),
+        ),
+        Effect.runPromise(
+          context.db.listAgentRuns({
+            limit: 1,
+            sourceType: "note_revision",
+            userId: context.user.id,
+          }),
+        ),
+      ]);
+      return { actions: [...actions], ...(latestRuns[0] ? { latestRun: latestRuns[0] } : {}) };
     }),
     updateStatus: api.actions.updateStatus.handler(async ({ context, input }) => {
       const action = await Effect.runPromise(
@@ -288,10 +297,55 @@ export const apiRouter = api.router({
         }),
       );
       if (result.revision.changedText.trim().length > 0) {
+        const extraction = await context.recordSpan(
+          "daily_note.ai_extract",
+          {
+            attributes: {
+              "lares.ai.source_type": "note_revision",
+              "lares.ai.system": "cloudflare-think",
+            },
+            kind: "internal",
+          },
+          async () =>
+            toAiExtractionResult(
+              await proxyConversationRequest(
+                context.agentSessions,
+                context.agentInternalSecret,
+                context.user,
+                "journal",
+                "/journal/interpret",
+                aiExtractionResponseSchema,
+                {
+                  body: JSON.stringify({
+                    changedText: result.revision.changedText,
+                    documentId: result.document.id,
+                    localDate: result.document.localDate,
+                    revisionId: result.revision.id,
+                  }),
+                  method: "POST",
+                },
+              ),
+            ),
+        );
+        console.info(
+          JSON.stringify({
+            event: "daily_note_ai_extract_completed",
+            logKind: "wide_event",
+            fallbackReason: extraction.fallbackReason ?? null,
+            itemCount: extraction.items.length,
+            model: extraction.model,
+            provider: extraction.provider,
+          }),
+        );
         const agentRun = await Effect.runPromise(
           context.db.startAgentRun({
-            metadata: { localDate: input.localDate },
-            model: "deterministic-delta-extractor",
+            metadata: {
+              fallbackReason: extraction.fallbackReason ?? null,
+              itemCount: extraction.items.length,
+              localDate: input.localDate,
+              provider: extraction.provider,
+            },
+            model: extraction.model,
             sourceId: noteResult.revision.id,
             sourceType: "note_revision",
             status: "running",
@@ -300,44 +354,44 @@ export const apiRouter = api.router({
           }),
         );
         const extractedItems = await Promise.all(
-          extractItemsFromDelta(noteResult.revision.changedText, input.localDate).map(
-            async (extracted) => {
-              const item = await Effect.runPromise(
-                context.db.upsertExtractedItem({
-                  ...extracted,
-                  sourceNoteId: noteResult.note.id,
-                  sourceRevisionId: noteResult.revision.id,
+          extraction.items.map(async (extracted) => {
+            const item = await Effect.runPromise(
+              context.db.upsertExtractedItem({
+                ...extracted,
+                sourceNoteId: noteResult.note.id,
+                sourceRevisionId: noteResult.revision.id,
+                userId: context.user.id,
+              }),
+            );
+            await Promise.all([
+              Effect.runPromise(
+                context.db.recordItemEvent({
+                  eventType: "created",
+                  itemId: item.id,
+                  payload: { sourceRevisionId: noteResult.revision.id },
                   userId: context.user.id,
                 }),
-              );
-              await Promise.all([
-                Effect.runPromise(
-                  context.db.recordItemEvent({
-                    eventType: "created",
-                    itemId: item.id,
-                    payload: { sourceRevisionId: noteResult.revision.id },
-                    userId: context.user.id,
-                  }),
-                ),
-                Effect.runPromise(
-                  context.db.upsertMemoryDocument({
-                    bodyText: `${item.title}\n${item.body}`,
-                    localDate: input.localDate,
-                    sourceId: item.id,
-                    sourceType: "extracted_item",
-                    title: item.title,
-                    userId: context.user.id,
-                  }),
-                ),
-              ]);
-              return item;
-            },
-          ),
+              ),
+              Effect.runPromise(
+                context.db.upsertMemoryDocument({
+                  bodyText: `${item.title}\n${item.body}`,
+                  localDate: input.localDate,
+                  sourceId: item.id,
+                  sourceType: "extracted_item",
+                  title: item.title,
+                  userId: context.user.id,
+                }),
+              ),
+            ]);
+            return item;
+          }),
         );
         const dailySummary = await Effect.runPromise(
           context.db.upsertSummaryDocument({
-            body: dailySummaryFrom({ items: extractedItems, noteText: input.bodyText }),
-            metadata: { generatedBy: "deterministic-summary" },
+            body:
+              extraction.dailySummary ??
+              dailySummaryFrom({ items: extractedItems, noteText: input.bodyText }),
+            metadata: { generatedBy: extraction.provider, model: extraction.model },
             periodEnd: input.localDate,
             periodStart: input.localDate,
             periodType: "day",
@@ -352,7 +406,7 @@ export const apiRouter = api.router({
         const weeklySummary = await Effect.runPromise(
           context.db.upsertSummaryDocument({
             body: `Week so far: ${dailySummary.body}`,
-            metadata: { generatedBy: "deterministic-summary" },
+            metadata: { generatedBy: extraction.provider, model: extraction.model },
             periodEnd: week.end,
             periodStart: week.start,
             periodType: "week",
@@ -455,23 +509,6 @@ export const apiRouter = api.router({
             },
           );
         }
-        await proxyConversationRequest(
-          context.agentSessions,
-          context.agentInternalSecret,
-          context.user,
-          "journal",
-          "/journal/interpret",
-          z.object({ accepted: z.literal(true) }),
-          {
-            body: JSON.stringify({
-              changedText: result.revision.changedText,
-              documentId: result.document.id,
-              localDate: result.document.localDate,
-              revisionId: result.revision.id,
-            }),
-            method: "POST",
-          },
-        );
       }
       return result;
     }),
@@ -813,61 +850,44 @@ function normalizeDedupe(text: string) {
     .slice(0, 96);
 }
 
-function titleCaseFragment(text: string) {
-  const cleaned = text.replaceAll(/^(need to|i should|should|remember to)\s+/gi, "").trim();
-  if (!cleaned) return "Review note";
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-}
+const aiExtractedItemSchema = z.object({
+  body: z.string().min(1).max(2_000),
+  confidence: z.number().min(0).max(1).optional(),
+  dueAt: z.string().optional(),
+  eventEndsAt: z.string().optional(),
+  eventStartsAt: z.string().optional(),
+  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
+  remindAt: z.string().optional(),
+  title: z.string().min(1).max(200),
+});
 
-interface ExtractedItemDraft {
-  readonly kind: ExtractedItemKind;
-  readonly title: string;
-  readonly body: string;
-  readonly status: "proposed";
-  readonly confidence: number;
-  readonly dedupeKey: string;
-  readonly metadata: unknown;
-}
+const aiExtractionResponseSchema = z.object({
+  dailySummary: z.string().max(2_000).optional(),
+  fallbackReason: z.string().optional(),
+  items: z.array(aiExtractedItemSchema).default([]),
+  model: z.string(),
+  provider: z.enum(["cloudflare-think", "deterministic"]),
+});
 
-function extractItemsFromDelta(
-  changedText: string,
-  localDate: string,
-): ReadonlyArray<ExtractedItemDraft> {
-  const drafts: Array<ExtractedItemDraft> = [];
-  for (const part of changedText
-    .split(/\n|\.|;|!/)
-    .map((value) => value.trim())
-    .filter(Boolean)) {
-    const lower = part.toLowerCase();
-    const base = { body: part, confidence: 0.82, metadata: { localDate } };
-    if (/\b(next week|tomorrow|party|meeting|appointment|birthday)\b/.test(lower)) {
-      drafts.push({
-        ...base,
-        dedupeKey: `reminder:${normalizeDedupe(part)}`,
-        kind: "reminder",
-        status: "proposed",
-        title: titleCaseFragment(part),
-      });
-    } else if (/\b(need to|should|todo|to do|write to|call|send|follow up)\b/.test(lower)) {
-      drafts.push({
-        ...base,
-        dedupeKey: `task:${normalizeDedupe(part)}`,
-        kind: lower.includes("follow up") ? "follow_up" : "task",
-        status: "proposed",
-        title: titleCaseFragment(part),
-      });
-    } else if (/\b(remember|prefers|likes|important)\b/.test(lower)) {
-      drafts.push({
-        ...base,
-        dedupeKey: `memory:${normalizeDedupe(part)}`,
-        kind: "memory",
-        status: "proposed",
-        title: titleCaseFragment(part),
-      });
-    }
-  }
-  return drafts;
-}
+const toAiExtractionResult = (response: z.infer<typeof aiExtractionResponseSchema>) => ({
+  ...(response.dailySummary ? { dailySummary: response.dailySummary } : {}),
+  ...(response.fallbackReason ? { fallbackReason: response.fallbackReason } : {}),
+  items: response.items.map((item) => ({
+    body: item.body,
+    confidence: item.confidence ?? 0.74,
+    dedupeKey: `${item.kind}:${normalizeDedupe(`${item.title}:${item.body}`)}`,
+    ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+    ...(item.eventEndsAt ? { eventEndsAt: item.eventEndsAt } : {}),
+    ...(item.eventStartsAt ? { eventStartsAt: item.eventStartsAt } : {}),
+    kind: item.kind,
+    metadata: { extractor: response.provider },
+    ...(item.remindAt ? { remindAt: item.remindAt } : {}),
+    status: "proposed" as const,
+    title: item.title,
+  })),
+  model: response.model,
+  provider: response.provider,
+});
 
 function dailySummaryFrom(input: {
   readonly noteText: string;

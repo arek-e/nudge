@@ -20,6 +20,7 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
 });
 
 test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
+  test.setTimeout(60000);
   const journalLoaded = page.waitForResponse(
     (response) => response.request().method() === "GET" && response.url().includes("/api/journal/"),
   );
@@ -37,13 +38,24 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   const viewportHeight = page.viewportSize()?.height ?? 0;
   expect(dashboardBottom).toBeLessThanOrEqual(viewportHeight);
 
-  await expect(page.getByRole("heading", { name: "Daily note" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily note" })).toHaveCount(0);
+  await expect(page.getByLabel("Daily journal")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save journal" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Recent notes" })).toBeVisible();
+
   const journalStamp = Date.now();
   const journalAction = `write to michael about playwright ${journalStamp}`;
-  await page.getByLabel("Daily journal").fill(`need to ${journalAction}`);
+  await page
+    .getByRole("navigation", { name: "Primary navigation" })
+    .getByRole("button", { name: "Write capture" })
+    .tap();
+  await page.getByRole("button", { name: "Note" }).tap();
+  await page.getByRole("textbox", { name: "Daily journal" }).fill(`need to ${journalAction}`);
   await page.getByRole("button", { name: "Save journal" }).tap();
-  await expect(page.getByText("Saved")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent notes" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Daily note" })).toHaveCount(0, {
+    timeout: 30000,
+  });
+  await expect(page.getByText(`need to ${journalAction}`).first()).toBeVisible({ timeout: 10000 });
 
   const note = `Playwright typed client ${Date.now()}`;
   await page
@@ -51,14 +63,17 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     .getByRole("button", { name: "Write capture" })
     .tap();
   await page.getByRole("button", { name: "Note" }).tap();
-  const captureDialogBox = await page.getByRole("dialog", { name: "Write capture" }).boundingBox();
+  const captureDialogBox = await page.getByRole("dialog", { name: "Daily note" }).boundingBox();
   expect(captureDialogBox?.y).toBeLessThanOrEqual(2);
   expect(captureDialogBox?.height ?? 0).toBeGreaterThanOrEqual(viewportHeight - 2);
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Heading" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
-  await page.getByRole("textbox", { name: "Capture body" }).fill(note);
-  await page.getByRole("button", { name: "Save capture" }).tap();
+  await page.getByRole("textbox", { name: "Daily journal" }).fill(note);
+  await page.getByRole("button", { name: "Save journal" }).tap();
+  await expect(page.getByRole("dialog", { name: "Daily note" })).toHaveCount(0, {
+    timeout: 30000,
+  });
   await expect(page.getByText(note)).toBeVisible();
 
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
@@ -85,8 +100,13 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
     .toBe("still-mounted");
   await expect(
-    page.getByRole("heading", { name: `Write to michael about playwright ${journalStamp}` }),
+    page
+      .getByRole("heading", {
+        name: new RegExp(`write to michael about playwright ${journalStamp}`, "i"),
+      })
+      .first(),
   ).toBeVisible();
+  await expect(page.getByText(/AI analysis · completed/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Accept" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Latest" })).toBeVisible();
 
@@ -104,7 +124,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Add" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Note" })).toBeVisible();
   await page.getByRole("button", { name: "Note" }).tap();
-  await expect(page.getByRole("textbox", { name: "Capture body" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Daily journal" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).tap();
   await expect(page.getByRole("heading", { name: "Journey timeline" })).toBeVisible();
   await expect(page.getByText("Manual check in submitted").first()).toBeVisible();

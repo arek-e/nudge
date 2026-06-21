@@ -1041,7 +1041,18 @@ describe("web app", () => {
       get: () => ({
         fetch: async (request: Request) => {
           forwardedRequests.push(request);
-          return Response.json({ accepted: true });
+          return Response.json({
+            items: [
+              {
+                body: "need to write to michael",
+                confidence: 0.82,
+                kind: "task",
+                title: "Write to michael",
+              },
+            ],
+            model: "deterministic-delta-extractor",
+            provider: "deterministic",
+          });
         },
       }),
     } as DurableObjectNamespace;
@@ -1139,6 +1150,93 @@ describe("web app", () => {
     expect((await summariesResponse.json()).summaries).toEqual(
       expect.arrayContaining([expect.objectContaining({ periodType: "day" })]),
     );
+  });
+
+  test("custom integrations save daily journals with Think-backed AI extraction status", async () => {
+    const agentNamespace = {
+      idFromName: (name: string) => ({ name }),
+      get: () => ({
+        fetch: async () =>
+          Response.json({
+            dailySummary: "AI summary: the user completed the Michael follow-up.",
+            items: [
+              {
+                body: "The user has completed writing to Michael.",
+                confidence: 0.91,
+                kind: "memory",
+                title: "Michael follow-up completed",
+              },
+            ],
+            model: "@cf/moonshotai/kimi-k2.6",
+            provider: "cloudflare-think",
+          }),
+      }),
+    } as DurableObjectNamespace;
+    const info = spyOn(console, "info").mockImplementation(() => {});
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    try {
+      const response = await app.request(
+        "/api/journal",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            bodyText: "I have now written to michael",
+            localDate: "2026-06-21",
+            title: "June 21",
+          }),
+        },
+        { ...env, USER_AGENT_SESSION: agentNamespace },
+      );
+
+      expect(response.status).toBe(200);
+
+      const exported = await (await app.request("/api/export", {}, env)).json();
+      expect(exported.extractedItems).toEqual([
+        expect.objectContaining({
+          body: "The user has completed writing to Michael.",
+          kind: "memory",
+          title: "Michael follow-up completed",
+        }),
+      ]);
+      expect(exported.summaryDocuments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: "AI summary: the user completed the Michael follow-up.",
+            metadata: { generatedBy: "cloudflare-think", model: "@cf/moonshotai/kimi-k2.6" },
+            periodType: "day",
+          }),
+        ]),
+      );
+      expect(exported.agentRuns).toEqual([
+        expect.objectContaining({
+          metadata: expect.objectContaining({ itemCount: 1, provider: "cloudflare-think" }),
+          model: "@cf/moonshotai/kimi-k2.6",
+          status: "completed",
+        }),
+      ]);
+
+      const actions = await (await app.request("/api/actions", {}, env)).json();
+      expect(actions.latestRun).toEqual(
+        expect.objectContaining({ model: "@cf/moonshotai/kimi-k2.6", status: "completed" }),
+      );
+      expect(actions.actions).toEqual([
+        expect.objectContaining({ title: "Michael follow-up completed" }),
+      ]);
+      const safeLog = JSON.parse(String(info.mock.calls.at(-1)?.[0]));
+      expect(safeLog).toEqual({
+        event: "daily_note_ai_extract_completed",
+        fallbackReason: null,
+        itemCount: 1,
+        logKind: "wide_event",
+        model: "@cf/moonshotai/kimi-k2.6",
+        provider: "cloudflare-think",
+      });
+      expect(JSON.stringify(safeLog)).not.toContain("michael");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   test("custom integrations can capture and list signals using primitive routes", async () => {
