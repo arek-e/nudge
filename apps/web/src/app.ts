@@ -35,7 +35,9 @@ type AppDbLayer = Layer.Layer<Db>;
 
 async function runBetterAuthApi<T>(c: Context, run: () => Promise<T>) {
   try {
-    return c.json(await run());
+    const result = await run();
+    if (result instanceof Response) return result;
+    return c.json(result);
   } catch (error) {
     const status = readErrorStatus(error);
     return new Response(JSON.stringify({ error: readErrorMessage(error) }), {
@@ -1154,6 +1156,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const auth = createBetterAuth(c.env);
     return runBetterAuthApi(c, () =>
       auth.api.generatePasskeyRegistrationOptions({
+        asResponse: true,
         headers: c.req.raw.headers,
         query: {
           ...(c.req.query("authenticatorAttachment")
@@ -1179,6 +1182,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const auth = createBetterAuth(c.env);
     return runBetterAuthApi(c, async () =>
       auth.api.verifyPasskeyRegistration({
+        asResponse: true,
         body: await c.req.json(),
         headers: c.req.raw.headers,
       }),
@@ -1194,6 +1198,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const auth = createBetterAuth(c.env);
     return runBetterAuthApi(c, () =>
       auth.api.generatePasskeyAuthenticationOptions({
+        asResponse: true,
         headers: c.req.raw.headers,
       }),
     );
@@ -1208,6 +1213,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const auth = createBetterAuth(c.env);
     return runBetterAuthApi(c, async () =>
       auth.api.verifyPasskeyAuthentication({
+        asResponse: true,
         body: await c.req.json(),
         headers: c.req.raw.headers,
       }),
