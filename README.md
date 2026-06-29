@@ -70,12 +70,21 @@ Model-backed extraction is narrow and draft-first. External writes and behavior-
 
 ## Quick Start
 
+Prerequisites:
+
+- [`mise`](https://mise.jdx.dev/) installed.
+- Cloudflare/Wrangler auth for commands that use remote Cloudflare resources.
+
 ```bash
+mise trust
 mise install
-bun install
-bun run db:migrations:apply:local
-bun run dev
+mise exec -- bun install
+mise exec -- bun run dev
 ```
+
+If your shell already activates `mise`, the `mise exec --` prefix is optional.
+
+`bun run dev` builds the web app, applies local D1 migrations, and starts `wrangler dev` on the first available local port.
 
 Then open:
 
