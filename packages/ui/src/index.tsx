@@ -1,5 +1,5 @@
 import type { Value } from "platejs";
-import type { MouseEvent, ReactNode } from "react";
+import type { FormEvent, MouseEvent, ReactNode } from "react";
 import { Drawer } from "@base-ui/react/drawer";
 import { BoldPlugin, ItalicPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import {
@@ -13,6 +13,7 @@ import {
   BookOpen,
   ClipboardList,
   Home,
+  KeyRound,
   LogOut,
   Moon,
   PenLine,
@@ -326,6 +327,146 @@ export function LaresAppShell(props: { readonly children: ReactNode }) {
   return (
     <main className={shellClass}>
       <div className={contentViewportClass}>{props.children}</div>
+    </main>
+  );
+}
+
+export function LoginCard(props: {
+  readonly email: string;
+  readonly emailOtpEnabled: boolean;
+  readonly error: string;
+  readonly googleEnabled: boolean;
+  readonly passkeyEnabled: boolean;
+  readonly pendingEmail: boolean;
+  readonly pendingPasskey: boolean;
+  readonly sentTo: string;
+  readonly otp: string;
+  readonly onEmailChange: (email: string) => void;
+  readonly onGoogle: () => void;
+  readonly onOtpChange: (otp: string) => void;
+  readonly onPasskey: () => void;
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const hasProvider = props.passkeyEnabled || props.googleEnabled;
+  const emailButtonLabel = props.pendingEmail
+    ? props.sentTo
+      ? "Verifying code..."
+      : "Sending code..."
+    : props.sentTo
+      ? "Verify code"
+      : "Continue with email";
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#161616] p-6 text-white md:p-10">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <a
+          className="flex items-center gap-2 self-center text-sm font-medium text-white no-underline"
+          href="/"
+        >
+          <span className="flex size-6 items-center justify-center rounded-md bg-[#f4f1eb] text-[#080808]">
+            <Sparkles className="size-4" aria-hidden="true" strokeWidth={2.2} />
+          </span>
+          Lares
+        </a>
+        <section className="rounded-2xl border border-white/8 bg-[#1f1f1f] p-6 shadow-[0_18px_42px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <header className="text-center">
+            <h1 className="m-0 text-xl font-semibold tracking-[-0.02em] text-white">
+              Welcome back
+            </h1>
+            <p className="mt-2 mb-0 text-sm leading-6 text-neutral-400">
+              Sign in with a passkey, Google, or an email code.
+            </p>
+          </header>
+          <div className="mt-6 grid gap-4">
+            <form className="grid gap-4" onSubmit={props.onSubmit}>
+              <label className="grid gap-2 text-sm font-medium text-neutral-200">
+                Email
+                <input
+                  className="min-h-11 rounded-xl border border-white/10 bg-[#111] px-3 text-base text-white outline-none focus:border-white/35"
+                  autoComplete="email"
+                  inputMode="email"
+                  required
+                  type="email"
+                  value={props.email}
+                  onChange={(event) => props.onEmailChange(event.currentTarget.value)}
+                />
+              </label>
+              {props.sentTo ? (
+                <label className="grid gap-2 text-sm font-medium text-neutral-200">
+                  Code
+                  <input
+                    className="min-h-11 rounded-xl border border-white/10 bg-[#111] px-3 text-base text-white outline-none focus:border-white/35"
+                    autoComplete="one-time-code"
+                    inputMode="numeric"
+                    required
+                    type="text"
+                    value={props.otp}
+                    onChange={(event) => props.onOtpChange(event.currentTarget.value)}
+                  />
+                </label>
+              ) : null}
+              {props.sentTo ? (
+                <p className="m-0 text-sm text-emerald-300">
+                  Enter the code sent to {props.sentTo}.
+                </p>
+              ) : null}
+              {props.error ? <p className="m-0 text-sm text-red-300">{props.error}</p> : null}
+              <button
+                className={buttonClass}
+                disabled={!props.emailOtpEnabled || props.pendingEmail}
+                type="submit"
+              >
+                {emailButtonLabel}
+              </button>
+            </form>
+            {hasProvider ? (
+              <div className="grid gap-3">
+                <div className="relative py-1 text-center text-xs text-neutral-500">
+                  <span className="absolute inset-x-0 top-1/2 border-t border-white/8" />
+                  <span className="relative bg-[#1f1f1f] px-2">Other ways to continue</span>
+                </div>
+                <div className="flex justify-center gap-2">
+                  {props.passkeyEnabled ? (
+                    <button
+                      className="grid size-11 place-items-center rounded-full border border-white/8 bg-white/5 text-neutral-100 disabled:opacity-70"
+                      aria-label="Continue with passkey"
+                      disabled={props.pendingPasskey}
+                      onClick={props.onPasskey}
+                      title="Continue with passkey"
+                      type="button"
+                    >
+                      <KeyRound className="size-5" aria-hidden="true" strokeWidth={2.1} />
+                    </button>
+                  ) : null}
+                  <button
+                    className="grid size-11 place-items-center rounded-full border border-white/8 bg-white/5 text-neutral-500 opacity-55"
+                    aria-label="Gmail unavailable"
+                    disabled
+                    title="Gmail sign-in unavailable"
+                    type="button"
+                  >
+                    <svg
+                      className="size-5"
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="52 42 88 66"
+                      aria-hidden="true"
+                    >
+                      <path fill="#4285f4" d="M58 108h14V74L52 59v43c0 3.32 2.69 6 6 6" />
+                      <path fill="#34a853" d="M120 108h14c3.32 0 6-2.69 6-6V59l-20 15" />
+                      <path fill="#fbbc04" d="M120 48v26l20-15v-8c0-7.42-8.47-11.65-14.4-7.2" />
+                      <path fill="#ea4335" d="M72 74V48l24 18 24-18v26L96 92" />
+                      <path
+                        fill="#c5221f"
+                        d="M52 51v8l20 15V48l-5.6-4.2c-5.94-4.45-14.4-.22-14.4 7.2"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

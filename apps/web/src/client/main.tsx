@@ -21,12 +21,14 @@ import {
   HomeDashboard,
   JourneyTimeline,
   LaresAppShell,
+  LoginCard,
   plainTextToRichTextDocument,
   type RichTextDocument,
   Surface,
   WritingDrawer,
 } from "@lares/ui";
 import { apiClient } from "./api-client";
+import { loginAuthMethodsForView } from "./login-preview";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
@@ -147,8 +149,9 @@ function AppShell() {
     return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
   }
 
-  if (session.data?.authMode === "unauthenticated") {
-    return <LoginScreen authMethods={session.data.authMethods} />;
+  const loginAuthMethods = loginAuthMethodsForView(session.data, window.location.search);
+  if (loginAuthMethods) {
+    return <LoginScreen authMethods={loginAuthMethods} />;
   }
 
   return (
@@ -216,17 +219,6 @@ function AppShell() {
   );
 }
 
-function LoginFrame(props: { readonly children?: React.ReactNode; readonly title: string }) {
-  return (
-    <main className="grid min-h-dvh place-items-center bg-[#111] px-5 py-10 text-white">
-      <section className="w-full max-w-sm rounded-[2rem] bg-white/[0.06] p-6 shadow-2xl ring-1 shadow-black/30 ring-white/10">
-        <h1 className="m-0 mb-2 text-3xl font-semibold tracking-[-0.04em]">{props.title}</h1>
-        {props.children}
-      </section>
-    </main>
-  );
-}
-
 function LoginScreen(props: {
   readonly authMethods: {
     readonly emailOtp: boolean;
@@ -290,74 +282,22 @@ function LoginScreen(props: {
   };
 
   return (
-    <LoginFrame title="Continue to Lares">
-      <p className="m-0 text-sm leading-6 text-neutral-300">
-        Use a passkey, Google, or an email code. New accounts are created the first time you
-        continue.
-      </p>
-      {props.authMethods.passkey ? (
-        <button
-          className="mt-6 rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
-          disabled={continueWithPasskey.isPending}
-          onClick={() => continueWithPasskey.mutate()}
-          type="button"
-        >
-          {continueWithPasskey.isPending ? "Opening passkey..." : "Continue with passkey"}
-        </button>
-      ) : null}
-      {props.authMethods.google ? (
-        <button
-          className="mt-3 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-          onClick={continueWithGoogle}
-          type="button"
-        >
-          Continue with Google
-        </button>
-      ) : null}
-      <form className="mt-6 grid gap-4" onSubmit={submit}>
-        <label className="grid gap-2 text-sm font-medium text-neutral-200">
-          Email
-          <input
-            className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
-            autoComplete="email"
-            inputMode="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.currentTarget.value)}
-          />
-        </label>
-        {sentTo ? (
-          <label className="grid gap-2 text-sm font-medium text-neutral-200">
-            Code
-            <input
-              className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-base text-white outline-none focus:border-white/35"
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              type="text"
-              value={otp}
-              onChange={(event) => setOtp(event.currentTarget.value)}
-            />
-          </label>
-        ) : null}
-        {sentTo ? (
-          <p className="m-0 text-sm text-emerald-300">Enter the code sent to {sentTo}.</p>
-        ) : null}
-        {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
-        <button
-          className="rounded-2xl bg-[#f4f1eb] px-4 py-3 text-sm font-semibold text-[#111] disabled:opacity-60"
-          disabled={!props.authMethods.emailOtp || continueWithEmail.isPending}
-          type="submit"
-        >
-          {continueWithEmail.isPending
-            ? sentTo
-              ? "Verifying code..."
-              : "Sending code..."
-            : sentTo
-              ? "Verify code"
-              : "Continue with email"}
-        </button>
-      </form>
-    </LoginFrame>
+    <LoginCard
+      email={email}
+      emailOtpEnabled={props.authMethods.emailOtp}
+      error={error}
+      googleEnabled={props.authMethods.google}
+      passkeyEnabled={props.authMethods.passkey}
+      pendingEmail={continueWithEmail.isPending}
+      pendingPasskey={continueWithPasskey.isPending}
+      sentTo={sentTo}
+      otp={otp}
+      onEmailChange={setEmail}
+      onGoogle={continueWithGoogle}
+      onOtpChange={setOtp}
+      onPasskey={() => continueWithPasskey.mutate()}
+      onSubmit={submit}
+    />
   );
 }
 

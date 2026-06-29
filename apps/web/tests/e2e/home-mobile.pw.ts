@@ -16,10 +16,10 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Continue to Lares" })).toBeVisible();
-  await expect(
-    page.getByText("Use a passkey, Google, or an email code. New accounts are created"),
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Lares" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await expect(page.getByText("Sign in with a passkey, Google, or an email code.")).toBeVisible();
+  await expect(page.getByText("Other ways to continue")).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue with passkey" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue with email" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "good afternoon." })).toHaveCount(0);
@@ -67,7 +67,7 @@ test("today avatar opens account actions", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Account" }).tap();
   await page.getByRole("menuitem", { name: "Sign out" }).tap();
-  await expect(page.getByRole("heading", { name: "Continue to Lares" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 });
 
 test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
