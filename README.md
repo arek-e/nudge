@@ -55,11 +55,18 @@ Current deployed slice:
 - Persist user-owned Signals in D1.
 - Query Signals by time range.
 - Generate a deterministic, source-linked Synthesis for the current Frame.
-- View Signals through a TanStack Table route.
+- Save daily notes and journal documents with revisions.
+- Extract reviewable actions, reminders, events, questions, ideas, and memory candidates from note revisions.
+- Run a durable `UserAgentSession` for conversations, memory retrieval, and reviewable loop drafts.
+- Index memory documents through the local memory index or Turbopuffer when configured.
+- Review Proposals into Commitments and close them with Outcomes.
+- List generated Summaries.
+- Sign in through Better Auth in configured environments, including passkeys and optional Google.
+- Export or delete user-owned data.
 - Read OpenAPI docs for custom integrations.
-- Persist safe request traces for debugging and future evals.
+- Persist safe wide events and trace spans for debugging and evals.
 
-LLMs and Cloudflare Agents SDK orchestration come after the primitive contracts, source links, review flow, and eval seams are stable.
+Model-backed extraction is narrow and draft-first. External writes and behavior-changing automation still require explicit review before they are added.
 
 ## Quick Start
 
@@ -106,29 +113,33 @@ Then open:
 | Signals    |                 | Redacted    |
 | Frames     |                 | artifacts   |
 | Syntheses  |                 +-------------+
+| Notes      |
+| Memory     |
 | Traces     |
 +------------+
       |
       v
 +--------------------+       +----------------------+
 | Durable Objects    |       | Workers Workflows    |
-| future live agents |       | future durable loops |
+| user agents        |       | note/digest analysis |
 +--------------------+       +----------------------+
 ```
 
-- **`apps/web`**: Cloudflare Worker, Hono app, React app, oRPC/OpenAPI API, Workers Workflow and Agent placeholders.
+- **`apps/web`**: Cloudflare Worker, Hono app, React app, oRPC/OpenAPI API, Better Auth, Workers Workflow, and Cloudflare Agent entrypoints.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
 - **`packages/observability`**: wide-event logging, request telemetry, and safe error fields.
-- **`packages/effect-services`**: Effect service seams such as dev auth.
-- **`packages/evals`**: placeholder for golden-case agent/product evals.
+- **`packages/effect-services`**: Effect service seams for auth, primitive workflows, and memory indexing.
+- **`packages/evals`**: golden-case agent/product evals.
 
 ## Stack
 
 - Cloudflare Workers, D1, R2, Durable Objects, Workers Workflows.
+- Cloudflare Agents, Think, Workers AI, and optional Turbopuffer memory search.
 - Hono for Worker routing and middleware.
 - oRPC/OpenAPI for public API contracts and typed frontend clients.
 - React, TanStack Router, TanStack Query, TanStack Table, Motion.
+- Better Auth for email, passkey, and optional Google authentication.
 - Effect v4 for services and dependency injection.
 - Drizzle over D1 behind an Effect `Db` port.
 - Bun, Mise, Oxfmt, Oxlint, Lefthook.
@@ -171,9 +182,10 @@ See [`docs/deployment.md`](docs/deployment.md) for rollback and PR guidance.
 
 - [`CONTEXT.md`](CONTEXT.md): glossary and primitive domain language.
 - [`docs/product-vision.md`](docs/product-vision.md): product direction.
+- [`docs/prd/daily-operating-loop-mvp.md`](docs/prd/daily-operating-loop-mvp.md): historical MVP PRD.
 - [`docs/adr/`](docs/adr/): durable architecture decisions.
 - [`docs/observability-and-evals.md`](docs/observability-and-evals.md): trace/eval direction.
-- [`docs/deep-docs/`](docs/deep-docs/): research and design notes.
+- [`docs/resilience.md`](docs/resilience.md): retry and replay guarantees.
 
 ## License
 

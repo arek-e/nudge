@@ -60,16 +60,16 @@ Visual directions:
 
 ## Near-Term Wedge
 
-The first useful product is the Daily Operating Loop:
+The current wedge is the Daily Operating Loop through notes, memory, review, and closure:
 
-1. Manual morning check-in.
-2. Read-only calendar context.
-3. Manually entered Relationship Memory.
-4. Digest of missed/new information.
-5. Source-linked Action Points.
-6. Review Queue for proposed memories and actions.
-7. Evening reflection and feedback.
-8. Golden-case evals for Digest improvements.
+1. Daily note and journal capture.
+2. Revision tracking and source-linked memory documents.
+3. Draft extraction of actions, reminders, events, questions, ideas, and memory candidates.
+4. Reviewable Proposals that can become Commitments.
+5. Outcomes that close the feedback loop.
+6. Conversation sessions that can retrieve memory and draft loop operations.
+7. Private data export and account deletion.
+8. Golden-case evals for agent/product behavior.
 
 ## Long-Term Vision
 

@@ -1,5 +1,7 @@
 # Daily Operating Loop MVP PRD
 
+Status: historical. This PRD shaped the first MVP direction, but the current implementation has moved toward daily notes, journal revisions, extracted items, memory indexing, conversation sessions, reviewable proposals, commitments, outcomes, data export, and account deletion. Use `README.md`, `CONTEXT.md`, and the ADRs for current repo state.
+
 ## Problem Statement
 
 Personal work, calendar commitments, relationship context, and daily reflections accumulate across tools faster than the user can reliably process them. The user needs a short Digest of what changed or was missed, concrete Action Points, and a trusted way for the system to remember useful context without silently taking control.
