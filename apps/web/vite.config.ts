@@ -1,11 +1,17 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   build: {
     outDir: "dist/client",
+  },
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("../../packages/ui/src", import.meta.url)),
+    },
   },
   plugins: [
     tailwindcss(),

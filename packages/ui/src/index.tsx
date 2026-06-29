@@ -1,5 +1,5 @@
 import type { Value } from "platejs";
-import type { FormEvent, MouseEvent, ReactNode } from "react";
+import type { ChangeEvent, DragEvent, FormEvent, MouseEvent, ReactNode } from "react";
 import { Drawer } from "@base-ui/react/drawer";
 import { BoldPlugin, ItalicPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import {
@@ -9,10 +9,15 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
+  ArrowUp,
   BarChart3,
   BookOpen,
+  Bot,
+  ChevronDown,
   ClipboardList,
+  FileText,
   Home,
+  ImageIcon,
   KeyRound,
   LogOut,
   Moon,
@@ -22,10 +27,11 @@ import {
   Sparkles,
   Sun,
   UserRound,
+  X,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -39,6 +45,10 @@ import {
   Tooltip,
   XAxis,
 } from "recharts";
+import { DotmCircular3 } from "./components/ui/dotm-circular-3";
+import { DotmCircular8 } from "./components/ui/dotm-circular-8";
+import { DotmCircular17 } from "./components/ui/dotm-circular-17";
+import { DotmSquare3 } from "./components/ui/dotm-square-3";
 
 export type RichTextDocument = Value;
 
@@ -53,6 +63,7 @@ const secondaryButtonClass =
   "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-white/5 px-4 text-[0.8125rem] font-medium text-neutral-200 shadow-none disabled:opacity-70";
 const eyebrowClass = "mb-2 text-[0.75rem] font-medium uppercase tracking-[0.12em] text-neutral-400";
 const summaryClass = "mt-4 text-[0.875rem] leading-[1.55] text-neutral-300";
+const cx = (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(" ");
 
 export interface EventListItem {
   readonly id: string;
@@ -794,6 +805,1143 @@ export function Surface(props: {
   );
 }
 
+type ChatAlign = "start" | "end";
+type BubbleVariant = "default" | "secondary" | "muted" | "ghost" | "destructive";
+type MarkerVariant = "default" | "border" | "separator";
+type DotMatrixVisualState = "thinking" | "tool";
+type LaresChatActivityStatus = "active" | "complete" | "error";
+
+export interface LaresChatMessage {
+  readonly content: string;
+  readonly draftTitle?: string;
+  readonly id: string;
+  readonly memoryCount?: number;
+  readonly role: "assistant" | "user";
+  readonly streaming?: boolean;
+}
+
+export interface LaresChatActivity {
+  readonly id: string;
+  readonly kind: "thinking" | "tool";
+  readonly label: string;
+  readonly status?: LaresChatActivityStatus;
+}
+
+export interface LaresChatAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly size?: number;
+  readonly type?: string;
+}
+
+export type LaresChatEvent =
+  | ({ readonly type: "activity" } & LaresChatActivity)
+  | ({ readonly type: "message" } & LaresChatMessage);
+
+type ChatTimelineGroup =
+  | {
+      readonly activities: ReadonlyArray<LaresChatActivity>;
+      readonly id: string;
+      readonly minimized: boolean;
+      readonly type: "activity";
+    }
+  | {
+      readonly id: string;
+      readonly message: LaresChatMessage;
+      readonly type: "message";
+    };
+
+// ponytail: request/response chat shell; replace with the full shadcn scroller when SSE streaming lands.
+export function MessageScrollerProvider(props: {
+  readonly autoScroll?: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div data-slot="message-scroller-provider" data-auto-scroll={props.autoScroll || undefined}>
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageScroller(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="message-scroller"
+      className={cx("relative grid h-full min-h-0 grid-rows-[1fr]", props.className)}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageScrollerViewport(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="message-scroller-viewport"
+      className={cx("min-h-0 overflow-y-auto overscroll-contain px-4 py-4", props.className)}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageScrollerContent(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="message-scroller-content"
+      className={cx("mx-auto grid w-full max-w-[38rem] gap-5", props.className)}
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageScrollerItem(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly messageId?: string;
+  readonly scrollAnchor?: boolean;
+}) {
+  return (
+    <div
+      data-slot="message-scroller-item"
+      data-message-id={props.messageId}
+      data-scroll-anchor={props.scrollAnchor || undefined}
+      className={props.className}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function Message(props: {
+  readonly align?: ChatAlign;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  const align = props.align ?? "start";
+  return (
+    <div
+      data-slot="message"
+      className={cx(
+        "flex items-end gap-2.5",
+        align === "end" ? "justify-end" : "justify-start",
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageAvatar(props: {
+  readonly align?: ChatAlign;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="message-avatar"
+      className={cx(
+        "grid size-8 shrink-0 place-content-center rounded-full bg-white/6 text-neutral-300",
+        props.align === "end" && "order-2",
+        props.className,
+      )}
+      aria-hidden="true"
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageContent(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div data-slot="message-content" className={cx("grid max-w-[82%] gap-1.5", props.className)}>
+      {props.children}
+    </div>
+  );
+}
+
+export function MessageFooter(props: {
+  readonly align?: ChatAlign;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="message-footer"
+      className={cx(
+        "flex text-xs text-neutral-400",
+        props.align === "end" ? "justify-end" : "justify-start",
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function Bubble(props: {
+  readonly align?: ChatAlign;
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly variant?: BubbleVariant;
+}) {
+  const variant = props.variant ?? "secondary";
+  const variantClass =
+    variant === "default"
+      ? "bg-[#f4f1eb] text-[#080808]"
+      : variant === "muted"
+        ? "bg-white/5 text-neutral-200"
+        : variant === "ghost"
+          ? "max-w-none bg-transparent px-0 text-neutral-100"
+          : variant === "destructive"
+            ? "bg-red-500/12 text-red-100 ring-1 ring-red-400/20"
+            : "bg-[#272727] text-neutral-100";
+
+  return (
+    <div
+      data-slot="bubble"
+      data-align={props.align ?? "start"}
+      data-variant={variant}
+      className={cx(
+        "w-fit max-w-[80%] rounded-[1.25rem] px-4 py-3 text-sm leading-6 text-pretty",
+        props.align === "end" && "justify-self-end",
+        variantClass,
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function BubbleContent(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div data-slot="bubble-content" className={cx("whitespace-pre-wrap", props.className)}>
+      {props.children}
+    </div>
+  );
+}
+
+export function Marker(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly role?: string;
+  readonly variant?: MarkerVariant;
+}) {
+  const variant = props.variant ?? "default";
+  return (
+    <div
+      data-slot="marker"
+      data-variant={variant}
+      role={props.role}
+      className={cx(
+        "flex items-center gap-1.5 text-xs text-neutral-400",
+        variant === "border" && "border-t border-white/6 pt-3",
+        variant === "separator" && "justify-center border-y border-white/6 py-3",
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export function MarkerIcon(props: { readonly children: ReactNode; readonly className?: string }) {
+  return (
+    <span data-slot="marker-icon" className={cx("text-neutral-500", props.className)} aria-hidden>
+      {props.children}
+    </span>
+  );
+}
+
+export function MarkerContent(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <span data-slot="marker-content" className={props.className}>
+      {props.children}
+    </span>
+  );
+}
+
+const chatAttachmentAccept = "image/*,.pdf,.doc,.docx,.txt,.md";
+
+function formatAttachmentSize(size?: number) {
+  if (!size) return "";
+  if (size < 1024) return `${size} B`;
+  const kib = size / 1024;
+  if (kib < 1024) return `${Math.round(kib)} KB`;
+  const mib = kib / 1024;
+  return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MB`;
+}
+
+function isImageAttachment(attachment: LaresChatAttachment) {
+  return (
+    attachment.type?.startsWith("image/") ||
+    /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(attachment.name)
+  );
+}
+
+export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState } = {}) {
+  const state = props.state ?? "thinking";
+  const tone = state === "tool" ? "amber" : "cyan";
+  const registryLoader = state === "tool" ? "dotm-square-3" : "dotm-thinking-sequence";
+
+  return (
+    <span
+      data-slot="dot-matrix-loader"
+      data-state={state}
+      data-registry-loader={registryLoader}
+      data-tone={tone}
+      className={cx(
+        "inline-flex size-4 items-center justify-center dmx-transitioning",
+        `dmx-state-${state}`,
+        `dmx-tone-${tone}`,
+      )}
+      aria-hidden="true"
+    >
+      {state === "tool" ? (
+        <DotmSquare3
+          animated
+          ariaLabel="Working"
+          color="#ffd166"
+          dotShape="square"
+          dotSize={2.35}
+          halo={0.14}
+          size={16}
+        />
+      ) : (
+        <span
+          data-slot="dot-matrix-loader-sequence"
+          className="dmx-thinking-sequence relative inline-flex size-4"
+        >
+          <span
+            data-slot="dot-matrix-loader-stage"
+            data-registry-loader-stage="dotm-circular-3"
+            className="dmx-thinking-sequence-stage"
+          >
+            <DotmCircular3
+              animated
+              ariaLabel="Thinking"
+              color="#8ee8ff"
+              dotSize={2.2}
+              halo={0.14}
+              size={16}
+            />
+          </span>
+          <span
+            data-slot="dot-matrix-loader-stage"
+            data-registry-loader-stage="dotm-circular-8"
+            className="dmx-thinking-sequence-stage"
+          >
+            <DotmCircular8
+              animated
+              ariaLabel="Thinking"
+              color="#8ee8ff"
+              dotSize={2.2}
+              halo={0.12}
+              size={16}
+            />
+          </span>
+          <span
+            data-slot="dot-matrix-loader-stage"
+            data-registry-loader-stage="dotm-circular-17"
+            className="dmx-thinking-sequence-stage"
+          >
+            <DotmCircular17
+              animated
+              ariaLabel="Thinking"
+              color="#8ee8ff"
+              dotSize={2.2}
+              halo={0.12}
+              size={16}
+            />
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+function groupChatTimeline(
+  events: ReadonlyArray<LaresChatEvent>,
+): ReadonlyArray<ChatTimelineGroup> {
+  const groups: Array<
+    | Omit<Extract<ChatTimelineGroup, { type: "activity" }>, "minimized">
+    | Extract<ChatTimelineGroup, { type: "message" }>
+  > = [];
+  let activities: Array<LaresChatActivity> = [];
+  let activityGroupId = "";
+  const flushActivities = () => {
+    if (activities.length === 0) return;
+    groups.push({ activities, id: `activity-${activityGroupId}`, type: "activity" });
+    activities = [];
+    activityGroupId = "";
+  };
+
+  for (const event of events) {
+    if (event.type === "message") {
+      flushActivities();
+      groups.push({ id: event.id, message: event, type: "message" });
+      continue;
+    }
+
+    if (!activityGroupId) activityGroupId = event.id;
+    activities.push(
+      event.status
+        ? { id: event.id, kind: event.kind, label: event.label, status: event.status }
+        : { id: event.id, kind: event.kind, label: event.label },
+    );
+  }
+  flushActivities();
+
+  return groups.map((group, index) =>
+    group.type === "message"
+      ? group
+      : {
+          ...group,
+          minimized: groups
+            .slice(index + 1)
+            .some(
+              (next) =>
+                next.type === "message" &&
+                next.message.role === "assistant" &&
+                next.message.content.trim().length > 0,
+            ),
+        },
+  );
+}
+
+function activityStatus(activity: LaresChatActivity): LaresChatActivityStatus {
+  return activity.status ?? "active";
+}
+
+function ActivityStatusDot(props: {
+  readonly state?: DotMatrixVisualState;
+  readonly status: LaresChatActivityStatus;
+}) {
+  return (
+    <span
+      data-slot="activity-status-dot"
+      data-status={props.status}
+      className={cx(
+        "inline-flex size-2 shrink-0 rounded-full",
+        props.status === "active" &&
+          cx(
+            "animate-spin border border-t-transparent bg-transparent",
+            props.state === "thinking" ? "border-[#8ee8ff]" : "border-[#ffd166]",
+          ),
+        props.status === "complete" && "bg-neutral-500",
+        props.status === "error" && "bg-red-500",
+      )}
+      aria-hidden="true"
+    />
+  );
+}
+
+function ActivitySteps(props: {
+  readonly activities: ReadonlyArray<LaresChatActivity>;
+  readonly minimized?: boolean;
+}) {
+  if (props.activities.length === 0) {
+    return null;
+  }
+
+  const hasActiveStep = props.activities.some((activity) => activityStatus(activity) === "active");
+  const hasError = props.activities.some((activity) => activityStatus(activity) === "error");
+  const state = props.activities.some((activity) => activity.kind === "tool") ? "tool" : "thinking";
+  const title = hasError
+    ? "Needs attention"
+    : hasActiveStep
+      ? state === "tool"
+        ? "Working"
+        : "Thinking"
+      : "Completed";
+  const countLabel = `${props.activities.length} step${props.activities.length === 1 ? "" : "s"}`;
+
+  return (
+    <MessageScrollerItem>
+      <details
+        data-slot="activity-steps"
+        data-minimized={props.minimized || undefined}
+        className="group w-fit max-w-[min(34rem,100%)] rounded-lg bg-white/[0.035] px-2.5 py-2 text-xs text-neutral-400 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
+        open={!props.minimized}
+      >
+        <summary
+          data-slot="activity-steps-summary"
+          className="flex cursor-pointer list-none items-start gap-2 pr-1 transition-colors outline-none hover:text-neutral-300 [&::-webkit-details-marker]:hidden"
+        >
+          <span
+            data-slot="activity-steps-loader"
+            className="mt-px inline-flex size-4 shrink-0 items-center justify-center"
+            aria-hidden="true"
+          >
+            {hasActiveStep ? (
+              <DotMatrixLoader state={state} />
+            ) : (
+              <ActivityStatusDot status={hasError ? "error" : "complete"} />
+            )}
+          </span>
+          <span className="grid min-w-0 gap-0.5">
+            <span className="text-[0.78rem] leading-4 font-medium text-neutral-200">{title}</span>
+            <span className="text-[0.7rem] leading-3.5 text-neutral-500">{countLabel}</span>
+          </span>
+          <ChevronDown
+            className="mt-1 ml-1 size-3.5 shrink-0 text-neutral-500 transition-transform duration-200 group-open:rotate-180"
+            aria-hidden="true"
+            strokeWidth={2.2}
+          />
+        </summary>
+        <ol
+          data-slot="activity-step-rail"
+          className="mt-2 ml-2 grid gap-2 border-l border-white/10 py-0.5 pl-4"
+        >
+          {props.activities.map((activity) => (
+            <li
+              key={activity.id}
+              data-slot="activity-step"
+              data-kind={activity.kind}
+              className="relative min-w-0 text-[0.76rem] leading-5 text-neutral-300"
+            >
+              <span
+                data-slot="activity-step-node"
+                className="absolute top-[0.43rem] -left-[1.22rem] grid size-2 place-content-center rounded-full bg-[#111111] ring-4 ring-[#111111]"
+              >
+                <ActivityStatusDot state={activity.kind} status={activityStatus(activity)} />
+              </span>
+              <span className="break-words">{activity.label}</span>
+            </li>
+          ))}
+        </ol>
+      </details>
+    </MessageScrollerItem>
+  );
+}
+
+export function LaresChat(props: {
+  readonly activities?: ReadonlyArray<LaresChatActivity>;
+  readonly attachments?: ReadonlyArray<LaresChatAttachment>;
+  readonly className?: string;
+  readonly error?: string;
+  readonly events?: ReadonlyArray<LaresChatEvent>;
+  readonly input: string;
+  readonly messages: ReadonlyArray<LaresChatMessage>;
+  readonly sending: boolean;
+  readonly onAttachmentRemove?: (id: string) => void;
+  readonly onAttachmentsAdd?: (files: ReadonlyArray<File>) => void;
+  readonly onInputChange: (input: string) => void;
+  readonly onSubmit: () => void;
+}) {
+  const canSend = props.input.trim().length > 0 && !props.sending;
+  const attachments = props.attachments ?? [];
+  const canAttach = Boolean(props.onAttachmentsAdd) && !props.sending;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const activities =
+    props.activities ??
+    (props.sending ? [{ id: "thinking", kind: "thinking" as const, label: "Thinking..." }] : []);
+  const timelineEvents =
+    props.events ??
+    ([
+      ...props.messages.map((message) => ({ ...message, type: "message" as const })),
+      ...activities.map((activity) => ({ ...activity, type: "activity" as const })),
+    ] satisfies ReadonlyArray<LaresChatEvent>);
+  const timelineGroups = groupChatTimeline(timelineEvents);
+  const hasMessages = timelineEvents.some((event) => event.type === "message");
+  const addFiles = (files: ReadonlyArray<File>) => {
+    if (!props.onAttachmentsAdd || files.length === 0) return;
+    props.onAttachmentsAdd(files);
+  };
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(event.currentTarget.files ?? []));
+    event.currentTarget.value = "";
+  };
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!canAttach || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setDraggingFiles(true);
+  };
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!canAttach) return;
+    event.preventDefault();
+  };
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+    setDraggingFiles(false);
+  };
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!canAttach) return;
+    event.preventDefault();
+    setDraggingFiles(false);
+    addFiles(Array.from(event.dataTransfer.files));
+  };
+
+  return (
+    <main
+      className={cx(
+        "mx-auto grid h-dvh w-full max-w-[42rem] bg-[#111111] text-neutral-100",
+        props.className,
+      )}
+    >
+      <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Lares chat">
+        <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
+          <p className="mb-1.5 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+            Lares
+          </p>
+          <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-white">Chat</h1>
+        </header>
+
+        <MessageScrollerProvider autoScroll>
+          <MessageScroller>
+            <MessageScrollerViewport>
+              <MessageScrollerContent>
+                {!hasMessages ? (
+                  <MessageScrollerItem>
+                    <Marker variant="separator">
+                      <MarkerContent>No messages yet</MarkerContent>
+                    </Marker>
+                  </MessageScrollerItem>
+                ) : null}
+                {timelineGroups.map((group) => {
+                  if (group.type === "activity") {
+                    return (
+                      <ActivitySteps
+                        key={group.id}
+                        activities={group.activities}
+                        minimized={group.minimized}
+                      />
+                    );
+                  }
+
+                  const message = group.message;
+                  const align = message.role === "user" ? "end" : "start";
+                  const memoryLabel =
+                    typeof message.memoryCount === "number" && message.memoryCount > 0
+                      ? `${message.memoryCount} memor${message.memoryCount === 1 ? "y" : "ies"}`
+                      : "";
+
+                  return (
+                    <MessageScrollerItem
+                      key={group.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === "user"}
+                    >
+                      <Message align={align}>
+                        <MessageContent
+                          className={cx(
+                            message.role === "user"
+                              ? "max-w-[75%] items-end"
+                              : "max-w-[min(34rem,100%)] items-start",
+                          )}
+                        >
+                          <Bubble
+                            align={align}
+                            variant={message.role === "user" ? "default" : "ghost"}
+                            className={
+                              message.role === "user"
+                                ? "max-w-full px-3.5 py-2.5 text-[0.9375rem] leading-6 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+                                : "max-w-full rounded-[1.35rem] bg-[#1b1b1b] px-4 py-3.5 text-[0.9375rem] leading-6 text-neutral-100 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                            }
+                          >
+                            <BubbleContent>
+                              {message.content}
+                              {message.streaming ? (
+                                <span
+                                  data-slot="streaming-cursor"
+                                  className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse rounded-full bg-neutral-300"
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                            </BubbleContent>
+                          </Bubble>
+                          {message.draftTitle || memoryLabel ? (
+                            <MessageFooter align={align}>
+                              <Marker className="w-fit rounded-full bg-white/[0.04] px-2.5 py-1 text-[0.72rem] leading-5 text-neutral-400 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+                                <MarkerIcon>
+                                  <Sparkles className="size-3" strokeWidth={2.2} />
+                                </MarkerIcon>
+                                <MarkerContent>
+                                  {message.draftTitle ? (
+                                    <>
+                                      <span className="font-medium text-neutral-300">
+                                        Review draft
+                                      </span>
+                                      {": "}
+                                      {message.draftTitle}
+                                    </>
+                                  ) : null}
+                                  {message.draftTitle && memoryLabel ? " · " : null}
+                                  {memoryLabel}
+                                </MarkerContent>
+                              </Marker>
+                            </MessageFooter>
+                          ) : null}
+                        </MessageContent>
+                      </Message>
+                    </MessageScrollerItem>
+                  );
+                })}
+                {props.error ? (
+                  <MessageScrollerItem>
+                    <Bubble variant="destructive">
+                      <BubbleContent>{props.error}</BubbleContent>
+                    </Bubble>
+                  </MessageScrollerItem>
+                ) : null}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+          </MessageScroller>
+        </MessageScrollerProvider>
+
+        <form
+          className="bg-[#111111]/96 px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+          aria-label="Message Lares"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSend) props.onSubmit();
+          }}
+        >
+          <div
+            data-slot="chat-composer-dropzone"
+            data-dragging={draggingFiles || undefined}
+            className="mx-auto w-full max-w-[38rem]"
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
+            <div
+              data-slot="chat-composer-surface"
+              className={cx(
+                "relative grid gap-3 rounded-[1.55rem] bg-[#1d1d1d] px-4 pt-4 pb-3 text-neutral-100 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_0_1px_rgba(255,255,255,0.08)]",
+                draggingFiles && "shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_0_1px_#8ee8ff]",
+              )}
+            >
+              {draggingFiles ? (
+                <div
+                  data-slot="chat-composer-drop-hint"
+                  className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[1.2rem] bg-[#111111]/88 text-sm font-medium text-[#8ee8ff] shadow-[inset_0_0_0_1px_rgba(142,232,255,0.55)] backdrop-blur-sm"
+                >
+                  Drop files to attach
+                </div>
+              ) : null}
+              {attachments.length > 0 ? (
+                <div
+                  data-slot="chat-attachment-list"
+                  className="flex gap-2 overflow-x-auto pb-1"
+                  aria-label={`${attachments.length} file${attachments.length === 1 ? "" : "s"} attached`}
+                >
+                  <span className="sr-only">
+                    {attachments.length} file{attachments.length === 1 ? "" : "s"} attached
+                  </span>
+                  {attachments.map((attachment) => {
+                    const size = formatAttachmentSize(attachment.size);
+                    const isImage = isImageAttachment(attachment);
+                    return (
+                      <div
+                        key={attachment.id}
+                        data-slot="chat-attachment"
+                        className="flex max-w-52 min-w-0 shrink-0 items-center gap-2 rounded-xl bg-white/[0.06] px-2.5 py-2 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                      >
+                        <span
+                          className="grid size-8 shrink-0 place-content-center rounded-lg bg-white/[0.06] text-neutral-300"
+                          aria-hidden="true"
+                        >
+                          {isImage ? (
+                            <ImageIcon className="size-4" strokeWidth={2.1} />
+                          ) : (
+                            <FileText className="size-4" strokeWidth={2.1} />
+                          )}
+                        </span>
+                        <span className="grid min-w-0 flex-1">
+                          <span className="truncate text-[0.78rem] leading-4 font-medium text-neutral-100">
+                            {attachment.name}
+                          </span>
+                          {size ? (
+                            <span className="text-[0.7rem] leading-4 text-neutral-500">{size}</span>
+                          ) : null}
+                        </span>
+                        {props.onAttachmentRemove ? (
+                          <button
+                            className="grid size-7 shrink-0 place-content-center rounded-full border-0 bg-transparent text-neutral-500 transition-colors hover:text-neutral-200"
+                            aria-label={`Remove ${attachment.name}`}
+                            type="button"
+                            onClick={() => props.onAttachmentRemove?.(attachment.id)}
+                          >
+                            <X className="size-3.5" aria-hidden="true" strokeWidth={2.2} />
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <textarea
+                className="max-h-40 min-h-18 resize-none border-0 bg-transparent p-0 text-[1rem] leading-6 text-white outline-none placeholder:text-neutral-500"
+                aria-label="Message"
+                placeholder="Message Lares"
+                rows={2}
+                value={props.input}
+                onChange={(event) => props.onInputChange(event.currentTarget.value)}
+              />
+              <div
+                data-slot="chat-composer-toolbar"
+                className="flex min-h-10 items-center justify-between gap-3"
+              >
+                <button
+                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-transparent text-neutral-400 transition-colors hover:text-neutral-100 disabled:text-neutral-700"
+                  aria-label="Attach files"
+                  disabled={!canAttach}
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Plus className="size-5" aria-hidden="true" strokeWidth={2} />
+                </button>
+                <input
+                  ref={fileInputRef}
+                  className="sr-only"
+                  type="file"
+                  multiple
+                  accept={chatAttachmentAccept}
+                  tabIndex={-1}
+                  onChange={handleFileInputChange}
+                />
+                <button
+                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-[#f4f1eb] text-[#080808] transition-transform active:scale-[0.96] disabled:bg-white/10 disabled:text-neutral-500"
+                  aria-label="Send message"
+                  disabled={!canSend}
+                  type="submit"
+                >
+                  <ArrowUp className="size-5" aria-hidden="true" strokeWidth={2.2} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+const chatPreviewStates = [
+  {
+    id: "empty",
+    label: "Empty",
+    props: {
+      activities: [],
+      error: "",
+      input: "",
+      messages: [],
+      sending: false,
+    },
+  },
+  {
+    id: "thinking",
+    label: "Thinking",
+    props: {
+      error: "",
+      input: "",
+      messages: [{ content: "What should I do next?", id: "thinking-user", role: "user" as const }],
+      sending: true,
+    },
+  },
+  {
+    id: "streaming",
+    label: "Streaming",
+    props: {
+      activities: [],
+      error: "",
+      input: "",
+      messages: [
+        { content: "What should I do next?", id: "stream-user", role: "user" as const },
+        {
+          content: "I’m drafting a next step from the latest signal",
+          id: "stream-assistant",
+          role: "assistant" as const,
+          streaming: true,
+        },
+      ],
+      sending: false,
+    },
+  },
+  {
+    id: "attachments",
+    label: "Attachments",
+    attachments: [
+      { id: "preview-image", name: "diagram.png", size: 2048, type: "image/png" },
+      { id: "preview-document", name: "brief.pdf", size: 4096, type: "application/pdf" },
+    ],
+    props: {
+      activities: [],
+      error: "",
+      input: "",
+      messages: [
+        { content: "Can you review these?", id: "attachment-user", role: "user" as const },
+      ],
+      sending: false,
+    },
+  },
+  {
+    id: "tool",
+    label: "Tool call",
+    props: {
+      activities: [
+        { id: "memory-tool", kind: "tool" as const, label: "Searching memory" },
+        { id: "draft-tool", kind: "tool" as const, label: "Drafting proposal" },
+      ],
+      error: "",
+      input: "",
+      messages: [{ content: "What should I do next?", id: "tool-user", role: "user" as const }],
+      sending: true,
+    },
+  },
+  {
+    id: "drafted",
+    label: "Drafted",
+    props: {
+      error: "",
+      events: [
+        { content: "test", id: "draft-user", role: "user" as const, type: "message" as const },
+        {
+          id: "draft-memory-tool",
+          kind: "tool" as const,
+          label: "Searched memory",
+          status: "complete" as const,
+          type: "activity" as const,
+        },
+        {
+          id: "draft-proposal-tool",
+          kind: "tool" as const,
+          label: "Drafted proposal",
+          status: "complete" as const,
+          type: "activity" as const,
+        },
+        {
+          content: "I drafted a reviewable next step from your message.",
+          draftTitle: "Clarify next attention point",
+          id: "draft-assistant",
+          memoryCount: 0,
+          role: "assistant" as const,
+          type: "message" as const,
+        },
+      ],
+      input: "",
+      messages: [],
+      sending: false,
+    },
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    props: {
+      activities: [],
+      error: "",
+      input: "",
+      messages: [
+        { content: "What should I follow up on?", id: "memory-user", role: "user" as const },
+        {
+          content: "I found related notes and drafted a follow-up.",
+          draftTitle: "Follow up on launch attention point",
+          id: "memory-assistant",
+          memoryCount: 2,
+          role: "assistant" as const,
+        },
+      ],
+      sending: false,
+    },
+  },
+  {
+    id: "error",
+    label: "Error",
+    props: {
+      activities: [],
+      error: "Could not reach Lares. Try again.",
+      input: "Retry this",
+      messages: [{ content: "What should I do next?", id: "error-user", role: "user" as const }],
+      sending: false,
+    },
+  },
+] as const;
+
+type ChatPreviewStateId = (typeof chatPreviewStates)[number]["id"];
+type ChatPreviewState = (typeof chatPreviewStates)[number];
+
+function getChatPreviewAttachments(state: ChatPreviewState): ReadonlyArray<LaresChatAttachment> {
+  return "attachments" in state ? state.attachments : [];
+}
+
+const streamingPreviewText =
+  "I'll draft a next step from the latest signal and keep the response visible while the answer is still growing.";
+const streamingPreviewStart = "I'll draft".length;
+
+function StreamingPreviewChat(props: { readonly className?: string }) {
+  const [visibleCharacters, setVisibleCharacters] = useState(streamingPreviewStart);
+  const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ReadonlyArray<LaresChatAttachment>>([]);
+  const content = streamingPreviewText.slice(0, visibleCharacters);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => {
+        setVisibleCharacters((current) =>
+          current >= streamingPreviewText.length ? streamingPreviewStart : current + 1,
+        );
+      },
+      visibleCharacters >= streamingPreviewText.length ? 900 : 32,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [visibleCharacters]);
+
+  return (
+    <div className={props.className} data-slot="streaming-simulator">
+      <LaresChat
+        attachments={attachments}
+        className="h-full"
+        error=""
+        events={[
+          { content: "What should I do next?", id: "stream-user", role: "user", type: "message" },
+          {
+            id: "stream-memory-tool",
+            kind: "tool",
+            label: "Searched memory",
+            status: "complete",
+            type: "activity",
+          },
+          {
+            id: "stream-draft-tool",
+            kind: "tool",
+            label: "Prepared draft",
+            status: "complete",
+            type: "activity",
+          },
+          {
+            content,
+            id: "stream-assistant",
+            role: "assistant",
+            streaming: true,
+            type: "message",
+          },
+        ]}
+        input={input}
+        messages={[]}
+        sending={false}
+        onAttachmentsAdd={(files) =>
+          setAttachments((current) => [
+            ...current,
+            ...files.map((file) => ({
+              id: crypto.randomUUID(),
+              name: file.name,
+              size: file.size,
+              type: file.type,
+            })),
+          ])
+        }
+        onAttachmentRemove={(id) =>
+          setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+        }
+        onInputChange={setInput}
+        onSubmit={() => {}}
+      />
+    </div>
+  );
+}
+
+export function LaresChatStatePreview(props: { readonly initialState?: ChatPreviewStateId } = {}) {
+  const initialSelected =
+    chatPreviewStates.find((state) => state.id === (props.initialState ?? "thinking")) ??
+    chatPreviewStates[0];
+  const [stateId, setStateId] = useState<ChatPreviewStateId>(initialSelected.id);
+  const selected = chatPreviewStates.find((state) => state.id === stateId) ?? chatPreviewStates[0];
+  const [input, setInput] = useState<string>(initialSelected.props.input);
+  const [attachments, setAttachments] = useState<ReadonlyArray<LaresChatAttachment>>(
+    getChatPreviewAttachments(initialSelected),
+  );
+
+  useEffect(() => {
+    setInput(selected.props.input);
+    setAttachments(getChatPreviewAttachments(selected));
+  }, [selected]);
+
+  return (
+    <main className="grid h-dvh grid-rows-[auto_1fr] bg-[#111111] text-neutral-100">
+      <header className="mx-auto w-full max-w-[42rem] px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+        <p className="mb-1.5 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+          Development
+        </p>
+        <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-white">
+          Chat state lab
+        </h1>
+        <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1" aria-label="Chat states">
+          {chatPreviewStates.map((state) => (
+            <button
+              key={state.id}
+              className={cx(
+                "min-h-9 shrink-0 rounded-full px-3 text-xs font-medium transition-transform active:scale-[0.96]",
+                state.id === stateId
+                  ? "bg-[#f4f1eb] text-[#080808]"
+                  : "bg-white/6 text-neutral-300",
+              )}
+              type="button"
+              onClick={() => setStateId(state.id)}
+            >
+              {state.label}
+            </button>
+          ))}
+        </div>
+      </header>
+      {selected.id === "streaming" ? (
+        <StreamingPreviewChat className="h-full" />
+      ) : (
+        <LaresChat
+          {...selected.props}
+          attachments={attachments}
+          className="h-full"
+          input={input}
+          onAttachmentsAdd={(files) =>
+            setAttachments((current) => [
+              ...current,
+              ...files.map((file) => ({
+                id: crypto.randomUUID(),
+                name: file.name,
+                size: file.size,
+                type: file.type,
+              })),
+            ])
+          }
+          onAttachmentRemove={(id) =>
+            setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+          }
+          onInputChange={setInput}
+          onSubmit={() => {}}
+        />
+      )}
+    </main>
+  );
+}
+
 export function CheckInForm(props: {
   readonly status: string;
   readonly saving: boolean;
@@ -899,6 +2047,7 @@ export function AddActionSheet(props: {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onCaptureNote: () => void;
+  readonly onOpenChat: () => void;
 }) {
   return (
     <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onClose() : undefined)}>
@@ -923,6 +2072,19 @@ export function AddActionSheet(props: {
                   </span>
                   <span className="grid text-left">
                     <strong className="text-sm font-semibold">Note</strong>
+                  </span>
+                </motion.button>
+                <motion.button
+                  className={`${secondaryButtonClass} justify-start gap-3 px-5`}
+                  type="button"
+                  whileTap={{ scale: 0.985 }}
+                  onClick={props.onOpenChat}
+                >
+                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                    <Bot className="size-4" aria-hidden="true" strokeWidth={2.3} />
+                  </span>
+                  <span className="grid text-left">
+                    <strong className="text-sm font-semibold">Chat</strong>
                   </span>
                 </motion.button>
               </div>

@@ -1,9 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "composite": true,
     "jsx": "react-jsx",
     "outDir": "../../.tsbuild/packages/ui",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "rootDir": "src",
     "tsBuildInfoFile": "../../.tsbuild/packages/ui.tsbuildinfo"
   },

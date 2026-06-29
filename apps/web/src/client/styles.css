@@ -9,6 +9,8 @@
 @layer base {
   :root {
     color-scheme: dark;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-font-smoothing: antialiased;
   }
 
   * {

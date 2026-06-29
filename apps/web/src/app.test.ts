@@ -922,6 +922,46 @@ describe("web app", () => {
     });
   });
 
+  test("POST /api/conversations/:conversationId/messages/stream proxies the agent text stream", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "Stream this" });
+          return new Response("Hello streamed reply", {
+            headers: { "content-type": "text/plain; charset=utf-8" },
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp();
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "Stream this" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
+    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("Hello streamed reply");
+  });
+
   test("custom integrations can append and list current user's events", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 

@@ -10,6 +10,7 @@ import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-serv
 import type { Env } from "./env";
 import {
   apiContract,
+  conversationMessageInputSchema,
   conversationMessageResponseSchema,
   conversationMetadataSchema,
   listRecentSignalsToolResponseSchema,
@@ -650,6 +651,46 @@ async function proxyConversationRequest<Schema extends z.ZodType>(
   return schema.parse(await response.json());
 }
 
+function conversationStreamPath(path: string) {
+  const match = /^\/api\/conversations\/([^/]+)\/messages\/stream$/.exec(path);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+async function proxyConversationStream(
+  agentSessions: DurableObjectNamespace,
+  internalSecret: string | undefined,
+  user: { readonly id: string; readonly displayName: string },
+  conversationId: string,
+  message: string,
+): Promise<Response> {
+  const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
+  const agent = agentSessions.get(agentId);
+  const internalSignature = internalSecret
+    ? await signAgentRequest(internalSecret, user.id, conversationId)
+    : undefined;
+  const response = await agent.fetch(
+    new Request("https://lares.local/messages/stream", {
+      body: JSON.stringify({ message }),
+      headers: {
+        "content-type": "application/json",
+        "x-lares-conversation-id": conversationId,
+        "x-lares-user-display-name": user.displayName,
+        "x-lares-user-id": user.id,
+        ...(internalSignature !== undefined
+          ? { "x-lares-internal-signature": internalSignature }
+          : {}),
+      },
+      method: "POST",
+    }),
+  );
+
+  if (!response.ok) {
+    throw new Error(`Conversation agent stream failed with ${response.status}`);
+  }
+
+  return response;
+}
+
 async function signAgentRequest(secret: string, userId: string, conversationId: string) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -1119,6 +1160,21 @@ export function createApp(options: CreateAppOptions = {}) {
     const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
+    const streamConversationId = conversationStreamPath(c.req.path);
+    if (streamConversationId && c.req.method === "POST") {
+      const input = conversationMessageInputSchema.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) {
+        return c.json({ error: "Invalid conversation message" }, 400);
+      }
+      return proxyConversationStream(
+        c.env.USER_AGENT_SESSION,
+        c.env.AGENT_INTERNAL_SECRET ?? c.env.BETTER_AUTH_SECRET,
+        user,
+        streamConversationId,
+        input.data.message,
+      );
+    }
+
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },

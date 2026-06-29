@@ -1,6 +1,6 @@
 import { Think } from "@cloudflare/think";
 import { Agent } from "agents";
-import { generateObject, type LanguageModel } from "ai";
+import { generateObject, smoothStream, streamText, type LanguageModel } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
@@ -50,6 +50,16 @@ interface LoopIntakeDraftInput {
   }>;
   readonly message: string;
   readonly user: LaresUserRef;
+}
+
+interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
+  readonly draft: {
+    readonly body: string;
+    readonly kind: string;
+    readonly rationale: string;
+    readonly title: string;
+  } | null;
+  readonly fallbackReply: string;
 }
 
 const thinkExtractedItemSchema = z.object({
@@ -131,6 +141,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     }
     if (url.pathname === "/messages" && request.method === "POST") {
       return this.reply(request);
+    }
+    if (url.pathname === "/messages/stream" && request.method === "POST") {
+      return this.replyStream(request);
     }
     if (url.pathname === "/journal/interpret" && request.method === "POST") {
       return this.interpretJournal(request);
@@ -297,7 +310,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     });
   }
 
-  private async reply(request: Request) {
+  private async prepareReply(request: Request) {
     const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -328,6 +341,14 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       userId: user.id,
     });
 
+    return { conversationId, draft, intake, memoryResults, message, user };
+  }
+
+  private async reply(request: Request) {
+    const prepared = await this.prepareReply(request);
+    if (prepared instanceof Response) return prepared;
+    const { conversationId, draft, memoryResults, message } = prepared;
+
     return Response.json({
       conversationId,
       draft: draft.draft,
@@ -339,6 +360,28 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       subAgentsUsed: ["loopIntakeThink"],
       usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
+    });
+  }
+
+  private async replyStream(request: Request) {
+    const prepared = await this.prepareReply(request);
+    if (prepared instanceof Response) return prepared;
+    const { conversationId, draft, intake, memoryResults, message, user } = prepared;
+
+    return intake.streamReplyText({
+      conversationId,
+      draft: draft.draft
+        ? {
+            body: draft.draft.proposal.body,
+            kind: draft.draft.proposal.kind,
+            rationale: draft.draft.proposal.rationale,
+            title: draft.draft.proposal.title,
+          }
+        : null,
+      fallbackReply: draft.reply,
+      memoryResults,
+      message,
+      user,
     });
   }
 
@@ -432,6 +475,46 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     // Think owns the durable reasoning harness; this RPC seam stays stable while model-produced
     // structured output is introduced behind the same contract.
     return this.deterministicDraftFromMessage(input);
+  }
+
+  async streamReplyText(input: LoopIntakeReplyStreamInput) {
+    const memoryContext = input.memoryResults.length
+      ? input.memoryResults.map((result, index) => `${index + 1}. ${result.text}`).join("\n")
+      : "No related memory found.";
+    const draftContext = input.draft
+      ? [
+          `Draft title: ${input.draft.title}`,
+          `Draft kind: ${input.draft.kind}`,
+          `Draft body: ${input.draft.body}`,
+          `Draft rationale: ${input.draft.rationale}`,
+        ].join("\n")
+      : "No review draft was created.";
+    const result = streamText({
+      abortSignal: AbortSignal.timeout(30_000),
+      experimental_transform: smoothStream({
+        chunking: "word",
+        delayInMs: 20,
+      }),
+      model: this.getModel(),
+      prompt: [
+        "Write the assistant reply for this private operating-loop chat.",
+        "Keep it concise, concrete, and grounded in the draft and memory context.",
+        "Do not claim external side effects were completed.",
+        `User: ${input.user.displayName} (${input.user.id})`,
+        `Message: ${input.message}`,
+        `Related memory:\n${memoryContext}`,
+        `Review draft:\n${draftContext}`,
+        `Fallback reply if nothing else is useful: ${input.fallbackReply}`,
+      ].join("\n\n"),
+      system: this.getSystemPrompt(),
+    });
+
+    return result.toTextStreamResponse({
+      headers: {
+        "cache-control": "no-cache",
+        "x-lares-conversation-id": input.conversationId,
+      },
+    });
   }
 
   async extractDailyNote(input: {

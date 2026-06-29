@@ -21,13 +21,17 @@ import {
   HomeDashboard,
   JourneyTimeline,
   LaresAppShell,
+  LaresChat,
+  LaresChatStatePreview,
   LoginCard,
   plainTextToRichTextDocument,
+  type LaresChatAttachment,
+  type LaresChatMessage,
   type RichTextDocument,
   Surface,
   WritingDrawer,
 } from "@lares/ui";
-import { apiClient } from "./api-client";
+import { apiClient, streamConversationMessage } from "./api-client";
 import { loginAuthMethodsForView } from "./login-preview";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
@@ -81,6 +85,16 @@ const settingsRoute = createRoute({
   path: "/settings",
   component: SettingsScreen,
 });
+const chatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/chat",
+  component: ChatScreen,
+});
+const chatStatesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/chat/states",
+  component: ChatStatesScreen,
+});
 
 const router = createRouter({
   routeTree: rootRoute.addChildren([
@@ -89,6 +103,8 @@ const router = createRouter({
     actionsRoute,
     insightsRoute,
     settingsRoute,
+    chatRoute,
+    chatStatesRoute,
   ]),
 });
 
@@ -170,6 +186,10 @@ function AppShell() {
           setAddOpen(false);
           setCaptureOpen(true);
         }}
+        onOpenChat={() => {
+          setAddOpen(false);
+          void navigate({ to: "/chat" });
+        }}
       />
       <WritingDrawer
         eyebrow="Today"
@@ -198,7 +218,7 @@ function AppShell() {
           startTransition(() => saveDailyNote.mutate(value));
         }}
       />
-      {addOpen || captureOpen ? null : (
+      {addOpen || captureOpen || pathname.startsWith("/chat") ? null : (
         <BottomNav
           active={
             pathname === "/actions"
@@ -216,6 +236,102 @@ function AppShell() {
         />
       )}
     </CaptureContext.Provider>
+  );
+}
+
+function ChatStatesScreen() {
+  return <LaresChatStatePreview />;
+}
+
+const chatMessageId = () => crypto.randomUUID();
+
+function ChatScreen() {
+  const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ReadonlyArray<LaresChatAttachment>>([]);
+  const [messages, setMessages] = useState<ReadonlyArray<LaresChatMessage>>([]);
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const sendStreamingMessage = async (message: string) => {
+    const assistantId = chatMessageId();
+    setSending(true);
+    setError("");
+    setMessages((current) => [
+      ...current,
+      { content: "", id: assistantId, role: "assistant", streaming: true },
+    ]);
+
+    try {
+      const stream = await streamConversationMessage({ conversationId: "default", message });
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let reply = "";
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- ReadableStream chunks are sequential.
+        const { done, value } = await reader.read();
+        if (done) break;
+        reply += decoder.decode(value, { stream: true });
+        setMessages((current) =>
+          current.map((item) => (item.id === assistantId ? { ...item, content: reply } : item)),
+        );
+      }
+      reply += decoder.decode();
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistantId ? { ...item, content: reply, streaming: false } : item,
+        ),
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+        queryClient.invalidateQueries({ queryKey: ["actions"] }),
+        queryClient.invalidateQueries({ queryKey: ["summaries"] }),
+      ]);
+    } catch {
+      setError("Could not reach Lares. Try again.");
+      setMessages((current) => current.filter((item) => item.id !== assistantId));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <LaresChat
+      attachments={attachments}
+      error={error}
+      input={input}
+      messages={messages}
+      sending={sending}
+      onAttachmentsAdd={(files) =>
+        setAttachments((current) => [
+          ...current,
+          ...files.map((file) => ({
+            id: chatMessageId(),
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          })),
+        ])
+      }
+      onAttachmentRemove={(id) =>
+        setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+      }
+      onInputChange={setInput}
+      onSubmit={() => {
+        const message = input.trim();
+        if (!message || sending) return;
+        setInput("");
+        setError("");
+        setMessages((current) => [
+          ...current,
+          {
+            content: message,
+            id: chatMessageId(),
+            role: "user",
+          },
+        ]);
+        void sendStreamingMessage(message);
+      }}
+    />
   );
 }
 
