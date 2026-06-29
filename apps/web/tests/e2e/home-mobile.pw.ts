@@ -149,7 +149,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
     .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
     .toBe("still-mounted");
   await expect(page.getByText(/AI analysis · (queued|running|completed)/)).toBeVisible();
-  await expect(page.getByText(/cloudflare-think · @cf\/moonshotai\/kimi-k2\.6/)).toBeVisible();
+  await expect(page.getByText(/cloudflare-think · @cf\/moonshotai\/kimi-k2\.7-code/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Latest" })).toBeVisible();
 
   await page.goto("/settings");
