@@ -9,7 +9,7 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/health", "/__test/*", "/__internal/*"],
+    "run_worker_first": ["/api/*", "/agents/*", "/health", "/__test/*", "/__internal/*"],
   },
   "observability": {
     "traces": {
@@ -26,7 +26,7 @@
     "APP_VERSION": "0.0.0",
     "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
     "LOG_HTTP_REQUESTS": "true",
-    "THINK_MODEL": "@cf/moonshotai/kimi-k2.6",
+    "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
   "ai": {
@@ -58,6 +58,10 @@
         "name": "USER_AGENT_SESSION",
         "class_name": "UserAgentSession",
       },
+      {
+        "name": "LoopIntakeThinkAgent",
+        "class_name": "LoopIntakeThinkAgent",
+      },
     ],
   },
   "workflows": [
@@ -71,6 +75,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["UserAgentSession"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["LoopIntakeThinkAgent"],
     },
   ],
 }
