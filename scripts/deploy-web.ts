@@ -13,7 +13,7 @@ const run = (
   command: string,
   options: { readonly cwd?: string; readonly env?: Record<string, string> } = {},
 ) => {
-  const result = Bun.spawnSync(["zsh", "-lc", command], {
+  const result = Bun.spawnSync(["bash", "-lc", command], {
     cwd: options.cwd ?? root,
     env: { ...process.env, ...options.env },
     stderr: "inherit",
@@ -26,7 +26,7 @@ const run = (
 };
 
 const output = (command: string) => {
-  const result = Bun.spawnSync(["zsh", "-lc", command], {
+  const result = Bun.spawnSync(["bash", "-lc", command], {
     cwd: root,
     stderr: "pipe",
     stdout: "pipe",
