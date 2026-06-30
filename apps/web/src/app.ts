@@ -722,6 +722,15 @@ export const apiRouter = api.router({
     }),
   },
   traces: {
+    agentRunsRecent: api.traces.agentRunsRecent.handler(async ({ context, input }) => {
+      const rows = await Effect.runPromise(
+        listRecentAgentAndEvalRuns(context.traceDb, input.limit),
+      );
+      return {
+        agentRuns: rows.agentRuns.map(toTraceAgentRunSummary),
+        evalRuns: rows.evalRuns.map(toTraceEvalRunSummary),
+      };
+    }),
     recent: api.traces.recent.handler(async ({ context, input }) => {
       const rows = await Effect.runPromise(
         listRecentTraceSpans(context.traceDb, input.limit ?? 20),
@@ -902,6 +911,30 @@ interface TraceSpanRow {
   readonly path: string | null;
 }
 
+interface TraceAgentRunRow {
+  readonly id: string;
+  readonly trace_id: string | null;
+  readonly user_id: string | null;
+  readonly agent_name: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly completed_at: string | null;
+  readonly summary: string | null;
+  readonly artifact_key: string | null;
+  readonly created_at: string;
+}
+
+interface TraceEvalRunRow {
+  readonly id: string;
+  readonly suite_name: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly completed_at: string | null;
+  readonly summary: string | null;
+  readonly artifact_key: string | null;
+  readonly created_at: string;
+}
+
 function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
   if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
 
@@ -936,6 +969,69 @@ function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
   }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
 }
 
+function listRecentAgentAndEvalRuns(traceDb: D1Database | undefined, limit: number) {
+  if (typeof traceDb?.prepare !== "function")
+    return Effect.succeed({ agentRuns: [], evalRuns: [] });
+
+  return Effect.tryPromise({
+    try: async () => {
+      const [agentRuns, evalRuns] = await Promise.all([
+        traceDb
+          .prepare(
+            `SELECT
+              id,
+              trace_id,
+              user_id,
+              agent_name,
+              status,
+              started_at,
+              completed_at,
+              summary,
+              artifact_key,
+              created_at
+            FROM agent_runs
+            ORDER BY started_at DESC
+            LIMIT ?`,
+          )
+          .bind(limit)
+          .all<TraceAgentRunRow>(),
+        traceDb
+          .prepare(
+            `SELECT
+              id,
+              suite_name,
+              status,
+              started_at,
+              completed_at,
+              summary,
+              artifact_key,
+              created_at
+            FROM eval_runs
+            ORDER BY started_at DESC
+            LIMIT ?`,
+          )
+          .bind(limit)
+          .all<TraceEvalRunRow>(),
+      ]);
+
+      return {
+        agentRuns: agentRuns.results ?? [],
+        evalRuns: evalRuns.results ?? [],
+      };
+    },
+    catch: (cause) => cause,
+  }).pipe(Effect.withSpan("TraceRuns.listRecent", { attributes: { limit } }));
+}
+
+function parseSummary(value: string | null) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function toTraceSpanSummary(row: TraceSpanRow) {
   return {
     id: row.id,
@@ -950,6 +1046,34 @@ function toTraceSpanSummary(row: TraceSpanRow) {
     routeName: row.route_name,
     method: row.method,
     path: row.path,
+  };
+}
+
+function toTraceAgentRunSummary(row: TraceAgentRunRow) {
+  return {
+    id: row.id,
+    traceId: row.trace_id,
+    userId: row.user_id,
+    agentName: row.agent_name,
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    summary: parseSummary(row.summary),
+    artifactKey: row.artifact_key,
+    createdAt: row.created_at,
+  };
+}
+
+function toTraceEvalRunSummary(row: TraceEvalRunRow) {
+  return {
+    id: row.id,
+    suiteName: row.suite_name,
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    summary: parseSummary(row.summary),
+    artifactKey: row.artifact_key,
+    createdAt: row.created_at,
   };
 }
 

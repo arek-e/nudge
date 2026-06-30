@@ -311,6 +311,30 @@ export const traceSpanSummarySchema = z.object({
   path: z.string().nullable(),
 });
 
+export const traceAgentRunSummarySchema = z.object({
+  id: z.string(),
+  traceId: z.string().nullable(),
+  userId: z.string().nullable(),
+  agentName: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+  summary: z.unknown().nullable(),
+  artifactKey: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+export const traceEvalRunSummarySchema = z.object({
+  id: z.string(),
+  suiteName: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+  summary: z.unknown().nullable(),
+  artifactKey: z.string().nullable(),
+  createdAt: z.string(),
+});
+
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
@@ -653,6 +677,15 @@ export const apiContract = {
       .output(synthesisResponseSchema),
   },
   traces: {
+    agentRunsRecent: oc
+      .route({ method: "GET", path: "/traces/agent-runs/recent" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
+      .output(
+        z.object({
+          agentRuns: z.array(traceAgentRunSummarySchema),
+          evalRuns: z.array(traceEvalRunSummarySchema),
+        }),
+      ),
     recent: oc
       .route({ method: "GET", path: "/traces/recent" })
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))

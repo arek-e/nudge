@@ -8,6 +8,7 @@ Useful commands:
 bun run logs:tail
 bun run logs:tail:pretty
 bun run traces:recent
+curl http://localhost:8787/api/traces/agent-runs/recent
 ```
 
 The JSON tail is the agent-readable path for now. It lets an implementation agent inspect request ids, route names, status, duration, outcome, deployment environment, version, and safe error fields while debugging or improving the app.
@@ -28,4 +29,6 @@ Current limitations:
 
 Internal Worker eval runs are available at `POST /__internal/evals/agent` with `x-lares-eval-secret` set to the internal agent secret. The route passes the Worker D1 and R2 bindings into `createEvalTraceSink`.
 
-Next observability step: add a read model for recent agent and eval runs once the UI needs it.
+Recent agent and eval run summaries are available at `GET /api/traces/agent-runs/recent`.
+
+Next observability step: add UI for recent agent and eval runs once in-product inspection matters.

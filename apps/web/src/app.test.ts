@@ -688,6 +688,96 @@ describe("web app", () => {
     });
   });
 
+  test("GET /api/traces/agent-runs/recent lists safe agent and eval run summaries", async () => {
+    const queries: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          all: async () => {
+            queries.push({ sql, values });
+            if (sql.includes("FROM agent_runs")) {
+              return {
+                results: [
+                  {
+                    id: "agent-run-1",
+                    trace_id: "trace-1",
+                    user_id: "dev-user",
+                    agent_name: "conversation-agent",
+                    status: "completed",
+                    started_at: "2026-06-30T21:00:00.000Z",
+                    completed_at: "2026-06-30T21:00:01.000Z",
+                    summary: '{"toolCallCount":4}',
+                    artifact_key: "agent-runs/conversation/agent-run-1.json",
+                    created_at: "2026-06-30T21:00:01.000Z",
+                  },
+                ],
+              };
+            }
+            if (sql.includes("FROM eval_runs")) {
+              return {
+                results: [
+                  {
+                    id: "eval-run-1",
+                    suite_name: "agent-workflow",
+                    status: "passed",
+                    started_at: "2026-06-30T21:01:00.000Z",
+                    completed_at: "2026-06-30T21:01:02.000Z",
+                    summary: '{"score":1}',
+                    artifact_key: "evals/cloudflare/eval-run-1.jsonl",
+                    created_at: "2026-06-30T21:01:02.000Z",
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          run: async () => ({ success: true }),
+        }),
+      }),
+    } as D1Database;
+    const app = createApp();
+
+    const response = await app.request(
+      "/api/traces/agent-runs/recent?limit=5",
+      {},
+      {
+        ...env,
+        DB: traceDb,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(queries.map((query) => query.values)).toEqual([[5], [5]]);
+    expect(await response.json()).toEqual({
+      agentRuns: [
+        {
+          id: "agent-run-1",
+          traceId: "trace-1",
+          userId: "dev-user",
+          agentName: "conversation-agent",
+          status: "completed",
+          startedAt: "2026-06-30T21:00:00.000Z",
+          completedAt: "2026-06-30T21:00:01.000Z",
+          summary: { toolCallCount: 4 },
+          artifactKey: "agent-runs/conversation/agent-run-1.json",
+          createdAt: "2026-06-30T21:00:01.000Z",
+        },
+      ],
+      evalRuns: [
+        {
+          id: "eval-run-1",
+          suiteName: "agent-workflow",
+          status: "passed",
+          startedAt: "2026-06-30T21:01:00.000Z",
+          completedAt: "2026-06-30T21:01:02.000Z",
+          summary: { score: 1 },
+          artifactKey: "evals/cloudflare/eval-run-1.jsonl",
+          createdAt: "2026-06-30T21:01:02.000Z",
+        },
+      ],
+    });
+  });
+
   test("GET /api/conversations/:conversationId/tools/list-recent-signals forwards to the agent session", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
