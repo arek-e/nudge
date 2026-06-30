@@ -22,7 +22,6 @@ import {
   JourneyTimeline,
   LaresAppShell,
   LaresChat,
-  LaresChatStatePreview,
   LoginCard,
   plainTextToRichTextDocument,
   type LaresChatAttachment,
@@ -90,11 +89,6 @@ const chatRoute = createRoute({
   path: "/chat",
   component: ChatScreen,
 });
-const chatStatesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/chat/states",
-  component: ChatStatesScreen,
-});
 
 const router = createRouter({
   routeTree: rootRoute.addChildren([
@@ -104,7 +98,6 @@ const router = createRouter({
     insightsRoute,
     settingsRoute,
     chatRoute,
-    chatStatesRoute,
   ]),
 });
 
@@ -237,10 +230,6 @@ function AppShell() {
       )}
     </CaptureContext.Provider>
   );
-}
-
-function ChatStatesScreen() {
-  return <LaresChatStatePreview />;
 }
 
 const chatMessageId = () => crypto.randomUUID();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LaresChat, LaresChatStatePreview } from "@lares/ui";
+import { LaresChat } from "@lares/ui";
 
 describe("LaresChat", () => {
   test("renders a shadcn-style conversation with draft context and composer controls", () => {
@@ -137,38 +137,6 @@ describe("LaresChat", () => {
     expect(html).toContain("4 KB");
     expect(html).toContain('aria-label="Remove diagram.png"');
     expect(html).toContain('aria-label="Remove brief.pdf"');
-  });
-
-  test("renders a development state lab for the chat UI states", () => {
-    const html = renderToStaticMarkup(<LaresChatStatePreview />);
-
-    expect(html).toContain("Chat state lab");
-    expect(html).toContain("Empty");
-    expect(html).toContain("Thinking");
-    expect(html).toContain("Streaming");
-    expect(html).toContain("Attachments");
-    expect(html).toContain("Tool call");
-    expect(html).toContain("Drafted");
-    expect(html).toContain("Error");
-  });
-
-  test("renders attachment preview state with pending files", () => {
-    const html = renderToStaticMarkup(<LaresChatStatePreview initialState="attachments" />);
-
-    expect(html).toContain('data-slot="chat-attachment-list"');
-    expect(html).toContain("2 files attached");
-    expect(html).toContain("diagram.png");
-    expect(html).toContain("brief.pdf");
-    expect(html).toContain('aria-label="Remove diagram.png"');
-    expect(html).toContain('aria-label="Remove brief.pdf"');
-  });
-
-  test("simulates partial streaming text in the development state lab", () => {
-    const html = renderToStaticMarkup(<LaresChatStatePreview initialState="streaming" />);
-
-    expect(html).toContain('data-slot="streaming-simulator"');
-    expect(html).toContain("draft");
-    expect(html).not.toContain("while the answer is still growing.");
   });
 
   test("uses a sequenced dot-matrix loader for active thinking state", () => {
