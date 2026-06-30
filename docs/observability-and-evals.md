@@ -16,15 +16,16 @@ Trace/event persistence uses Wrangler-managed infrastructure:
 
 - D1 table `trace_events` stores indexed safe wide-event metadata and the redacted JSON payload.
 - D1 table `trace_spans` stores recent OpenTelemetry-shaped request spans for `/api/traces/recent`.
-- D1 tables `agent_runs`, `eval_runs`, and `eval_case_results` are provisioned for upcoming agent/eval loops.
+- D1 tables `agent_runs`, `eval_runs`, and `eval_case_results` store safe agent/eval run summaries.
 - D1 tables `daily_agent_runs` and `daily_agent_run_outputs` track note-analysis runs and generated outputs.
 - R2 bucket `lares-trace-artifacts` is bound as `TRACE_ARTIFACTS` for larger redacted artifacts.
 
 Current limitations:
 
 - Agent reasoning, prompts, tool traces, and model outputs are only captured as safe summaries.
+- Daily note analysis writes agent run trace summaries; conversation agent replies are not yet written to `agent_runs`.
 - Evals run a small deterministic golden-case suite through `bun run check`, CI, and deploy gating.
 
-Next observability step: add an agent trace sink for real agent loops. The trace sink should store safe metadata, tool call summaries, eval case ids, outcome labels, and redacted artifacts. It must not store raw personal content, private prompts, calendar text, relationship memory content, or unredacted consent grants.
+Next observability step: wire conversation agent replies into the agent trace sink.
 
-Next evals step: add a redacted artifact sink for agent workflow eval runs.
+Next evals step: run evals from a Cloudflare-bound runner that passes `createEvalTraceSink` D1 and R2 bindings.

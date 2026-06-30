@@ -10,6 +10,7 @@ import {
   isTransientBackpressureError,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
+  persistAgentTraceRun,
   pruneTraceCache,
   retryAfterSecondsFor,
   safeErrorFields,
@@ -280,6 +281,74 @@ describe("observability", () => {
       expect.stringContaining("DELETE FROM trace_spans"),
       expect.stringContaining("DELETE FROM trace_events"),
       expect.stringContaining("DELETE FROM trace_events"),
+    ]);
+  });
+
+  test("persists real agent run metadata with redacted artifacts", async () => {
+    const statements: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
+    const objects: Array<{ readonly body: string; readonly key: string }> = [];
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            statements.push({ sql, values });
+            return { success: true };
+          },
+        }),
+      }),
+    };
+    const artifactBucket = {
+      put: async (key: string, body: string) => {
+        objects.push({ body, key });
+      },
+    };
+
+    await persistAgentTraceRun(
+      {
+        artifactBucket,
+        artifactPrefix: "agent-runs/test",
+        db,
+        now: () => "2026-06-30T20:40:00.000Z",
+      },
+      {
+        agentName: "daily-note-analysis",
+        completedAt: "2026-06-30T20:40:00.000Z",
+        evalCaseIds: ["okf-reviewable-write-policy"],
+        id: "agent-run-1",
+        outcomeLabels: ["completed", "items:2"],
+        startedAt: "2026-06-30T20:39:55.000Z",
+        status: "completed",
+        toolCalls: [
+          {
+            durationMs: 1200,
+            resultCount: 2,
+            status: "completed",
+            tool: "daily-note-analysis-extract-with-think",
+          },
+        ],
+        traceId: "trace-1",
+        userId: "user-1",
+      },
+    );
+
+    expect(objects).toEqual([
+      {
+        key: "agent-runs/test/agent-run-1.json",
+        body: expect.stringContaining("daily-note-analysis-extract-with-think"),
+      },
+    ]);
+    expect(statements[0]!.sql).toContain("INSERT OR REPLACE INTO agent_runs");
+    expect(statements[0]!.values).toEqual([
+      "agent-run-1",
+      "trace-1",
+      "user-1",
+      "daily-note-analysis",
+      "completed",
+      "2026-06-30T20:39:55.000Z",
+      "2026-06-30T20:40:00.000Z",
+      expect.stringContaining('"toolCallCount":1'),
+      "agent-runs/test/agent-run-1.json",
+      "2026-06-30T20:40:00.000Z",
     ]);
   });
 });

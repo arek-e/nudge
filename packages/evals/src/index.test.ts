@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   agentEvalCases,
   createCodexCliJudge,
+  createEvalTraceSink,
   createHttpAgentRunner,
   renderCodexEvalReport,
   runAgentEvalSuite,
@@ -145,6 +146,59 @@ describe("agent evals", () => {
         expect.objectContaining({ candidateId: "current", type: "candidate_summary" }),
       ]),
     );
+  });
+
+  test("persists eval run metadata with redacted artifacts", async () => {
+    const statements: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
+    const objects: Array<{ readonly body: string; readonly key: string }> = [];
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            statements.push({ sql, values });
+            return { success: true };
+          },
+        }),
+      }),
+    };
+    const artifactBucket = {
+      put: async (key: string, body: string) => {
+        objects.push({ body, key });
+      },
+    };
+
+    await runAgentEvalSuite({
+      artifactSink: createEvalTraceSink({
+        artifactBucket,
+        artifactPrefix: "evals/test",
+        db,
+        now: () => "2026-06-30T20:30:00.000Z",
+        runId: "eval-run-1",
+      }),
+      cases: [agentEvalCases[0]!],
+    });
+
+    expect(objects).toEqual([
+      {
+        key: "evals/test/eval-run-1.jsonl",
+        body: expect.stringContaining('"type":"agent_result"'),
+      },
+    ]);
+    expect(objects[0]!.body).not.toContain("Follow up with Maya");
+    expect(statements[0]!.sql).toContain("INSERT INTO eval_runs");
+    expect(
+      statements.filter((statement) => statement.sql.includes("INSERT INTO eval_case_results")),
+    ).toHaveLength(3);
+    expect(statements[0]!.values).toEqual([
+      "eval-run-1",
+      "agent-workflow",
+      "passed",
+      "2026-06-30T20:30:00.000Z",
+      "2026-06-30T20:30:00.000Z",
+      expect.stringContaining('"score":1'),
+      "evals/test/eval-run-1.jsonl",
+      "2026-06-30T20:30:00.000Z",
+    ]);
   });
 
   test("can run eval cases against a live HTTP agent endpoint", async () => {

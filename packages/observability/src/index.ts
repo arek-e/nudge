@@ -74,6 +74,37 @@ export interface TraceCacheDb {
   };
 }
 
+export interface AgentTraceArtifactBucket {
+  readonly put: (key: string, body: string) => Promise<unknown>;
+}
+
+export interface AgentTraceRunToolCallSummary {
+  readonly durationMs?: number;
+  readonly resultCount?: number;
+  readonly status: "completed" | "failed" | "skipped";
+  readonly tool: string;
+}
+
+export interface AgentTraceRunInput {
+  readonly agentName: string;
+  readonly completedAt?: string | null;
+  readonly evalCaseIds?: ReadonlyArray<string>;
+  readonly id?: string;
+  readonly outcomeLabels?: ReadonlyArray<string>;
+  readonly startedAt: string;
+  readonly status: "queued" | "running" | "completed" | "failed";
+  readonly toolCalls?: ReadonlyArray<AgentTraceRunToolCallSummary>;
+  readonly traceId?: string | null;
+  readonly userId?: string | null;
+}
+
+export interface AgentTraceSinkConfig {
+  readonly artifactBucket?: AgentTraceArtifactBucket;
+  readonly artifactPrefix?: string;
+  readonly db: TraceCacheDb;
+  readonly now?: () => string;
+}
+
 const randomHex = (bytes: number) => {
   const values = new Uint8Array(bytes);
   crypto.getRandomValues(values);
@@ -309,6 +340,71 @@ export const pruneTraceCache = (db: TraceCacheDb) =>
       "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
     );
   });
+
+export const persistAgentTraceRun = async (
+  config: AgentTraceSinkConfig,
+  input: AgentTraceRunInput,
+) => {
+  const id = input.id ?? crypto.randomUUID();
+  const now = config.now?.() ?? new Date().toISOString();
+  const artifactKey = config.artifactBucket
+    ? `${config.artifactPrefix ?? "agent-runs"}/${id}.json`
+    : null;
+  const toolCalls = input.toolCalls ?? [];
+  const evalCaseIds = input.evalCaseIds ?? [];
+  const outcomeLabels = input.outcomeLabels ?? [];
+  const summary = JSON.stringify({
+    evalCaseIds,
+    outcomeLabels,
+    status: input.status,
+    toolCallCount: toolCalls.length,
+  });
+
+  if (artifactKey && config.artifactBucket) {
+    await config.artifactBucket.put(
+      artifactKey,
+      JSON.stringify({
+        agentName: input.agentName,
+        completedAt: input.completedAt ?? null,
+        evalCaseIds,
+        outcomeLabels,
+        startedAt: input.startedAt,
+        status: input.status,
+        toolCalls,
+        traceId: input.traceId ?? null,
+      }),
+    );
+  }
+
+  await config.db
+    .prepare(
+      `INSERT OR REPLACE INTO agent_runs (
+        id,
+        trace_id,
+        user_id,
+        agent_name,
+        status,
+        started_at,
+        completed_at,
+        summary,
+        artifact_key,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      input.traceId ?? null,
+      input.userId ?? null,
+      input.agentName,
+      input.status,
+      input.startedAt,
+      input.completedAt ?? null,
+      summary,
+      artifactKey,
+      now,
+    )
+    .run();
+};
 
 const runTraceCacheRow = (db: TraceCacheDb, row: SqlInsertRow) => {
   return Effect.tryPromise({

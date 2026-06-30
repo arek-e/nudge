@@ -153,6 +153,27 @@ export interface AgentEvalSuiteOptions {
   readonly judge?: AgentJudge;
 }
 
+export interface EvalTraceDb {
+  readonly prepare: (sql: string) => {
+    readonly bind: (...values: ReadonlyArray<unknown>) => {
+      readonly run: () => Promise<unknown>;
+    };
+  };
+}
+
+export interface EvalTraceArtifactBucket {
+  readonly put: (key: string, body: string) => Promise<unknown>;
+}
+
+export interface EvalTraceSinkConfig {
+  readonly artifactBucket?: EvalTraceArtifactBucket;
+  readonly artifactPrefix?: string;
+  readonly db: EvalTraceDb;
+  readonly now?: () => string;
+  readonly runId?: string;
+  readonly suiteName?: string;
+}
+
 export const agentEvalCases: ReadonlyArray<AgentEvalCase> = [
   {
     id: "journal-follow-up-maya-travel",
@@ -416,6 +437,181 @@ const artifactsFor = (report: AgentEvalReport): ReadonlyArray<AgentEvalArtifact>
     type: "candidate_summary" as const,
   })),
 ];
+
+const caseArtifacts = (records: ReadonlyArray<AgentEvalArtifact>) =>
+  records.filter(
+    (
+      record,
+    ): record is Extract<
+      AgentEvalArtifact,
+      { readonly type: "agent_result" | "guidance_result" | "judge_result" }
+    > => record.type !== "candidate_summary",
+  );
+
+const averageScore = (records: ReadonlyArray<AgentEvalArtifact>) =>
+  average(records.map((record) => record.result.score));
+
+const notesFor = (record: ReturnType<typeof caseArtifacts>[number]) => {
+  if ("notes" in record.result) return record.result.notes;
+  return record.result.improvements.map((improvement) => `improvement: ${improvement}`);
+};
+
+const redactedArtifact = (record: AgentEvalArtifact) => {
+  if (record.type === "agent_result") {
+    return {
+      type: record.type,
+      candidateId: record.candidateId,
+      caseId: record.caseId,
+      agent: record.result.agent,
+      notes: record.result.notes,
+      output: {
+        proposalBodyLength: record.result.output.proposalBody.length,
+        proposalKind: record.result.output.proposalKind,
+        proposalTitleLength: record.result.output.proposalTitle.length,
+        synthesisSummaryLength: record.result.output.synthesisSummary.length,
+      },
+      passed: record.result.passed,
+      score: record.result.score,
+    };
+  }
+
+  if (record.type === "guidance_result") {
+    return {
+      type: record.type,
+      candidateId: record.candidateId,
+      caseId: record.caseId,
+      notes: record.result.notes,
+      output: record.result.output,
+      passed: record.result.passed,
+      score: record.result.score,
+    };
+  }
+
+  if (record.type === "judge_result") {
+    return {
+      type: record.type,
+      candidateId: record.candidateId,
+      caseId: record.caseId,
+      improvementCount: record.result.improvements.length,
+      judge: record.result.judge,
+      passed: record.result.passed,
+      rationaleLength: record.result.rationale.length,
+      score: record.result.score,
+    };
+  }
+
+  return {
+    type: record.type,
+    candidateId: record.candidateId,
+    result: record.result,
+  };
+};
+
+const insertEvalRun = async (config: {
+  readonly artifactKey: string | null;
+  readonly db: EvalTraceDb;
+  readonly now: string;
+  readonly records: ReadonlyArray<AgentEvalArtifact>;
+  readonly runId: string;
+  readonly suiteName: string;
+}) => {
+  const score = averageScore(config.records);
+  const passed = config.records.every((record) => record.result.passed);
+  const summary = JSON.stringify({
+    artifactCount: config.records.length,
+    caseResultCount: caseArtifacts(config.records).length,
+    passed,
+    score,
+  });
+
+  await config.db
+    .prepare(
+      `INSERT INTO eval_runs (
+        id,
+        suite_name,
+        status,
+        started_at,
+        completed_at,
+        summary,
+        artifact_key,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      config.runId,
+      config.suiteName,
+      passed ? "passed" : "failed",
+      config.now,
+      config.now,
+      summary,
+      config.artifactKey,
+      config.now,
+    )
+    .run();
+};
+
+const insertEvalCaseResult = async (config: {
+  readonly artifactKey: string | null;
+  readonly db: EvalTraceDb;
+  readonly now: string;
+  readonly record: ReturnType<typeof caseArtifacts>[number];
+  readonly runId: string;
+}) => {
+  await config.db
+    .prepare(
+      `INSERT INTO eval_case_results (
+        id,
+        eval_run_id,
+        case_id,
+        passed,
+        score,
+        notes,
+        artifact_key,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      `${config.runId}:${config.record.type}:${config.record.candidateId}:${config.record.caseId}`,
+      config.runId,
+      config.record.caseId,
+      config.record.result.passed ? 1 : 0,
+      config.record.result.score,
+      JSON.stringify(notesFor(config.record)),
+      config.artifactKey,
+      config.now,
+    )
+    .run();
+};
+
+export const createEvalTraceSink =
+  (config: EvalTraceSinkConfig) => async (records: ReadonlyArray<AgentEvalArtifact>) => {
+    const now = config.now?.() ?? new Date().toISOString();
+    const runId = config.runId ?? crypto.randomUUID();
+    const artifactKey = config.artifactBucket
+      ? `${config.artifactPrefix ?? "evals"}/${runId}.jsonl`
+      : null;
+
+    if (artifactKey && config.artifactBucket) {
+      await config.artifactBucket.put(
+        artifactKey,
+        `${records.map((record) => JSON.stringify(redactedArtifact(record))).join("\n")}\n`,
+      );
+    }
+
+    await insertEvalRun({
+      artifactKey,
+      db: config.db,
+      now,
+      records,
+      runId,
+      suiteName: config.suiteName ?? "agent-workflow",
+    });
+    await Promise.all(
+      caseArtifacts(records).map((record) =>
+        insertEvalCaseResult({ artifactKey, db: config.db, now, record, runId }),
+      ),
+    );
+  };
 
 export const runAgentEvalSuite = async (
   input: ReadonlyArray<AgentEvalCase> | AgentEvalSuiteOptions = {},

@@ -15,6 +15,11 @@ import {
   workflowStepName,
   type WorkflowVersion,
 } from "@lares/effect-services";
+import {
+  persistAgentTraceRun,
+  safeErrorFields,
+  type AgentTraceRunInput,
+} from "@lares/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
@@ -125,6 +130,30 @@ const dailySummaryFrom = (input: {
     ? input.items.map((item) => `${item.kind}: ${item.title}`).join("; ")
     : "No extracted actions.";
   return [`Actions: ${actionText}`, `Context: ${input.noteText.slice(0, 500)}`].join("\n");
+};
+
+const persistDailyNoteAgentTrace = async (env: Env, input: AgentTraceRunInput) => {
+  if (typeof env.DB?.prepare !== "function") return;
+  try {
+    await persistAgentTraceRun(
+      {
+        artifactBucket: env.TRACE_ARTIFACTS,
+        artifactPrefix: "agent-runs/daily-note-analysis",
+        db: env.DB,
+      },
+      input,
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        agentName: input.agentName,
+        event: "agent_trace_persist_failed",
+        logKind: "wide_event",
+        runId: input.id,
+        ...safeErrorFields(error),
+      }),
+    );
+  }
 };
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
@@ -667,6 +696,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
     workflowVersion: WorkflowVersion,
     step: WorkflowStep,
   ) {
+    const traceStartedAt = new Date().toISOString();
     try {
       const extraction = await step.do(
         workflowStepName(workflowVersion, "daily-note-analysis-extract-with-think"),
@@ -817,6 +847,27 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               layer,
             ),
           );
+          await persistDailyNoteAgentTrace(this.env, {
+            agentName: "daily-note-analysis",
+            completedAt: new Date().toISOString(),
+            id: input.runId,
+            outcomeLabels: ["completed", `items:${extractedItems.length}`, "summary:day-week"],
+            startedAt: traceStartedAt,
+            status: "completed",
+            toolCalls: [
+              {
+                resultCount: extraction.items.length,
+                status: "completed",
+                tool: "daily-note-analysis-extract-with-think",
+              },
+              {
+                resultCount: extractedItems.length + 2,
+                status: "completed",
+                tool: "daily-note-analysis-persist-results",
+              },
+            ],
+            userId: input.userId,
+          });
           console.info(
             JSON.stringify({
               event: "daily_note_ai_extract_completed",
@@ -849,6 +900,21 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               Db.layerD1(this.env.DB),
             ),
           );
+          await persistDailyNoteAgentTrace(this.env, {
+            agentName: "daily-note-analysis",
+            completedAt: new Date().toISOString(),
+            id: input.runId,
+            outcomeLabels: ["failed", safeError.name],
+            startedAt: traceStartedAt,
+            status: "failed",
+            toolCalls: [
+              {
+                status: "failed",
+                tool: "daily-note-analysis",
+              },
+            ],
+            userId: input.userId,
+          });
           console.warn(
             JSON.stringify({
               event: "daily_note_ai_extract_failed",
