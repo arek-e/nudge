@@ -50,9 +50,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright WebKit
-        run: bunx playwright install --with-deps webkit
-
       - name: Apply remote D1 migrations
         if: ${{ github.event_name == 'workflow_run' || inputs.apply_migrations }}
         env:

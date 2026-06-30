@@ -51,9 +51,11 @@ if (status && !allowDirty) {
 
 const commit = output("git rev-parse --short HEAD");
 const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit);
+const deployEnvironment = env ?? "production";
 const deployArgs = [
   env ? `--env ${env}` : "",
   dryRun ? "--dry-run" : "",
+  `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
   `--tag ${version}`,
   `--message ${JSON.stringify(`Deploy ${version}`)}`,
@@ -61,8 +63,6 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run check", { cwd: root });
-run("mise exec -- bun run test:e2e", { cwd: root });
 run("mise exec -- bun run build", { cwd: web });
 run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 

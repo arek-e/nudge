@@ -536,6 +536,18 @@ describe("web app", () => {
     });
   });
 
+  test("GET /api/version/ reports service version", async () => {
+    const app = createApp();
+    const response = await app.request("/api/version/", {}, env);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      service: "lares-web",
+      version: "test-version",
+    });
+  });
+
   test("GET /api/traces/recent lists safe trace span summaries", async () => {
     const rows = [
       {

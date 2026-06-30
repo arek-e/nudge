@@ -3,7 +3,7 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { z } from "zod";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type Handler } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type AgentRunRecord, type DbService } from "@lares/db";
 import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
@@ -912,13 +912,16 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use("*", requestObservability());
   app.use("*", serverTiming());
 
-  app.get("/api/version", (c) => {
+  const versionHandler: Handler<ObservabilityHonoEnv> = (c) => {
     addWideEventFields(c, { routeName: "api.version" });
     return c.json({
       service: "lares-web",
       version: c.env.APP_VERSION ?? "0.0.0",
     });
-  });
+  };
+
+  app.get("/api/version", versionHandler);
+  app.get("/api/version/", versionHandler);
 
   app.get("/manifest.webmanifest", (c) => {
     addWideEventFields(c, { routeName: "manifest" });
