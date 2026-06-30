@@ -6,7 +6,15 @@ import { z } from "zod";
 import { Hono, type Context } from "hono";
 import { Effect, type Layer } from "effect";
 import { Db, type AgentRunRecord, type DbService } from "@lares/db";
-import { AuthService, MemoryIndex, PrimitiveWorkflows } from "@lares/effect-services";
+import {
+  AuthService,
+  buildOkfProjection,
+  listOkfDirectory,
+  MemoryIndex,
+  PrimitiveWorkflows,
+  readOkfFile,
+  searchOkfFiles,
+} from "@lares/effect-services";
 import type { Env } from "./env";
 import {
   apiContract,
@@ -21,6 +29,7 @@ import {
   resolveBetterAuthSession,
   type AuthSessionResolver,
 } from "./auth";
+import { handleLaresMcpRequest } from "./mcp";
 import {
   addWideEventFields,
   evlogWideEvents,
@@ -30,6 +39,7 @@ import {
   runWithRequestSpan,
   serverTiming,
 } from "./observability";
+import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 
 type AppDbLayer = Layer.Layer<Db>;
 
@@ -69,6 +79,11 @@ function readErrorMessage(error: unknown) {
   return "Authentication failed";
 }
 
+function readSandboxSmokeError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return "OKF sandbox smoke failed";
+}
+
 interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
@@ -76,6 +91,7 @@ interface ApiContext {
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
   readonly googleAuthConfigured: boolean;
+  readonly getOkfSandbox: () => Promise<OkfSandbox | null>;
   readonly recordSpan: <A>(
     name: string,
     input: {
@@ -105,6 +121,48 @@ interface ApiContext {
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
   readonly dbLayer?: AppDbLayer;
+  readonly okfSandboxFactory?: (input: {
+    readonly env: Env;
+    readonly user: { readonly displayName: string; readonly id: string };
+  }) => Promise<OkfSandbox | null> | OkfSandbox | null;
+}
+
+async function defaultOkfSandboxFactory(input: {
+  readonly env: Env;
+  readonly user: { readonly displayName: string; readonly id: string };
+}) {
+  if (!input.env.OKF_SANDBOX) return null;
+  const { getSandbox } = await import("@cloudflare/sandbox");
+  const sandbox = getSandbox(
+    input.env.OKF_SANDBOX as Parameters<typeof getSandbox>[0],
+    `okf-${input.user.id}`,
+  );
+  return {
+    ...(input.env.OKF_FILES
+      ? {
+          deletePrefix: (prefix: string) => deleteR2Prefix(input.env.OKF_FILES!, prefix),
+          mountBucket: (bucket, mountPath, options) =>
+            sandbox.mountBucket(bucket, mountPath, {
+              ...options,
+              ...(input.env.ENVIRONMENT === "local" ? { localBucket: true as const } : {}),
+            }),
+          putObject: (key: string, content: string) =>
+            input.env.OKF_FILES!.put(key, content, {
+              httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+            }),
+        }
+      : {}),
+    exec: (command, options) => sandbox.exec(command, options),
+    mkdir: (path, options) => sandbox.mkdir(path, options),
+    writeFile: (path, content) => sandbox.writeFile(path, content),
+  } satisfies OkfSandbox;
+}
+
+async function deleteR2Prefix(bucket: R2Bucket, prefix: string, cursor?: string): Promise<void> {
+  const page = await bucket.list(cursor ? { cursor, prefix } : { prefix });
+  const keys = page.objects.map((object) => object.key);
+  if (keys.length > 0) await bucket.delete(keys);
+  if (page.truncated) await deleteR2Prefix(bucket, prefix, page.cursor);
 }
 
 const api = implement(apiContract).$context<ApiContext>();
@@ -280,6 +338,55 @@ export const apiRouter = api.router({
       })),
     };
   }),
+  okf: {
+    list: api.okf.list.handler(async ({ context, input }) => {
+      const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+      const projection = buildOkfProjection(exported);
+      return { entries: listOkfDirectory(projection, input.path), path: input.path };
+    }),
+    readFile: api.okf.readFile.handler(async ({ context, input }) => {
+      const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+      const projection = buildOkfProjection(exported);
+      return { content: readOkfFile(projection, input.path), path: input.path };
+    }),
+    search: api.okf.search.handler(async ({ context, input }) => {
+      const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+      const projection = buildOkfProjection(exported);
+      return { results: [...searchOkfFiles(projection, input.query, input.limit)] };
+    }),
+    sandboxSmoke: api.okf.sandboxSmoke.handler(async ({ context }) => {
+      const sandbox = await context.getOkfSandbox();
+      if (!sandbox) {
+        return {
+          available: false,
+          exitCode: null,
+          fileCount: 0,
+          root: "/workspace/okf",
+          stderr: "OKF sandbox is not configured",
+          stdout: "",
+          success: false,
+        };
+      }
+      const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+      const projection = buildOkfProjection(exported);
+      const root = "/workspace/okf";
+      const smoke = await smokeTestOkfProjection(sandbox, projection).catch((error: unknown) => ({
+        exitCode: null,
+        stderr: readSandboxSmokeError(error),
+        stdout: "",
+        success: false,
+      }));
+      return {
+        available: true,
+        exitCode: smoke.exitCode,
+        fileCount: projection.files.size,
+        root,
+        stderr: smoke.stderr,
+        stdout: smoke.stdout,
+        success: smoke.success,
+      };
+    }),
+  },
   events: {
     append: api.events.append.handler(async ({ context, input }) => {
       return runWorkflow(
@@ -317,6 +424,7 @@ export const apiRouter = api.router({
       return { document };
     }),
     save: api.journal.save.handler(async ({ context, input }) => {
+      await Effect.runPromise(context.db.ensureUser(context.user));
       const result = await Effect.runPromise(
         context.db.upsertJournalDocument({
           bodyText: input.bodyText,
@@ -865,6 +973,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<ObservabilityHonoEnv>();
   const apiHandler = makeApiHandler();
   const sharedDb = options.dbLayer ? resolveDb(options.dbLayer) : undefined;
+  const okfSandboxFactory = options.okfSandboxFactory ?? defaultOkfSandboxFactory;
   const resolveSession = options.authSessionResolver ?? resolveBetterAuthSession;
 
   app.use("*", evlogWideEvents());
@@ -974,6 +1083,30 @@ export function createApp(options: CreateAppOptions = {}) {
     });
 
     return c.json({ created: true });
+  });
+
+  app.on(["GET", "POST", "OPTIONS"], "/mcp", async (c) => {
+    addWideEventFields(c, { routeName: "mcp" });
+    const db = await runWithRequestSpan(
+      c,
+      {
+        attributes: { "db.system.name": "cloudflare-d1" },
+        kind: "client",
+        name: "db.resolve",
+      },
+      () => (sharedDb ? sharedDb : resolveDb(Db.layerD1(c.env.DB))),
+    );
+    const auth = await runWithRequestSpan(
+      c,
+      { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
+      () => resolveCurrentUser({ env: c.env, headers: c.req.raw.headers, resolveSession }),
+    );
+    if (!auth.user) return c.json({ error: "Authentication required" }, 401);
+    return handleLaresMcpRequest(c.req.raw, {
+      db,
+      user: auth.user,
+      version: c.env.APP_VERSION ?? "0.0.0",
+    });
   });
 
   app.get("/api/auth/passkey/generate-register-options", async (c) => {
@@ -1094,6 +1227,8 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.session" });
     } else if (c.req.path.startsWith("/api/export")) {
       addWideEventFields(c, { routeName: "api.export" });
+    } else if (c.req.path.startsWith("/api/okf")) {
+      addWideEventFields(c, { routeName: "api.okf" });
     } else if (c.req.path.startsWith("/api/account")) {
       addWideEventFields(c, { routeName: "api.account" });
     }
@@ -1133,6 +1268,7 @@ export function createApp(options: CreateAppOptions = {}) {
             dailyAnalysisWorkflow: c.env.DAILY_DIGEST_WORKFLOW,
             db,
             googleAuthConfigured: Boolean(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
+            getOkfSandbox: () => Promise.resolve(okfSandboxFactory({ env: c.env, user })),
             recordSpan,
             session: auth,
             traceDb: c.env.DB,
@@ -1293,6 +1429,11 @@ export function createApp(options: CreateAppOptions = {}) {
         margin: 0.85rem 0 0;
         color: #c9d1d9;
       }
+      #proposal-status {
+        min-height: 1.5rem;
+        margin: 0.85rem 0 0;
+        color: #c9d1d9;
+      }
       ul {
         display: grid;
         gap: 0.75rem;
@@ -1317,6 +1458,19 @@ export function createApp(options: CreateAppOptions = {}) {
         margin-top: 0.35rem;
         line-height: 1.45;
         overflow-wrap: anywhere;
+      }
+      .proposal-title {
+        margin: 0;
+        font-size: 1rem;
+      }
+      .proposal-body, .proposal-rationale {
+        margin: 0.45rem 0 0;
+        color: #c9d1d9;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+      .proposal-rationale {
+        font-size: 0.9rem;
       }
       @media (min-width: 40rem) {
         main { padding-inline: 1.5rem; }
@@ -1351,6 +1505,12 @@ export function createApp(options: CreateAppOptions = {}) {
         </form>
       </section>
 
+      <section class="card" aria-labelledby="proposals-title">
+        <h2 id="proposals-title">Agent proposals</h2>
+        <ul id="proposals"><li>Loading proposals...</li></ul>
+        <p id="proposal-status" role="status"></p>
+      </section>
+
       <section class="card" aria-labelledby="events-title">
         <h2 id="events-title">Recent events</h2>
         <ul id="events"><li>Loading events...</li></ul>
@@ -1361,6 +1521,8 @@ export function createApp(options: CreateAppOptions = {}) {
       const note = document.querySelector('#note');
       const status = document.querySelector('#status');
       const events = document.querySelector('#events');
+      const proposals = document.querySelector('#proposals');
+      const proposalStatus = document.querySelector('#proposal-status');
 
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
@@ -1384,6 +1546,50 @@ export function createApp(options: CreateAppOptions = {}) {
           item.querySelector('.event-note').textContent = text;
           events.append(item);
         }
+      }
+
+      async function loadProposals() {
+        const response = await fetch('/api/proposals');
+        const body = await response.json();
+        proposals.innerHTML = '';
+        if (!body.proposals.length) {
+          proposals.innerHTML = '<li>No proposals waiting for review.</li>';
+          return;
+        }
+        for (const proposal of body.proposals) {
+          const item = document.createElement('li');
+          item.innerHTML = [
+            '<h3 class="proposal-title"></h3>',
+            '<p class="proposal-body"></p>',
+            '<p class="proposal-rationale"></p>',
+            '<div class="actions">',
+            '<button type="button" data-decision="accepted">Accept</button>',
+            '<button class="secondary" type="button" data-decision="rejected">Reject</button>',
+            '</div>',
+          ].join('');
+          item.querySelector('.proposal-title').textContent = proposal.title;
+          item.querySelector('.proposal-body').textContent = proposal.body;
+          item.querySelector('.proposal-rationale').textContent = proposal.rationale;
+          for (const button of item.querySelectorAll('button')) {
+            button.addEventListener('click', () => reviewProposal(proposal.id, button.dataset.decision));
+          }
+          proposals.append(item);
+        }
+      }
+
+      async function reviewProposal(proposalId, decision) {
+        proposalStatus.textContent = 'Saving review...';
+        const response = await fetch('/api/reviews', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ proposalId, decision }),
+        });
+        if (!response.ok) {
+          proposalStatus.textContent = 'Could not save review. Check the deployment logs.';
+          return;
+        }
+        proposalStatus.textContent = 'Review saved.';
+        await loadProposals();
       }
 
       form.addEventListener('submit', async (event) => {
@@ -1416,6 +1622,9 @@ export function createApp(options: CreateAppOptions = {}) {
 
       loadEvents().catch(() => {
         events.innerHTML = '<li>Could not load events. Check the deployment logs.</li>';
+      });
+      loadProposals().catch(() => {
+        proposals.innerHTML = '<li>Could not load proposals. Check the deployment logs.</li>';
       });
     </script>
   </body>

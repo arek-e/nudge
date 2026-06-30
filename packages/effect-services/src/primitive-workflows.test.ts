@@ -208,7 +208,7 @@ describe("PrimitiveWorkflows", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.status).toBe("active");
     expect(result[0]?.title).toBe("Clarify next attention point");
-    expect(result[0]?.body).toBe("Answer: What needs attention next?");
+    expect(result[0]?.body).toBe("The next commitment is uncertain. What needs attention next?");
   });
 
   test("accepting a proposal is idempotent across retries", async () => {

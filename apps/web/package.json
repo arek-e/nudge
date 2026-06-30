@@ -23,6 +23,7 @@
   "dependencies": {
     "@better-auth/drizzle-adapter": "catalog:",
     "@better-auth/passkey": "catalog:",
+    "@cloudflare/sandbox": "catalog:",
     "@cloudflare/think": "catalog:",
     "@lares/db": "workspace:*",
     "@lares/domain": "workspace:*",
@@ -30,6 +31,7 @@
     "@lares/evals": "workspace:*",
     "@lares/observability": "workspace:*",
     "@lares/ui": "workspace:*",
+    "@modelcontextprotocol/sdk": "catalog:",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/openapi": "catalog:",

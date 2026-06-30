@@ -4,7 +4,8 @@
     "composite": true,
     "outDir": "../../.tsbuild/packages/evals",
     "rootDir": "src",
-    "tsBuildInfoFile": "../../.tsbuild/packages/evals.tsbuildinfo"
+    "tsBuildInfoFile": "../../.tsbuild/packages/evals.tsbuildinfo",
+    "types": ["@cloudflare/workers-types", "node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],

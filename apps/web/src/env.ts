@@ -1,8 +1,10 @@
 export interface Env {
   DB: D1Database;
+  OKF_FILES?: R2Bucket;
   TRACE_ARTIFACTS: R2Bucket;
   DAILY_DIGEST_WORKFLOW: Workflow;
   USER_AGENT_SESSION: DurableObjectNamespace;
+  OKF_SANDBOX?: DurableObjectNamespace;
   ENVIRONMENT?: string;
   APP_VERSION?: string;
   LOG_HTTP_REQUESTS?: string;
