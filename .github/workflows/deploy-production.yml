@@ -1,9 +1,13 @@
 name: Deploy Production
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
     branches:
       - main
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       apply_migrations:
@@ -23,12 +27,15 @@ concurrency:
 jobs:
   deploy:
     name: Deploy
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup mise
         uses: jdx/mise-action@v3
@@ -47,7 +54,7 @@ jobs:
         run: bunx playwright install --with-deps webkit
 
       - name: Apply remote D1 migrations
-        if: ${{ github.event_name == 'push' || inputs.apply_migrations }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.apply_migrations }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
