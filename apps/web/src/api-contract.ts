@@ -427,6 +427,39 @@ export const dataExportResponseSchema = z.object({
   syntheses: z.array(synthesisRecordSchema),
 });
 
+const okfPathInputSchema = z.object({
+  path: z.string().min(1).default("/"),
+});
+
+const okfSearchInputSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  query: z.string().min(1).max(1_000),
+});
+
+export const okfListResponseSchema = z.object({
+  entries: z.array(z.string()),
+  path: z.string(),
+});
+
+export const okfFileResponseSchema = z.object({
+  content: z.string(),
+  path: z.string(),
+});
+
+export const okfSearchResponseSchema = z.object({
+  results: z.array(z.object({ path: z.string(), snippet: z.string() })),
+});
+
+export const okfSandboxSmokeResponseSchema = z.object({
+  available: z.boolean(),
+  exitCode: z.number().int().nullable(),
+  fileCount: z.number().int().min(0),
+  root: z.string(),
+  stderr: z.string(),
+  stdout: z.string(),
+  success: z.boolean(),
+});
+
 export const accountDeleteResponseSchema = z.object({ deleted: z.literal(true) });
 
 const synthesisInputSchema = z.object({ frameKey: z.string().default("current_state") });
@@ -521,6 +554,23 @@ export const apiContract = {
       .output(eventRecordSchema),
   },
   dataExport: oc.route({ method: "GET", path: "/export" }).output(dataExportResponseSchema),
+  okf: {
+    list: oc
+      .route({ method: "GET", path: "/okf" })
+      .input(okfPathInputSchema)
+      .output(okfListResponseSchema),
+    readFile: oc
+      .route({ method: "GET", path: "/okf/file" })
+      .input(okfPathInputSchema)
+      .output(okfFileResponseSchema),
+    search: oc
+      .route({ method: "GET", path: "/okf/search" })
+      .input(okfSearchInputSchema)
+      .output(okfSearchResponseSchema),
+    sandboxSmoke: oc
+      .route({ method: "POST", path: "/okf/sandbox/smoke" })
+      .output(okfSandboxSmokeResponseSchema),
+  },
   events: {
     append: oc
       .route({ method: "POST", path: "/events" })

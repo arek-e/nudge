@@ -20,6 +20,10 @@ _Avoid_: Raw log line, notification, unscoped event dump
 Information available for reasoning. Context may be raw signals, user-authored captures, distilled memory, consent grants, or external read models.
 _Avoid_: Hidden prompt stuffing, unsourced memory
 
+**Workspace Boundary**:
+The user-scoped surface of Context that Lares exposes to agents for reasoning and tool use. A workspace boundary must preserve source links, respect the current user, and keep canonical writes behind the normal Review and persistence paths.
+_Avoid_: Global agent filesystem, shared memory dump, writeable canonical store
+
 **Frame**:
 A bounded question, situation, or intent Lares is helping with. Frames define what context matters and what kind of synthesis/proposal is useful.
 _Avoid_: Assuming every frame is a daily plan

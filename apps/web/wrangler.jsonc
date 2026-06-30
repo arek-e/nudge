@@ -9,7 +9,7 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/agents/*", "/health", "/__test/*", "/__internal/*"],
+    "run_worker_first": ["/api/*", "/agents/*", "/mcp", "/health", "/__test/*", "/__internal/*"],
   },
   "observability": {
     "traces": {
@@ -21,6 +21,14 @@
       "head_sampling_rate": 1,
     },
   },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1,
+    },
+  ],
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
@@ -43,6 +51,10 @@
   ],
   "r2_buckets": [
     {
+      "binding": "OKF_FILES",
+      "bucket_name": "lares-okf-files",
+    },
+    {
       "binding": "TRACE_ARTIFACTS",
       "bucket_name": "lares-trace-artifacts",
     },
@@ -62,6 +74,10 @@
         "name": "LoopIntakeThinkAgent",
         "class_name": "LoopIntakeThinkAgent",
       },
+      {
+        "name": "OKF_SANDBOX",
+        "class_name": "Sandbox",
+      },
     ],
   },
   "workflows": [
@@ -79,6 +95,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["LoopIntakeThinkAgent"],
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["Sandbox"],
     },
   ],
 }

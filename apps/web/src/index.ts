@@ -1,4 +1,5 @@
 import { Think } from "@cloudflare/think";
+export { ContainerProxy, Sandbox } from "@cloudflare/sandbox";
 import { Agent } from "agents";
 import { generateObject, smoothStream, streamText, type LanguageModel } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -15,6 +16,7 @@ import {
   type WorkflowVersion,
 } from "@lares/effect-services";
 import type { Env } from "./env";
+import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
 
 const app = createApp();
@@ -463,12 +465,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   }
 
   getSystemPrompt(): string {
-    return [
-      "You are Lares, a private operating loop agent.",
-      "Interpret the user's journal or message into reviewable loop operations.",
-      "Never create external side effects. Draft signals, proposals, follow-ups, and reminders for review.",
-      "Prefer concrete next actions over generic advice.",
-    ].join("\n");
+    return loopIntakeSystemPrompt;
   }
 
   async draftFromMessage(input: LoopIntakeDraftInput) {
@@ -524,12 +521,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     const { object } = await generateObject({
       abortSignal: AbortSignal.timeout(10_000),
       model: this.getModel(),
-      prompt: [
-        "Extract reviewable tasks, reminders, memories, questions, ideas, events, and follow-ups from this private daily note.",
-        "Return only facts grounded in the note. Do not invent actions.",
-        `Local date: ${input.localDate}`,
-        `Daily note: ${input.changedText}`,
-      ].join("\n"),
+      prompt: dailyNoteExtractionPrompt(input),
       schema: thinkDailyNoteExtractionSchema,
     });
 

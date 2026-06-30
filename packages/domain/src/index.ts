@@ -91,7 +91,7 @@ export const buildDeterministicProposals = (input: {
         kind: "follow_up",
         title: followUp.title,
         body: followUp.body,
-        rationale: "Created from follow-up language in the captured signal.",
+        rationale: followUp.rationale,
       },
     ];
   }
@@ -103,8 +103,8 @@ export const buildDeterministicProposals = (input: {
         synthesisId: input.synthesisId,
         kind: "clarify",
         title: "Clarify next attention point",
-        body: `Answer: ${firstQuestion}`,
-        rationale: "Created from an open question in the synthesis.",
+        body: clarifyBodyFromQuestion(firstQuestion),
+        rationale: clarifyRationaleFromQuestion(firstQuestion),
       },
     ];
   }
@@ -161,21 +161,45 @@ const openQuestionsFromNote = (note: string) => {
   if (note.toLowerCase().includes("follow up") || note.toLowerCase().includes("follow-up")) {
     return [note];
   }
+  if (
+    note.toLowerCase().includes("energy is low") &&
+    note.toLowerCase().includes("committing to anything new")
+  ) {
+    return [
+      "Energy is low, and you are not ready to commit to anything new yet. What context do you need to think through before taking on anything new?",
+    ];
+  }
   return ["What needs attention next?"];
 };
 
+const clarifyBodyFromQuestion = (question: string) =>
+  question === "What needs attention next?"
+    ? "The next commitment is uncertain. What needs attention next?"
+    : question.startsWith("Energy is low,")
+      ? question
+      : `Answer: ${question}`;
+
+const clarifyRationaleFromQuestion = (question: string) =>
+  question.startsWith("Energy is low,")
+    ? "Grounded in captured user note: energy is low and the user needs to think before committing to anything new."
+    : "Grounded in a captured signal clarification need.";
+
 const followUpFromQuestion = (question: string) => {
   const match =
-    /follow[- ]up with (?<person>[^.]+?) about (?<topic>[^.]+?)(?: before| by| today| tomorrow|\.|$)/i.exec(
+    /follow[- ]up with (?<person>[^.]+?) about (?<topic>[^.]+?)(?:(?<timing>\s+(?:before|by)\s+[^.]+|\s+today|\s+tomorrow)|\.|$)/i.exec(
       question,
     );
   const personMatch = match?.groups?.person;
   const topicMatch = match?.groups?.topic;
+  const timingMatch = match?.groups?.timing;
   if (!personMatch || !topicMatch) return undefined;
   const person = personMatch.trim();
-  const topic = topicMatch.trim().replace(/^the\s+/i, "");
+  const topic = topicMatch.trim();
+  const timing = timingMatch?.trim().replace(/\.$/, "");
+  const timedTopic = timing ? `${topic} ${timing}` : topic;
   return {
-    title: `Follow up on ${topic}`,
-    body: `Follow up with ${person} about ${topic}.`,
+    title: `Follow up with ${person} on ${timedTopic}`,
+    body: `Follow up with ${person} about ${timedTopic}.`,
+    rationale: `Grounded in captured user note: ${question}`,
   };
 };

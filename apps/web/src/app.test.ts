@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Db } from "@lares/db";
 import { readHttpTelemetrySnapshot } from "@lares/observability";
 import type { Env } from "./env";
+import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
 
 const testAi = (() => ({ provider: "test" })) as Ai;
@@ -56,6 +57,9 @@ describe("web app", () => {
     expect(body).toContain("Daily Operating Loop");
     expect(body).toContain("Capture");
     expect(body).toContain("/api/events");
+    expect(body).toContain("Agent proposals");
+    expect(body).toContain("/api/proposals");
+    expect(body).toContain("/api/reviews");
     expect(body).not.toContain("QA build");
     expect(body).not.toContain("smoke test");
   });
@@ -1256,6 +1260,447 @@ describe("web app", () => {
     expect(actions.latestRun).toEqual(expect.objectContaining({ status: "queued" }));
     const summariesResponse = await app.request("/api/summaries", {}, env);
     expect((await summariesResponse.json()).summaries).toEqual([]);
+  });
+
+  test("agents can read workspace notes through the OKF filesystem API", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "OKF should be mounted into the sandbox for grep and cat.",
+          localDate: "2026-06-29",
+          title: "June 29",
+        }),
+      },
+      env,
+    );
+    expect(save.status).toBe(200);
+
+    const listed = await app.request("/api/okf?path=/daily", {}, env);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({
+      entries: ["2026-06-29.md", "index.md"],
+      path: "/daily",
+    });
+
+    const read = await app.request("/api/okf/file?path=/daily/2026-06-29.md", {}, env);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({
+      content: expect.stringContaining("OKF should be mounted into the sandbox"),
+      path: "/daily/2026-06-29.md",
+    });
+
+    const search = await app.request("/api/okf/search?query=grep&limit=1", {}, env);
+    expect(search.status).toBe(200);
+    expect(await search.json()).toEqual({
+      results: [
+        {
+          path: "/daily/2026-06-29.md",
+          snippet: "OKF should be mounted into the sandbox for grep and cat.",
+        },
+      ],
+    });
+  });
+
+  test("agents can read workspace notes through MCP OKF tools", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "MCP should expose the same OKF workspace boundary.",
+          localDate: "2026-07-02",
+          title: "July 2",
+        }),
+      },
+      env,
+    );
+    expect(save.status).toBe(200);
+
+    const tools = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 0,
+          jsonrpc: "2.0",
+          method: "tools/list",
+        }),
+      },
+      env,
+    );
+
+    expect(tools.status).toBe(200);
+    expect(await tools.json()).toMatchObject({
+      id: 0,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "okf_list" }),
+          expect.objectContaining({ name: "okf_read" }),
+          expect.objectContaining({ name: "okf_search" }),
+        ]),
+      },
+    });
+
+    const listed = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { path: "/daily" }, name: "okf_list" },
+        }),
+      },
+      env,
+    );
+
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      id: 1,
+      result: {
+        content: [{ text: '["2026-07-02.md","index.md"]', type: "text" }],
+      },
+    });
+
+    const read = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { path: "/daily/2026-07-02.md" }, name: "okf_read" },
+        }),
+      },
+      env,
+    );
+
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({
+      id: 2,
+      result: {
+        content: [
+          {
+            text: expect.stringContaining("MCP should expose the same OKF workspace boundary."),
+            type: "text",
+          },
+        ],
+      },
+    });
+
+    const resources = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 4,
+          jsonrpc: "2.0",
+          method: "resources/list",
+        }),
+      },
+      env,
+    );
+
+    expect(resources.status).toBe(200);
+    expect(await resources.json()).toMatchObject({
+      id: 4,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            mimeType: "text/markdown",
+            name: "/daily/2026-07-02.md",
+            uri: "file:///okf/daily/2026-07-02.md",
+          }),
+        ]),
+      },
+    });
+
+    const templates = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 6,
+          jsonrpc: "2.0",
+          method: "resources/templates/list",
+        }),
+      },
+      env,
+    );
+
+    expect(templates.status).toBe(200);
+    expect(await templates.json()).toMatchObject({
+      id: 6,
+      result: {
+        resourceTemplates: expect.arrayContaining([
+          expect.objectContaining({ uriTemplate: "file:///okf/{+path}" }),
+        ]),
+      },
+    });
+
+    const resource = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 5,
+          jsonrpc: "2.0",
+          method: "resources/read",
+          params: { uri: "file:///okf/daily/2026-07-02.md" },
+        }),
+      },
+      env,
+    );
+
+    expect(resource.status).toBe(200);
+    expect(await resource.json()).toMatchObject({
+      id: 5,
+      result: {
+        contents: [
+          {
+            mimeType: "text/markdown",
+            text: expect.stringContaining("MCP should expose the same OKF workspace boundary."),
+            uri: "file:///okf/daily/2026-07-02.md",
+          },
+        ],
+      },
+    });
+
+    const search = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 3,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { limit: 1, query: "boundary" }, name: "okf_search" },
+        }),
+      },
+      env,
+    );
+
+    expect(search.status).toBe(200);
+    const searchBody = await search.json();
+    expect(searchBody).toMatchObject({
+      id: 3,
+      result: {
+        structuredContent: {
+          results: [
+            {
+              mimeType: "text/markdown",
+              path: "/daily/2026-07-02.md",
+              snippet: "MCP should expose the same OKF workspace boundary.",
+              uri: "file:///okf/daily/2026-07-02.md",
+            },
+          ],
+        },
+      },
+    });
+    expect(searchBody).toMatchObject({
+      result: {
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            type: "resource_link",
+            uri: "file:///okf/daily/2026-07-02.md",
+          }),
+        ]),
+      },
+    });
+  });
+
+  test("agents can write reviewable proposals through MCP", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const write = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: {
+              body: "Ask Maya whether launch notes need a final pass.",
+              frameKey: "current_state",
+              kind: "follow_up",
+              rationale: "Agent found an unresolved launch follow-up in workspace context.",
+              title: "Follow up on launch",
+            },
+            name: "proposal_write",
+          },
+        }),
+      },
+      env,
+    );
+
+    expect(write.status).toBe(200);
+    expect(await write.json()).toMatchObject({
+      id: 1,
+      result: {
+        structuredContent: {
+          proposal: expect.objectContaining({
+            kind: "follow_up",
+            status: "pending",
+            title: "Follow up on launch",
+          }),
+          requiresReview: true,
+        },
+      },
+    });
+
+    const proposals = await app.request("/api/proposals", {}, env);
+    expect((await proposals.json()).proposals).toEqual([
+      expect.objectContaining({ status: "pending", title: "Follow up on launch" }),
+    ]);
+
+    const commitments = await app.request("/api/commitments", {}, env);
+    expect((await commitments.json()).commitments).toEqual([]);
+  });
+
+  test("agents can smoke test projected OKF files inside a sandbox", async () => {
+    const files = new Map<string, string>();
+    const execCalls: Array<{ readonly command: string; readonly cwd?: string }> = [];
+    const sandbox = {
+      exec: async (command, options) => {
+        execCalls.push({ command, ...(options?.cwd ? { cwd: options.cwd } : {}) });
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: [...files.keys()].sort().join("\n"),
+          success: true,
+        };
+      },
+      mkdir: async () => {},
+      writeFile: async (path, content) => {
+        files.set(path, content);
+      },
+    } satisfies OkfSandbox;
+    const app = createApp({ dbLayer: Db.layerMemory, okfSandboxFactory: () => sandbox });
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "Sandbox should expose OKF files to grep.",
+          localDate: "2026-06-30",
+          title: "June 30",
+        }),
+      },
+      env,
+    );
+    expect(save.status).toBe(200);
+
+    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+
+    expect(smoke.status).toBe(200);
+    expect(await smoke.json()).toEqual({
+      available: true,
+      exitCode: 0,
+      fileCount: expect.any(Number),
+      root: "/workspace/okf",
+      stderr: "",
+      stdout: expect.stringContaining("/workspace/okf/daily/2026-06-30.md"),
+      success: true,
+    });
+    expect(files.get("/workspace/okf/daily/2026-06-30.md")).toContain(
+      "Sandbox should expose OKF files to grep.",
+    );
+    expect(execCalls).toEqual([
+      {
+        command: expect.stringContaining("shutil.rmtree"),
+        cwd: "/workspace/okf",
+      },
+      {
+        command: 'find . -type f | sort && grep -R "type:" daily memory',
+        cwd: "/workspace/okf",
+      },
+    ]);
+  });
+
+  test("sandbox smoke reports startup failures without crashing the API", async () => {
+    const sandbox = {
+      exec: async () => {
+        throw new Error("exec should not run after materialization fails");
+      },
+      mkdir: async () => {
+        throw new Error("Container failed to start");
+      },
+      writeFile: async () => {
+        throw new Error("writeFile should not run after mkdir fails");
+      },
+    } satisfies OkfSandbox;
+    const app = createApp({ dbLayer: Db.layerMemory, okfSandboxFactory: () => sandbox });
+
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "Sandbox startup can fail locally while OKF projection remains valid.",
+          localDate: "2026-07-01",
+          title: "July 1",
+        }),
+      },
+      env,
+    );
+    expect(save.status).toBe(200);
+
+    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+
+    expect(smoke.status).toBe(200);
+    expect(await smoke.json()).toEqual({
+      available: true,
+      exitCode: null,
+      fileCount: expect.any(Number),
+      root: "/workspace/okf",
+      stderr: "Container failed to start",
+      stdout: "",
+      success: false,
+    });
   });
 
   test("custom integrations enqueue durable AI analysis instead of extracting synchronously", async () => {
