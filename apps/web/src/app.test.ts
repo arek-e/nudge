@@ -39,6 +39,23 @@ const createTraceDb = () => {
   return { db, rows };
 };
 
+const createStatementDb = () => {
+  const statements: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
+  const db = {
+    prepare: (sql: string) => ({
+      bind: (...values: ReadonlyArray<unknown>) => ({
+        all: async () => ({ results: [] }),
+        run: async () => {
+          statements.push({ sql, values });
+          return { success: true };
+        },
+      }),
+    }),
+  } as D1Database;
+
+  return { db, statements };
+};
+
 describe("web app", () => {
   test("GET / serves the Lares Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
@@ -218,6 +235,69 @@ describe("web app", () => {
         }),
       },
       env,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  test("POST /__internal/evals/agent runs evals with D1 and R2 trace bindings", async () => {
+    const traceDb = createStatementDb();
+    const traceArtifacts: Array<{ readonly body: string; readonly key: string }> = [];
+    const artifactBucket = {
+      put: async (key: string, body: string) => {
+        traceArtifacts.push({ body, key });
+      },
+    } as R2Bucket;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/__internal/evals/agent",
+      {
+        method: "POST",
+        headers: { "x-lares-eval-secret": "eval-secret" },
+      },
+      {
+        ...env,
+        AGENT_INTERNAL_SECRET: "eval-secret",
+        DB: traceDb.db,
+        TRACE_ARTIFACTS: artifactBucket,
+      },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      artifactKey: expect.stringMatching(/^evals\/cloudflare\/.+\.jsonl$/),
+      candidateSummaries: 1,
+      guidanceResults: 2,
+      passed: true,
+      results: 2,
+      runId: expect.any(String),
+      score: 1,
+    });
+    expect(traceArtifacts).toEqual([
+      {
+        key: body.artifactKey,
+        body: expect.stringContaining('"type":"agent_result"'),
+      },
+    ]);
+    expect(traceArtifacts[0]!.body).not.toContain("Follow up with Maya");
+    expect(
+      traceDb.statements.some((statement) => statement.sql.includes("INSERT INTO eval_runs")),
+    ).toBe(true);
+    expect(
+      traceDb.statements.filter((statement) =>
+        statement.sql.includes("INSERT INTO eval_case_results"),
+      ),
+    ).toHaveLength(4);
+  });
+
+  test("POST /__internal/evals/agent stays hidden without the eval secret", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request(
+      "/__internal/evals/agent",
+      { method: "POST" },
+      { ...env, AGENT_INTERNAL_SECRET: "eval-secret" },
     );
 
     expect(response.status).toBe(404);
@@ -815,6 +895,13 @@ describe("web app", () => {
   test("POST /api/conversations/:conversationId/messages forwards user-scoped messages to the agent", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
+    const traceDb = createStatementDb();
+    const traceArtifacts: Array<{ readonly body: string; readonly key: string }> = [];
+    const artifactBucket = {
+      put: async (key: string, body: string) => {
+        traceArtifacts.push({ body, key });
+      },
+    } as R2Bucket;
     const agentNamespace = {
       idFromName: (name: string) => {
         agentNames.push(name);
@@ -881,7 +968,12 @@ describe("web app", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: "What should I do next?" }),
       },
-      { ...env, USER_AGENT_SESSION: agentNamespace },
+      {
+        ...env,
+        DB: traceDb.db,
+        TRACE_ARTIFACTS: artifactBucket,
+        USER_AGENT_SESSION: agentNamespace,
+      },
     );
 
     expect(response.status).toBe(200);
@@ -936,6 +1028,28 @@ describe("web app", () => {
       usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
       workflowHooks: ["dailyDigest"],
     });
+    const agentRun = traceDb.statements.find((statement) =>
+      statement.sql.includes("INSERT OR REPLACE INTO agent_runs"),
+    );
+    expect(agentRun?.values).toEqual([
+      expect.any(String),
+      null,
+      "dev-user",
+      "conversation-agent",
+      "completed",
+      expect.any(String),
+      expect.any(String),
+      expect.stringContaining('"toolCallCount":4'),
+      expect.stringMatching(/^agent-runs\/conversation\/.+\.json$/),
+      expect.any(String),
+    ]);
+    expect(traceArtifacts).toEqual([
+      {
+        key: expect.stringMatching(/^agent-runs\/conversation\/.+\.json$/),
+        body: expect.stringContaining('"agentName":"conversation-agent"'),
+      },
+    ]);
+    expect(traceArtifacts[0]!.body).not.toContain("What should I do next?");
   });
 
   test("POST /api/conversations/:conversationId/messages/stream proxies the agent text stream", async () => {

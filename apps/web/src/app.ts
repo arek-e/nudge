@@ -15,6 +15,8 @@ import {
   readOkfFile,
   searchOkfFiles,
 } from "@lares/effect-services";
+import { createEvalTraceSink, runAgentEvalSuite } from "@lares/evals";
+import { persistAgentTraceRun, safeErrorFields } from "@lares/observability";
 import type { Env } from "./env";
 import {
   apiContract,
@@ -101,6 +103,7 @@ interface ApiContext {
     },
     task: () => Promise<A>,
   ) => Promise<A>;
+  readonly traceArtifacts?: R2Bucket;
   readonly traceDb?: D1Database;
   readonly turbopuffer?: {
     readonly apiKey: string;
@@ -271,7 +274,8 @@ export const apiRouter = api.router({
       );
     }),
     sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
-      return proxyConversationRequest(
+      const startedAt = new Date().toISOString();
+      const response = await proxyConversationRequest(
         context.agentSessions,
         context.agentInternalSecret,
         context.user,
@@ -283,6 +287,12 @@ export const apiRouter = api.router({
           method: "POST",
         },
       );
+      await persistConversationAgentTrace(context, {
+        conversationId: input.conversationId,
+        response,
+        startedAt,
+      });
+      return response;
     }),
   },
   captures: {
@@ -759,9 +769,71 @@ async function proxyConversationRequest<Schema extends z.ZodType>(
   return schema.parse(await response.json());
 }
 
+async function persistConversationAgentTrace(
+  context: ApiContext,
+  input: {
+    readonly conversationId: string;
+    readonly response: z.infer<typeof conversationMessageResponseSchema>;
+    readonly startedAt: string;
+  },
+) {
+  if (typeof context.traceDb?.prepare !== "function") return;
+
+  try {
+    await persistAgentTraceRun(
+      {
+        artifactPrefix: "agent-runs/conversation",
+        db: context.traceDb,
+        ...(context.traceArtifacts ? { artifactBucket: context.traceArtifacts } : {}),
+      },
+      {
+        agentName: "conversation-agent",
+        completedAt: new Date().toISOString(),
+        outcomeLabels: [
+          "completed",
+          `conversation:${input.conversationId}`,
+          input.response.draft ? "draft:proposal" : "draft:none",
+          `memory:${input.response.memoryResults.length}`,
+        ],
+        startedAt: input.startedAt,
+        status: "completed",
+        toolCalls: input.response.usedTools.map((tool) => ({ status: "completed", tool })),
+        userId: context.user.id,
+      },
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        agentName: "conversation-agent",
+        event: "agent_trace_persist_failed",
+        logKind: "wide_event",
+        ...safeErrorFields(error),
+      }),
+    );
+  }
+}
+
 function conversationStreamPath(path: string) {
   const match = /^\/api\/conversations\/([^/]+)\/messages\/stream$/.exec(path);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function timingSafeEqual(left: string, right: string) {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  let diff = leftBytes.length ^ rightBytes.length;
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+  return diff === 0;
+}
+
+function isEvalRunRequestAuthorized(request: Request, env: Env) {
+  const secret = env.AGENT_INTERNAL_SECRET ?? env.BETTER_AUTH_SECRET;
+  const provided = request.headers.get("x-lares-eval-secret");
+  return Boolean(secret && provided && timingSafeEqual(provided, secret));
 }
 
 async function proxyConversationStream(
@@ -1129,6 +1201,35 @@ export function createApp(options: CreateAppOptions = {}) {
     return c.json({ created: true });
   });
 
+  app.post("/__internal/evals/agent", async (c) => {
+    addWideEventFields(c, { routeName: "internal.evals.agent" });
+    if (!isEvalRunRequestAuthorized(c.req.raw, c.env)) return c.notFound();
+    if (typeof c.env.DB?.prepare !== "function") {
+      return c.json({ error: "D1 is not configured" }, 503);
+    }
+
+    const runId = crypto.randomUUID();
+    const artifactPrefix = "evals/cloudflare";
+    const report = await runAgentEvalSuite({
+      artifactSink: createEvalTraceSink({
+        artifactBucket: c.env.TRACE_ARTIFACTS,
+        artifactPrefix,
+        db: c.env.DB,
+        runId,
+      }),
+    });
+
+    return c.json({
+      artifactKey: `${artifactPrefix}/${runId}.jsonl`,
+      candidateSummaries: report.candidateSummaries.length,
+      guidanceResults: report.guidanceResults.length,
+      passed: report.passed,
+      results: report.results.length,
+      runId,
+      score: report.score,
+    });
+  });
+
   app.on(["GET", "POST", "OPTIONS"], "/mcp", async (c) => {
     addWideEventFields(c, { routeName: "mcp" });
     const db = await runWithRequestSpan(
@@ -1330,6 +1431,7 @@ export function createApp(options: CreateAppOptions = {}) {
             getOkfSandbox: () => Promise.resolve(okfSandboxFactory({ env: c.env, user })),
             recordSpan,
             session: auth,
+            traceArtifacts: c.env.TRACE_ARTIFACTS,
             traceDb: c.env.DB,
             ...(c.env.TURBOPUFFER_API_KEY
               ? {

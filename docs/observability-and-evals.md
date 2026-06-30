@@ -23,9 +23,9 @@ Trace/event persistence uses Wrangler-managed infrastructure:
 Current limitations:
 
 - Agent reasoning, prompts, tool traces, and model outputs are only captured as safe summaries.
-- Daily note analysis writes agent run trace summaries; conversation agent replies are not yet written to `agent_runs`.
-- Evals run a small deterministic golden-case suite through `bun run check`, CI, and deploy gating.
+- Daily note analysis and conversation replies write safe agent run trace summaries.
+- Evals run a small deterministic golden-case suite through `bun run check`, CI, deploy gating, and the internal Worker eval route.
 
-Next observability step: wire conversation agent replies into the agent trace sink.
+Internal Worker eval runs are available at `POST /__internal/evals/agent` with `x-lares-eval-secret` set to the internal agent secret. The route passes the Worker D1 and R2 bindings into `createEvalTraceSink`.
 
-Next evals step: run evals from a Cloudflare-bound runner that passes `createEvalTraceSink` D1 and R2 bindings.
+Next observability step: add a read model for recent agent and eval runs once the UI needs it.
