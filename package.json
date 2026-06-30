@@ -59,7 +59,7 @@
   "type": "module",
   "scripts": {
     "cf-typegen": "bun run --cwd apps/web cf-typegen",
-    "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun test && bun run eval:agent",
     "db:migrations:apply:local": "bun run --cwd apps/web db:migrations:apply:local",
     "db:migrations:apply:remote": "bun run --cwd apps/web db:migrations:apply:remote",
     "deploy": "bun scripts/deploy-web.ts",

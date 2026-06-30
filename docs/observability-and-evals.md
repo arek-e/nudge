@@ -23,8 +23,8 @@ Trace/event persistence uses Wrangler-managed infrastructure:
 Current limitations:
 
 - Agent reasoning, prompts, tool traces, and model outputs are only captured as safe summaries.
-- Evals run a small deterministic golden-case suite; they are not yet wired into release gating.
+- Evals run a small deterministic golden-case suite through `bun run check`, CI, and deploy gating.
 
 Next observability step: add an agent trace sink for real agent loops. The trace sink should store safe metadata, tool call summaries, eval case ids, outcome labels, and redacted artifacts. It must not store raw personal content, private prompts, calendar text, relationship memory content, or unredacted consent grants.
 
-Next evals step: wire `packages/evals` into CI and deployment checks for agent workflow changes.
+Next evals step: add a redacted artifact sink for agent workflow eval runs.

@@ -63,6 +63,7 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
+run("mise exec -- bun run check");
 run("mise exec -- bun run build", { cwd: web });
 run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 
