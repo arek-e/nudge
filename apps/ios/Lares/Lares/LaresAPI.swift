@@ -243,13 +243,27 @@ enum LaresAPI {
         return response.document
     }
 
-    static func saveDailyNote(_ note: String, localDate: String) async throws -> SavedCapture {
-        let document = RichTextBlock(children: [RichTextText(text: note)])
+    static func saveDailyNote(
+        _ note: String,
+        attachments: [JournalMediaAttachment] = [],
+        trailingNote: String = "",
+        localDate: String
+    ) async throws -> SavedCapture {
+        let leadingNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let continuationNote = trailingNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bodyText = [leadingNote, continuationNote]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        var bodyDocument: [RichTextBlock] = leadingNote.isEmpty ? [] : [RichTextBlock.paragraph(leadingNote)]
+        bodyDocument.append(contentsOf: attachments.map(RichTextBlock.media))
+        if !continuationNote.isEmpty {
+            bodyDocument.append(RichTextBlock.paragraph(continuationNote))
+        }
         let journalResponse: JournalSaveResponse = try await post(
             "/api/journal",
             body: JournalSaveRequest(
-                bodyDocument: [document],
-                bodyText: note,
+                bodyDocument: bodyDocument,
+                bodyText: bodyText,
                 localDate: localDate,
                 title: localDate
             )
@@ -259,7 +273,7 @@ enum LaresAPI {
             body: CaptureAppendRequest(
                 idempotencyKey: UUID().uuidString,
                 occurredAt: ISO8601DateFormatter().string(from: Date()),
-                payload: CapturePayload(note: note),
+                payload: CapturePayload(note: bodyText, attachments: attachments),
                 schemaVersion: 1,
                 source: "ios_app",
                 type: "manual_check_in_submitted"
@@ -333,6 +347,14 @@ enum LaresAPI {
     }
 }
 
+struct JournalMediaAttachment {
+    let id: String
+    let kind: String
+    let label: String
+    let mimeType: String
+    let dataURL: String
+}
+
 private struct VoiceLogRequest: Encodable {
     let idempotencyKey: String
     let spokenText: String
@@ -355,12 +377,37 @@ private struct JournalSaveRequest: Encodable {
 }
 
 private struct RichTextBlock: Encodable {
-    let type = "p"
-    let children: [RichTextText]
+    let type: String
+    let children: [RichTextText]?
+    let attrs: RichTextMediaAttributes?
+
+    static func paragraph(_ text: String) -> RichTextBlock {
+        RichTextBlock(type: "p", children: [RichTextText(text: text)], attrs: nil)
+    }
+
+    static func media(_ attachment: JournalMediaAttachment) -> RichTextBlock {
+        RichTextBlock(
+            type: attachment.kind == "voice" ? "audio" : "img",
+            children: nil,
+            attrs: RichTextMediaAttributes(
+                alt: attachment.label,
+                id: attachment.id,
+                mimeType: attachment.mimeType,
+                src: attachment.dataURL
+            )
+        )
+    }
 }
 
 private struct RichTextText: Encodable {
     let text: String
+}
+
+private struct RichTextMediaAttributes: Encodable {
+    let alt: String
+    let id: String
+    let mimeType: String
+    let src: String
 }
 
 private struct CaptureAppendRequest: Encodable {
@@ -374,6 +421,22 @@ private struct CaptureAppendRequest: Encodable {
 
 private struct CapturePayload: Encodable {
     let note: String
+    let attachments: [CaptureAttachmentPayload]?
+
+    init(note: String, attachments: [JournalMediaAttachment] = []) {
+        self.note = note
+        self.attachments = attachments.isEmpty
+            ? nil
+            : attachments.map {
+                CaptureAttachmentPayload(kind: $0.kind, label: $0.label, mimeType: $0.mimeType)
+            }
+    }
+}
+
+private struct CaptureAttachmentPayload: Encodable {
+    let kind: String
+    let label: String
+    let mimeType: String
 }
 
 enum LaresAPIError: LocalizedError {

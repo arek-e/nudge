@@ -1,11 +1,18 @@
+import PencilKit
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var model = LaresCaptureViewModel()
     @Environment(\.scenePhase) private var scenePhase
-    @FocusState private var captureFocused: Bool
+    @FocusState private var captureFocused: CaptureFocusTarget?
     @State private var navigationPath: [LaresDestination] = []
     @State private var activeSheet: LaresSheet?
+    @State private var addMenuOpen = false
+    @State private var drawingOpen = false
+    @State private var formattingOpen = false
+    @State private var imagePickerSource: CaptureImagePickerSource?
+    @State private var voiceRecorderOpen = false
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -39,8 +46,26 @@ struct ContentView: View {
                     hasDraft: model.hasDraft,
                     latestResult: model.latestResult,
                     saving: model.saving,
-                    focusInput: { captureFocused = true },
-                    addLine: { model.addLine() },
+                    addMenuOpen: $addMenuOpen,
+                    formattingOpen: $formattingOpen,
+                    openCamera: {
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            imagePickerSource = .camera
+                        } else {
+                            model.errorMessage = "Camera is not available on this device."
+                        }
+                    },
+                    openDrawing: { drawingOpen = true },
+                    openPhotoLibrary: { imagePickerSource = .photoLibrary },
+                    openVoiceRecorder: { voiceRecorderOpen = true },
+                    requestSuggestion: {
+                        model.addJournalingSuggestion()
+                        captureFocused = model.attachments.isEmpty ? .draft : .trailingDraft
+                    },
+                    applyFormat: {
+                        model.applyTextFormat($0)
+                        captureFocused = model.attachments.isEmpty ? .draft : .trailingDraft
+                    },
                     submit: { Task { await model.submit() } }
                 )
                 .padding(.horizontal, 24)
@@ -72,6 +97,33 @@ struct ContentView: View {
                     .presentationDetents([.fraction(0.78), .large])
                     .presentationDragIndicator(.visible)
             }
+        }
+        .sheet(item: $imagePickerSource) { source in
+            SystemImagePicker(source: source) { image in
+                model.appendImage(image, source: source)
+                captureFocused = .trailingDraft
+            }
+        }
+        .fullScreenCover(isPresented: $drawingOpen) {
+            DrawingSheet { drawing in
+                model.appendDrawing(drawing)
+                captureFocused = .trailingDraft
+            }
+        }
+        .fullScreenCover(item: $model.editingDrawing) { attachment in
+            DrawingSheet(initialDrawing: attachment.drawing ?? PKDrawing()) { drawing in
+                model.updateDrawing(attachment, drawing: drawing)
+            }
+        }
+        .sheet(item: $model.previewedAttachment) { attachment in
+            AttachmentPreviewSheet(attachment: attachment)
+        }
+        .sheet(isPresented: $voiceRecorderOpen) {
+            VoiceRecorderSheet { url in
+                model.appendVoiceRecording(url)
+                captureFocused = .trailingDraft
+            }
+            .presentationDetents([.height(320)])
         }
     }
 
