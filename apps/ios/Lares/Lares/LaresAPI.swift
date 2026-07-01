@@ -31,10 +31,46 @@ struct JournalSaveResponse: Decodable {
     let document: JournalDocument
 }
 
+struct AgentRunResponse: Decodable {
+    let run: AgentRun?
+}
+
 struct SavedCapture {
     let analysisRun: AgentRun?
     let journal: JournalDocument
     let capture: EventRecord?
+}
+
+struct JournalSaveComposition: Equatable {
+    let captureNoteText: String
+    let existingJournalText: String
+    let journalBodyText: String
+    let leadingNote: String
+    let trailingNote: String
+}
+
+enum JournalSaveCompositionPolicy {
+    static func evaluate(
+        existingJournalText: String?,
+        leadingNote: String,
+        trailingNote: String
+    ) -> JournalSaveComposition {
+        let existing = existingJournalText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let leading = leadingNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trailing = trailingNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let captureNoteText = [leading, trailing]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        let paragraphs = [existing, leading, trailing].filter { !$0.isEmpty }
+
+        return JournalSaveComposition(
+            captureNoteText: captureNoteText,
+            existingJournalText: existing,
+            journalBodyText: paragraphs.joined(separator: "\n\n"),
+            leadingNote: leading,
+            trailingNote: trailing
+        )
+    }
 }
 
 struct ConversationMessageResponse: Decodable {
@@ -85,12 +121,18 @@ struct ActionItem: Decodable, Identifiable {
 }
 
 struct AgentRun: Decodable {
+    let id: String
     let status: String
     let model: String?
+    let errorCode: String?
     let metadata: JSONValue
 
     var isProcessing: Bool {
         ["pending", "queued", "running", "processing", "in_progress"].contains(status.lowercased())
+    }
+
+    var isFailed: Bool {
+        status.lowercased() == "failed"
     }
 
     var itemCount: Int? {
@@ -243,27 +285,39 @@ enum LaresAPI {
         return response.document
     }
 
+    static func getAgentRun(runId: String) async throws -> AgentRun? {
+        let escaped = runId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? runId
+        let response: AgentRunResponse = try await get("/api/agent-runs/\(escaped)")
+        return response.run
+    }
+
     static func saveDailyNote(
         _ note: String,
         attachments: [JournalMediaAttachment] = [],
+        existingJournalText: String? = nil,
         trailingNote: String = "",
         localDate: String
     ) async throws -> SavedCapture {
-        let leadingNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let continuationNote = trailingNote.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bodyText = [leadingNote, continuationNote]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-        var bodyDocument: [RichTextBlock] = leadingNote.isEmpty ? [] : [RichTextBlock.paragraph(leadingNote)]
+        let composition = JournalSaveCompositionPolicy.evaluate(
+            existingJournalText: existingJournalText,
+            leadingNote: note,
+            trailingNote: trailingNote
+        )
+        var bodyDocument = composition.existingJournalText.isEmpty
+            ? []
+            : [RichTextBlock.paragraph(composition.existingJournalText)]
+        if !composition.leadingNote.isEmpty {
+            bodyDocument.append(RichTextBlock.paragraph(composition.leadingNote))
+        }
         bodyDocument.append(contentsOf: attachments.map(RichTextBlock.media))
-        if !continuationNote.isEmpty {
-            bodyDocument.append(RichTextBlock.paragraph(continuationNote))
+        if !composition.trailingNote.isEmpty {
+            bodyDocument.append(RichTextBlock.paragraph(composition.trailingNote))
         }
         let journalResponse: JournalSaveResponse = try await post(
             "/api/journal",
             body: JournalSaveRequest(
                 bodyDocument: bodyDocument,
-                bodyText: bodyText,
+                bodyText: composition.journalBodyText,
                 localDate: localDate,
                 title: localDate
             )
@@ -273,7 +327,7 @@ enum LaresAPI {
             body: CaptureAppendRequest(
                 idempotencyKey: UUID().uuidString,
                 occurredAt: ISO8601DateFormatter().string(from: Date()),
-                payload: CapturePayload(note: bodyText, attachments: attachments),
+                payload: CapturePayload(note: composition.captureNoteText, attachments: attachments),
                 schemaVersion: 1,
                 source: "ios_app",
                 type: "manual_check_in_submitted"

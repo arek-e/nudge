@@ -28,6 +28,16 @@ export const eventListInputSchema = z.object({
   to: z.string().datetime().optional(),
 });
 
+export const calendarDaysInputSchema = z.object({
+  timeZone: z.string().min(1).default("UTC"),
+});
+
+export const calendarDayStatsSchema = z.object({
+  localDate: z.string(),
+  noteCount: z.number().int().min(0),
+  signalCount: z.number().int().min(0),
+});
+
 export const frameRecordSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -572,6 +582,12 @@ export const apiContract = {
       .route({ method: "POST", path: "/captures" })
       .input(eventInputSchema)
       .output(eventRecordSchema),
+  },
+  calendar: {
+    days: oc
+      .route({ method: "GET", path: "/calendar/days" })
+      .input(calendarDaysInputSchema)
+      .output(z.object({ days: z.array(calendarDayStatsSchema) })),
   },
   dataExport: oc.route({ method: "GET", path: "/export" }).output(dataExportResponseSchema),
   okf: {

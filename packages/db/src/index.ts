@@ -458,6 +458,9 @@ export interface DbService {
     readonly userId: string;
     readonly localDate: string;
   }) => Effect.Effect<JournalDocumentRecord | null>;
+  readonly listJournalDocuments: (input: {
+    readonly userId: string;
+  }) => Effect.Effect<ReadonlyArray<JournalDocumentRecord>>;
   readonly getDailyNote: (input: {
     readonly userId: string;
     readonly localDate: string;
@@ -1511,6 +1514,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }),
         getJournalDocument: (input) =>
           Effect.sync(() => journalDocumentStore.get(`${input.userId}:${input.localDate}`) ?? null),
+        listJournalDocuments: (input) =>
+          Effect.sync(() =>
+            [...journalDocumentStore.values()]
+              .filter((document) => document.userId === input.userId)
+              .sort((left, right) => right.localDate.localeCompare(left.localDate)),
+          ),
         getMemoryChunk: (input) =>
           Effect.sync(() => {
             const chunk = memoryChunkStore.get(input.memoryChunkId) ?? null;
@@ -2621,6 +2630,16 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 .get();
 
               return row ? toJournalDocumentRecord(row) : null;
+            }),
+          listJournalDocuments: (input) =>
+            Effect.promise(async () => {
+              const rows = await db
+                .select()
+                .from(journalDocuments)
+                .where(eq(journalDocuments.userId, input.userId))
+                .orderBy(desc(journalDocuments.localDate));
+
+              return rows.map(toJournalDocumentRecord);
             }),
           getMemoryChunk: (input) =>
             Effect.promise(async () => {

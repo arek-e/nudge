@@ -28,11 +28,6 @@ struct LaresLogo: View {
     }
 }
 
-enum CaptureFocusTarget: Hashable {
-    case draft
-    case trailingDraft
-}
-
 enum CaptureImagePickerSource: String, Identifiable {
     case camera
     case photoLibrary
@@ -52,60 +47,194 @@ enum CaptureImagePickerSource: String, Identifiable {
 struct CaptureCanvas: View {
     @ObservedObject var model: LaresCaptureViewModel
     var focused: FocusState<CaptureFocusTarget?>.Binding
+    let openLatestResult: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if model.attachments.isEmpty || !model.draft.isEmpty {
-                draftField("What matters now?", text: $model.draft, target: .draft)
+        let layout = CaptureWritingLayoutPolicy.evaluate(
+            hasAttachments: !model.attachments.isEmpty,
+            hasDraftText: !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            hasPendingResult: model.hasPendingResult,
+            stage: model.stage
+        )
+
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(model.retainedRows) { row in
+                        RetainedCaptureRowView(row: row)
+                    }
+
+                    if layout.showsLeadingDraft {
+                        draftField(
+                            "What matters now?",
+                            text: draftText,
+                            target: .draft,
+                            usesWorkingOverlay: layout.leadingDraftUsesWorkingOverlay
+                        )
+                        .id(CaptureScrollID.leadingDraft)
+                    }
+
+                    if !model.attachments.isEmpty {
+                        AttachmentPreviewRail(
+                            attachments: model.attachments,
+                            open: { model.openAttachment($0) },
+                            remove: { model.removeAttachment($0) }
+                        )
+                    }
+
+                    if layout.keepsStatusWithSubmittedCapture {
+                        statusRow
+                    }
+
+                    if layout.showsContinuationDraft {
+                        draftField(
+                            "Keep writing...",
+                            text: trailingDraftText,
+                            target: .trailingDraft,
+                            usesWorkingOverlay: false
+                        )
+                        .id(CaptureScrollID.continuationDraft)
+                    }
+
+                    if !layout.keepsStatusWithSubmittedCapture {
+                        statusRow
+                    }
+
+                    if !model.errorMessage.isEmpty {
+                        Text(model.errorMessage)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color.feedbackCritical)
+                            .padding(.horizontal, 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.bottom, 120)
             }
-
-            if !model.attachments.isEmpty {
-                AttachmentPreviewRail(
-                    attachments: model.attachments,
-                    open: { model.openAttachment($0) },
-                    remove: { model.removeAttachment($0) }
-                )
-
-                draftField("Keep writing...", text: $model.trailingDraft, target: .trailingDraft)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focused.wrappedValue) { _, _ in
+                scrollToActiveField(proxy, layout: layout)
             }
-
-            HStack {
-                Spacer(minLength: 0)
-                StatusChip(stage: model.stage, result: model.latestResult)
+            .onChange(of: model.draft) { _, _ in
+                scrollToActiveField(proxy, layout: layout)
             }
-            .frame(minHeight: 22)
-
-            if !model.errorMessage.isEmpty {
-                Text(model.errorMessage)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.feedbackCritical)
-                    .padding(.horizontal, 2)
+            .onChange(of: model.trailingDraft) { _, _ in
+                scrollToActiveField(proxy, layout: layout)
+            }
+            .onChange(of: model.retainedRows.count) { _, _ in
+                scrollToActiveField(proxy, layout: layout)
+            }
+            .onChange(of: model.stage) { _, _ in
+                scrollToActiveField(proxy, layout: layout)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var statusRow: some View {
+        HStack {
+            Spacer(minLength: 0)
+            StatusChip(
+                stage: model.stage,
+                result: model.latestResult,
+                openResult: openLatestResult
+            )
+        }
+        .frame(minHeight: 22)
+    }
+
+    private func scrollToActiveField(_ proxy: ScrollViewProxy, layout: CaptureWritingLayout) {
+        let behavior = CaptureScrollTargetPolicy.evaluate(
+            focusedTarget: focused.wrappedValue,
+            showsContinuationDraft: layout.showsContinuationDraft
+        )
+        let target = scrollID(for: behavior.target)
+        let scroll = {
+            proxy.scrollTo(target, anchor: .bottom)
+        }
+
+        if behavior.usesSmoothAnimation {
+            withAnimation(.easeInOut(duration: 0.24), scroll)
+        } else {
+            scroll()
+        }
+    }
+
+    private func scrollID(for target: CaptureScrollTarget) -> CaptureScrollID {
+        switch target {
+        case .leadingDraft:
+            .leadingDraft
+        case .continuationDraft:
+            .continuationDraft
+        }
     }
 
     private func draftField(
         _ placeholder: String,
         text: Binding<String>,
-        target: CaptureFocusTarget
+        target: CaptureFocusTarget,
+        usesWorkingOverlay: Bool
     ) -> some View {
         ZStack(alignment: .topLeading) {
             TextField(placeholder, text: text, axis: .vertical)
                 .focused(focused, equals: target)
-                .submitLabel(.done)
-                .onSubmit { Task { await model.submit() } }
-                .lineLimit(1...5)
+                .submitLabel(target == .trailingDraft ? .return : .done)
+                .onSubmit {
+                    Task {
+                        await model.submit()
+                        if model.shouldFocusContinuationDraft {
+                            focused.wrappedValue = .trailingDraft
+                        }
+                    }
+                }
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
                 .font(.system(size: 25, weight: .semibold, design: .rounded))
-                .foregroundStyle(model.stage.isWorking && !text.wrappedValue.isEmpty ? Color.clear : Color.textPrimary)
+                .foregroundStyle(usesWorkingOverlay && !text.wrappedValue.isEmpty ? Color.clear : Color.textPrimary)
+                .lineLimit(1...12)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if model.stage.isWorking && !text.wrappedValue.isEmpty {
+            if usesWorkingOverlay && !text.wrappedValue.isEmpty {
                 ShimmeringNoteText(text: text.wrappedValue)
                     .allowsHitTesting(false)
             }
+        }
+    }
+
+    private var draftText: Binding<String> {
+        Binding(
+            get: { model.draft },
+            set: { model.updateDraft($0) }
+        )
+    }
+
+    private var trailingDraftText: Binding<String> {
+        Binding(
+            get: { model.trailingDraft },
+            set: { model.updateTrailingDraft($0) }
+        )
+    }
+}
+
+private enum CaptureScrollID: Hashable {
+    case leadingDraft
+    case continuationDraft
+}
+
+struct RetainedCaptureRowView: View {
+    let row: RetainedCaptureRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(row.noteText)
+                .font(.system(size: 25, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer(minLength: 0)
+                StatusChip(stage: row.stage, result: nil, openResult: {})
+            }
+            .frame(minHeight: 22)
         }
     }
 }
@@ -204,10 +333,28 @@ struct AttachmentPreviewCard: View {
 struct StatusChip: View {
     let stage: CaptureStage
     let result: CaptureResult?
+    let openResult: () -> Void
 
     var body: some View {
+        let placement = CaptureResultPlacementPolicy.evaluate(
+            hasLatestResult: result != nil,
+            stage: stage
+        )
+
         Group {
-            if let label = stage.label {
+            if placement.showsInlineResult, let result {
+                Button(action: openResult) {
+                    CompactResultDetail(result: result)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    CaptureInlineResultSummaryPolicy.evaluate(
+                        actionCount: result.actionCount,
+                        signalCount: result.signalCount,
+                        sourceCount: result.sourceCount
+                    ).accessibilityLabel
+                )
+            } else if let label = stage.label {
                 HStack(spacing: 7) {
                     if stage == .saved {
                         Image(systemName: "sparkles")
@@ -222,14 +369,42 @@ struct StatusChip: View {
                             .foregroundStyle(stage == .saved ? Color.textPrimary : Color.textSecondary)
                     }
                 }
-            } else if let result {
-                Text("\(result.signalCount) signal")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.textSecondary)
             }
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+struct CompactResultDetail: View {
+    let result: CaptureResult
+
+    var body: some View {
+        let summary = CaptureInlineResultSummaryPolicy.evaluate(
+            actionCount: result.actionCount,
+            signalCount: result.signalCount,
+            sourceCount: result.sourceCount
+        )
+
+        HStack(spacing: 5) {
+            ForEach(Array(summary.metricTexts.enumerated()), id: \.offset) { index, text in
+                if index > 0 {
+                    Circle()
+                        .fill(Color.textSecondary.opacity(0.32))
+                        .frame(width: 3, height: 3)
+                }
+
+                Text(text)
+                    .fontDesign(.rounded)
+                    .foregroundStyle(index == 0 ? Color.textPrimary : Color.textSecondary)
+                    .monospacedDigit()
+            }
+        }
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .lineLimit(1)
+        .padding(.horizontal, 2)
+        .frame(minWidth: 44, minHeight: 32, alignment: .trailing)
+        .contentShape(Rectangle())
     }
 }
 
@@ -316,7 +491,6 @@ struct LaresShimmeringText: View {
 
 struct BottomCaptureRail: View {
     let hasDraft: Bool
-    let latestResult: CaptureResult?
     let saving: Bool
     @Binding var addMenuOpen: Bool
     @Binding var formattingOpen: Bool
@@ -330,65 +504,61 @@ struct BottomCaptureRail: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            if let latestResult {
-                ResultMetricRail(result: latestResult)
-            } else {
-                RailButton(
-                    systemName: "plus",
-                    color: .textPrimary,
-                    accessibilityLabel: "Add attachment",
-                    action: { addMenuOpen = true }
-                )
-                .popover(isPresented: $addMenuOpen, arrowEdge: .bottom) {
-                    AttachmentActionPopover(
-                        openVoiceRecorder: {
-                            addMenuOpen = false
-                            openVoiceRecorder()
-                        },
-                        openCamera: {
-                            addMenuOpen = false
-                            openCamera()
-                        },
-                        openPhotoLibrary: {
-                            addMenuOpen = false
-                            openPhotoLibrary()
-                        },
-                        openDrawing: {
-                            addMenuOpen = false
-                            openDrawing()
-                        },
-                        requestSuggestion: {
-                            addMenuOpen = false
-                            requestSuggestion()
-                        }
-                    )
-                    .presentationCompactAdaptation(.popover)
-                }
-
-                RailTextButton(
-                    text: "Aa",
-                    accessibilityLabel: "Text formatting",
-                    action: { formattingOpen = true }
-                )
-                .popover(isPresented: $formattingOpen, arrowEdge: .bottom) {
-                    TextFormatPopover { action in
-                        formattingOpen = false
-                        applyFormat(action)
+            RailButton(
+                systemName: "plus",
+                color: .textPrimary,
+                accessibilityLabel: "Add attachment",
+                action: { addMenuOpen = true }
+            )
+            .popover(isPresented: $addMenuOpen, arrowEdge: .bottom) {
+                AttachmentActionPopover(
+                    openVoiceRecorder: {
+                        addMenuOpen = false
+                        openVoiceRecorder()
+                    },
+                    openCamera: {
+                        addMenuOpen = false
+                        openCamera()
+                    },
+                    openPhotoLibrary: {
+                        addMenuOpen = false
+                        openPhotoLibrary()
+                    },
+                    openDrawing: {
+                        addMenuOpen = false
+                        openDrawing()
+                    },
+                    requestSuggestion: {
+                        addMenuOpen = false
+                        requestSuggestion()
                     }
-                    .presentationCompactAdaptation(.popover)
-                }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
 
-                Spacer(minLength: 0)
-
-                if hasDraft || saving {
-                    RailButton(
-                        systemName: saving ? "hourglass" : "checkmark",
-                        color: .textPrimary,
-                        accessibilityLabel: saving ? "Saving" : "Submit note",
-                        action: submit
-                    )
-                        .transition(.scale(scale: 0.82).combined(with: .opacity))
+            RailTextButton(
+                text: "Aa",
+                accessibilityLabel: "Text formatting",
+                action: { formattingOpen = true }
+            )
+            .popover(isPresented: $formattingOpen, arrowEdge: .bottom) {
+                TextFormatPopover { action in
+                    formattingOpen = false
+                    applyFormat(action)
                 }
+                .presentationCompactAdaptation(.popover)
+            }
+
+            Spacer(minLength: 0)
+
+            if hasDraft || saving {
+                RailButton(
+                    systemName: saving ? "hourglass" : "checkmark",
+                    color: .textPrimary,
+                    accessibilityLabel: saving ? "Saving" : "Submit note",
+                    action: submit
+                )
+                    .transition(.scale(scale: 0.82).combined(with: .opacity))
             }
         }
         .frame(maxWidth: 430)

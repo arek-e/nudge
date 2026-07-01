@@ -123,6 +123,11 @@ enum TextFormatAction {
     case italic
 }
 
+private struct PendingCaptureResultContext {
+    let noteText: String
+    let saved: SavedCapture
+}
+
 @MainActor
 final class LaresCaptureViewModel: ObservableObject {
     private static let dailyStreakKey = "lares.dailyStreak"
@@ -130,6 +135,7 @@ final class LaresCaptureViewModel: ObservableObject {
     private let defaults = UserDefaults.standard
 
     @Published var actions: [ActionItem] = []
+    @Published var activeAlert: CaptureAlert?
     @Published var attachments: [CaptureAttachment] = []
     @Published var calendarDays: [CalendarDayStats] = []
     @Published private(set) var dailyStreak: Int
@@ -141,12 +147,15 @@ final class LaresCaptureViewModel: ObservableObject {
     @Published var presentedResult: CaptureResult?
     @Published var previewedAttachment: CaptureAttachment?
     @Published var editingDrawing: CaptureAttachment?
+    @Published var retainedRows: [RetainedCaptureRow] = []
     @Published var saving = false
     @Published var signals: [EventRecord] = []
     @Published var stage: CaptureStage = .idle
     @Published var statusMessage = "Connecting"
     @Published var trailingDraft = ""
     private var lastStreakDate: String
+    private var pendingInterruptedDraftText: String?
+    private var pendingResultContext: PendingCaptureResultContext?
 
     init() {
         dailyStreak = defaults.integer(forKey: Self.dailyStreakKey)
@@ -160,13 +169,92 @@ final class LaresCaptureViewModel: ObservableObject {
     }
 
     var hasDraft: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if let pendingResultContext {
+            return draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                != pendingResultContext.noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+                || !trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
     }
 
+    var hasPendingResult: Bool {
+        pendingResultContext != nil
+    }
+
+    var shouldFocusContinuationDraft: Bool {
+        pendingResultContext != nil && stage == .processing
+    }
+
+    var shouldPollProcessing: Bool {
+        (pendingResultContext != nil && stage == .processing)
+            || retainedRows.contains { $0.stage == .processing }
+    }
+
     var todayLocalDate: String {
         Self.localDate()
+    }
+
+    func updateDraft(_ text: String) {
+        let processingEdit = CaptureProcessingEditPolicy.evaluate(
+            isLeadingDraft: true,
+            currentText: draft,
+            nextText: text,
+            hasPendingResult: pendingResultContext != nil,
+            stage: stage
+        )
+        if processingEdit.requiresInterruptionConfirmation {
+            pendingInterruptedDraftText = text
+            activeAlert = .processingEditInterruption
+            return
+        }
+
+        let reset = CaptureDraftResetPolicy.evaluate(
+            currentText: draft,
+            nextText: text,
+            hasLatestResult: latestResult != nil,
+            hasPendingResult: pendingResultContext != nil,
+            stage: stage
+        )
+        draft = text
+        apply(reset)
+    }
+
+    func updateTrailingDraft(_ text: String) {
+        let reset = CaptureDraftResetPolicy.evaluate(
+            currentText: trailingDraft,
+            nextText: text,
+            hasLatestResult: latestResult != nil,
+            hasPendingResult: pendingResultContext != nil,
+            stage: stage
+        )
+        trailingDraft = text
+        apply(reset)
+    }
+
+    func confirmProcessingEditInterruption() {
+        guard let pendingInterruptedDraftText else {
+            activeAlert = nil
+            return
+        }
+
+        let reset = CaptureDraftResetOutcome(
+            clearsLatestResult: latestResult != nil,
+            clearsPendingResult: pendingResultContext != nil,
+            stage: .idle
+        )
+        draft = pendingInterruptedDraftText
+        self.pendingInterruptedDraftText = nil
+        activeAlert = nil
+        apply(reset)
+        statusMessage = "Editing note"
+    }
+
+    func cancelProcessingEditInterruption() {
+        pendingInterruptedDraftText = nil
+        activeAlert = nil
     }
 
     func calendarStats(selectedDate: String) -> CalendarStatsSnapshot {
@@ -191,19 +279,50 @@ final class LaresCaptureViewModel: ObservableObject {
             actions = actionsResponse.actions
             journal = try await loadedJournal
             latestRun = actionsResponse.latestRun
-            if latestRun?.isProcessing == true {
+            let isProcessing = latestRun?.isProcessing == true
+            let tracksPendingResult = pendingResultContext != nil
+            if isProcessing && tracksPendingResult {
                 stage = .processing
+                statusMessage = "Processing in background"
+            } else if let latestRun, latestRun.isFailed, tracksPendingResult {
+                let completion = CaptureSaveCompletionPolicy.evaluate(
+                    isProcessing: false,
+                    errorCode: latestRun.errorCode
+                )
+                stage = completion.stage
+                statusMessage = completion.statusMessage
+            } else if let pendingResultContext {
+                let completedSave = SavedCapture(
+                    analysisRun: latestRun ?? pendingResultContext.saved.analysisRun,
+                    journal: journal ?? pendingResultContext.saved.journal,
+                    capture: pendingResultContext.saved.capture
+                )
+                latestResult = makeResult(for: pendingResultContext.noteText, saved: completedSave)
+                self.pendingResultContext = nil
+                stage = .saved
+                statusMessage = "Saved to Lares"
             } else if stage == .processing {
                 stage = .idle
+                statusMessage = "Connected"
+            } else {
+                statusMessage = "Connected"
             }
-            statusMessage = "Connected"
+            await refreshRetainedRows()
         } catch {
             statusMessage = "Engine unavailable"
         }
     }
 
+    func pollProcessingResult() async {
+        while shouldPollProcessing {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if Task.isCancelled { return }
+            await refreshContext()
+        }
+    }
+
     func addLine() {
-        if attachments.isEmpty {
+        if attachments.isEmpty && pendingResultContext == nil {
             draft = Self.appending("Remember ", to: draft)
         } else {
             trailingDraft = Self.appending("Remember ", to: trailingDraft)
@@ -211,25 +330,30 @@ final class LaresCaptureViewModel: ObservableObject {
     }
 
     func addJournalingSuggestion() {
-        if attachments.isEmpty {
+        if attachments.isEmpty && pendingResultContext == nil {
             draft = Self.appending("Today, I noticed ", to: draft)
         } else {
             trailingDraft = Self.appending("Today, I noticed ", to: trailingDraft)
         }
-        latestResult = nil
-        stage = .idle
+        if pendingResultContext == nil {
+            latestResult = nil
+            stage = .idle
+        }
     }
 
     func applyTextFormat(_ format: TextFormatAction) {
-        latestResult = nil
-        stage = .idle
+        let formatsContinuation = pendingResultContext != nil || !attachments.isEmpty
+        if pendingResultContext == nil {
+            latestResult = nil
+            stage = .idle
+        }
 
-        let text = attachments.isEmpty ? draft : trailingDraft
+        let text = formatsContinuation ? trailingDraft : draft
         let formatted = Self.formatted(text, as: format)
-        if attachments.isEmpty {
-            draft = formatted
-        } else {
+        if formatsContinuation {
             trailingDraft = formatted
+        } else {
+            draft = formatted
         }
     }
 
@@ -265,6 +389,7 @@ final class LaresCaptureViewModel: ObservableObject {
         }
         attachments.append(attachment)
         latestResult = nil
+        pendingResultContext = nil
         errorMessage = ""
         stage = .idle
     }
@@ -280,6 +405,7 @@ final class LaresCaptureViewModel: ObservableObject {
         }
         attachments.append(attachment)
         latestResult = nil
+        pendingResultContext = nil
         errorMessage = ""
         stage = .idle
     }
@@ -296,6 +422,7 @@ final class LaresCaptureViewModel: ObservableObject {
             trailingDraft = ""
         }
         latestResult = nil
+        pendingResultContext = nil
     }
 
     func openAttachment(_ attachment: CaptureAttachment) {
@@ -306,6 +433,11 @@ final class LaresCaptureViewModel: ObservableObject {
         }
     }
 
+    func openLatestResult() {
+        guard let latestResult else { return }
+        presentedResult = latestResult
+    }
+
     func updateDrawing(_ attachment: CaptureAttachment, drawing: PKDrawing) {
         guard let updated = CaptureAttachment.drawing(drawing, id: attachment.id),
               let index = attachments.firstIndex(where: { $0.id == attachment.id }) else {
@@ -314,6 +446,7 @@ final class LaresCaptureViewModel: ObservableObject {
         }
         attachments[index] = updated
         latestResult = nil
+        pendingResultContext = nil
         errorMessage = ""
         stage = .idle
     }
@@ -321,20 +454,24 @@ final class LaresCaptureViewModel: ObservableObject {
     func submit() async {
         let leadingText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let trailingText = trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !leadingText.isEmpty || !trailingText.isEmpty || !attachments.isEmpty else {
-            errorMessage = "Say or type something first."
+        let pendingNoteText = pendingResultContext?.noteText
+        let previousPendingStage = stage
+        let existingJournalText = journal?.bodyText
+        let submission = CaptureSubmissionDraftPolicy.evaluate(
+            leadingText: leadingText,
+            trailingText: trailingText,
+            attachmentLabels: attachments.map(\.label),
+            pendingNoteText: pendingNoteText
+        )
+        guard submission.hasContent else {
+            if pendingNoteText == nil {
+                errorMessage = "Say or type something first."
+            }
             return
         }
         guard !saving else { return }
 
-        let typedText = [leadingText, trailingText]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-        let noteText = typedText.isEmpty
-            ? attachments.map(\.label).joined(separator: "\n")
-            : typedText
-        let leadingNote = typedText.isEmpty ? noteText : leadingText
-        let mediaAttachments = attachments.map(\.journalAttachment)
+        let mediaAttachments = submission.includesAttachments ? attachments.map(\.journalAttachment) : []
 
         saving = true
         errorMessage = ""
@@ -344,9 +481,10 @@ final class LaresCaptureViewModel: ObservableObject {
 
         do {
             let saved = try await LaresAPI.saveDailyNote(
-                leadingNote,
+                submission.leadingNote,
                 attachments: mediaAttachments,
-                trailingNote: trailingText,
+                existingJournalText: existingJournalText,
+                trailingNote: submission.trailingNote,
                 localDate: Self.localDate()
             )
             latestRun = saved.analysisRun ?? latestRun
@@ -354,11 +492,38 @@ final class LaresCaptureViewModel: ObservableObject {
             stage = .refreshing
             await refreshContext()
 
-            let result = makeResult(for: noteText, saved: saved)
-            latestResult = result
-            presentedResult = result
-            stage = latestRun?.isProcessing == true ? .processing : .saved
-            statusMessage = "Saved to Lares"
+            if pendingNoteText != nil {
+                let transition = CaptureSubmissionTransitionPolicy.evaluate(
+                    analysisRunId: pendingResultContext?.saved.analysisRun?.id,
+                    currentLeadingText: leadingText,
+                    submittedNoteText: submission.noteText,
+                    pendingNoteText: pendingNoteText,
+                    stage: previousPendingStage
+                )
+                if let retainedRow = transition.retainedRow {
+                    appendRetainedRow(retainedRow)
+                }
+                draft = transition.leadingText
+                trailingDraft = transition.trailingText
+            }
+
+            let result = makeResult(for: submission.noteText, saved: saved)
+            let completion = CaptureSaveCompletionPolicy.evaluate(
+                isProcessing: latestRun?.isProcessing == true,
+                errorCode: latestRun?.isFailed == true ? latestRun?.errorCode : nil
+            )
+            if completion.showsResultRow {
+                latestResult = result
+                pendingResultContext = nil
+            } else if completion.keepsResultPending {
+                latestResult = nil
+                pendingResultContext = PendingCaptureResultContext(noteText: submission.noteText, saved: saved)
+            }
+            if completion.autoPresentsDrawer {
+                presentedResult = result
+            }
+            stage = completion.stage
+            statusMessage = completion.statusMessage
         } catch {
             if Self.isTimeout(error) {
                 stage = .processing
@@ -383,6 +548,41 @@ final class LaresCaptureViewModel: ObservableObject {
         latestResult = nil
         errorMessage = ""
         stage = .idle
+    }
+
+    private func appendRetainedRow(_ row: RetainedCaptureRow) {
+        guard !retainedRows.contains(where: { retainedRow in
+            if let analysisRunId = row.analysisRunId {
+                return retainedRow.analysisRunId == analysisRunId
+            }
+            return retainedRow.noteText == row.noteText && retainedRow.stage == row.stage
+        }) else {
+            return
+        }
+        retainedRows.append(row)
+    }
+
+    private func refreshRetainedRows() async {
+        var updatedRows: [RetainedCaptureRow] = []
+        for row in retainedRows {
+            guard row.stage == .processing, let analysisRunId = row.analysisRunId else {
+                updatedRows.append(row)
+                continue
+            }
+            guard let run = try? await LaresAPI.getAgentRun(runId: analysisRunId) else {
+                updatedRows.append(row)
+                continue
+            }
+            updatedRows.append(
+                RetainedCaptureRow(
+                    id: row.id,
+                    analysisRunId: row.analysisRunId,
+                    noteText: row.noteText,
+                    stage: Self.stage(for: run)
+                )
+            )
+        }
+        retainedRows = updatedRows
     }
 
     private func makeResult(for text: String, saved: SavedCapture) -> CaptureResult {
@@ -449,6 +649,16 @@ final class LaresCaptureViewModel: ObservableObject {
         return labels
     }
 
+    private func apply(_ reset: CaptureDraftResetOutcome) {
+        if reset.clearsLatestResult {
+            latestResult = nil
+        }
+        if reset.clearsPendingResult {
+            pendingResultContext = nil
+        }
+        stage = reset.stage
+    }
+
     private func updateDailyStreak(for localDate: String) {
         guard lastStreakDate != localDate else { return }
         if Self.previousLocalDate(from: localDate) == lastStreakDate {
@@ -482,37 +692,13 @@ final class LaresCaptureViewModel: ObservableObject {
     private static func isTimeout(_ error: Error) -> Bool {
         (error as? URLError)?.code == .timedOut || (error as NSError).code == NSURLErrorTimedOut
     }
-}
 
-enum CaptureStage: Equatable {
-    case idle
-    case saving
-    case refreshing
-    case processing
-    case saved
-
-    var label: String? {
-        switch self {
-        case .idle:
-            nil
-        case .saving:
-            "Saving"
-        case .refreshing:
-            "Updating context"
-        case .processing:
-            "Processing"
-        case .saved:
-            "Saved"
+    private static func stage(for run: AgentRun) -> CaptureStage {
+        if run.isProcessing { return .processing }
+        if run.isFailed {
+            return run.errorCode == "AI_EXTRACTION_TIMEOUT" ? .analysisTimedOut : .analysisFailed
         }
-    }
-
-    var isWorking: Bool {
-        switch self {
-        case .saving, .refreshing, .processing:
-            true
-        case .idle, .saved:
-            false
-        }
+        return .saved
     }
 }
 

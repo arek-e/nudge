@@ -1300,6 +1300,51 @@ describe("web app", () => {
     expect((await summariesResponse.json()).summaries).toEqual([]);
   });
 
+  test("iOS clients can list calendar day activity", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "Met Kai and captured the follow-up.",
+          localDate: "2026-06-18",
+          title: "June 18",
+        }),
+      },
+      env,
+    );
+    await app.request(
+      "/api/events",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          occurredAt: "2026-06-18T10:00:00.000Z",
+          payload: { note: "Follow up with Kai." },
+          schemaVersion: 1,
+          source: "ios_app",
+          type: "manual_check_in_submitted",
+        }),
+      },
+      env,
+    );
+
+    const response = await app.request("/api/calendar/days?timeZone=UTC", {}, env);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.days).toEqual([
+      {
+        localDate: "2026-06-18",
+        noteCount: 1,
+        signalCount: 1,
+      },
+    ]);
+  });
+
   test("POST /api/journal persists AI context as a debug-wide event", async () => {
     const traceDb = createTraceDb();
     const workflow = {

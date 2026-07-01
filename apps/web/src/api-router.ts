@@ -3,7 +3,13 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Effect } from "effect";
-import { Db, type AgentRunRecord, type DbService } from "@lares/db";
+import {
+  Db,
+  type AgentRunRecord,
+  type DbService,
+  type EventRecord,
+  type JournalDocumentRecord,
+} from "@lares/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
@@ -46,6 +52,59 @@ function classifyVoiceLogRoute(spokenText: string) {
   return text.includes("?") || reasoningVoiceLogPrefixes.some((prefix) => text.startsWith(prefix))
     ? "reasoning_candidate"
     : "capture_only";
+}
+
+interface CalendarDayActivity {
+  readonly localDate: string;
+  readonly noteCount: number;
+  readonly signalCount: number;
+}
+
+function localDateInTimeZone(isoDate: string, timeZone: string) {
+  const date = new Date(isoDate);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone,
+    year: "numeric",
+  });
+  const parts = formatter.formatToParts(date);
+  const year = formattedDatePart(parts, "year");
+  const month = formattedDatePart(parts, "month");
+  const day = formattedDatePart(parts, "day");
+  return year && month && day ? `${year}-${month}-${day}` : isoDate.slice(0, 10);
+}
+
+function formattedDatePart(parts: ReadonlyArray<Intl.DateTimeFormatPart>, type: string) {
+  return parts.find((part) => part.type === type)?.value ?? "";
+}
+
+function upsertCalendarDay(
+  days: Map<string, CalendarDayActivity>,
+  localDate: string,
+  increment: { readonly notes?: number; readonly signals?: number },
+) {
+  const current = days.get(localDate) ?? { localDate, noteCount: 0, signalCount: 0 };
+  days.set(localDate, {
+    localDate,
+    noteCount: current.noteCount + (increment.notes ?? 0),
+    signalCount: current.signalCount + (increment.signals ?? 0),
+  });
+}
+
+function buildCalendarDays(input: {
+  readonly events: ReadonlyArray<EventRecord>;
+  readonly journalDocuments: ReadonlyArray<JournalDocumentRecord>;
+  readonly timeZone: string;
+}) {
+  const days = new Map<string, CalendarDayActivity>();
+  for (const document of input.journalDocuments) {
+    upsertCalendarDay(days, document.localDate, { notes: 1 });
+  }
+  for (const event of input.events) {
+    upsertCalendarDay(days, localDateInTimeZone(event.occurredAt, input.timeZone), { signals: 1 });
+  }
+  return [...days.values()].sort((left, right) => left.localDate.localeCompare(right.localDate));
 }
 
 export interface ApiContext {
@@ -152,6 +211,21 @@ export const apiRouter = api.router({
       }
       await context.runEffect(context.db.deleteUserData({ userId: context.user.id }));
       return { deleted: true };
+    }),
+  },
+  calendar: {
+    days: api.calendar.days.handler(async ({ context, input }) => {
+      const [events, journalDocuments] = await Promise.all([
+        context.runEffect(context.db.listRecentEvents({ limit: 100, userId: context.user.id })),
+        context.runEffect(context.db.listJournalDocuments({ userId: context.user.id })),
+      ]);
+      return {
+        days: buildCalendarDays({
+          events,
+          journalDocuments,
+          timeZone: input.timeZone,
+        }),
+      };
     }),
   },
   conversations: {

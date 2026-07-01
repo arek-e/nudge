@@ -34,17 +34,19 @@ struct ContentView: View {
                         .padding(.horizontal, 24)
                         .padding(.top, 14)
 
-                    CaptureCanvas(model: model, focused: $captureFocused)
+                    CaptureCanvas(
+                        model: model,
+                        focused: $captureFocused,
+                        openLatestResult: { model.openLatestResult() }
+                    )
                         .padding(.horizontal, 26)
                         .padding(.top, 48)
-
-                    Spacer(minLength: 0)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 BottomCaptureRail(
                     hasDraft: model.hasDraft,
-                    latestResult: model.latestResult,
                     saving: model.saving,
                     addMenuOpen: $addMenuOpen,
                     formattingOpen: $formattingOpen,
@@ -60,13 +62,20 @@ struct ContentView: View {
                     openVoiceRecorder: { voiceRecorderOpen = true },
                     requestSuggestion: {
                         model.addJournalingSuggestion()
-                        captureFocused = model.attachments.isEmpty ? .draft : .trailingDraft
+                        captureFocused = model.shouldFocusContinuationDraft || !model.attachments.isEmpty ? .trailingDraft : .draft
                     },
                     applyFormat: {
                         model.applyTextFormat($0)
-                        captureFocused = model.attachments.isEmpty ? .draft : .trailingDraft
+                        captureFocused = model.shouldFocusContinuationDraft || !model.attachments.isEmpty ? .trailingDraft : .draft
                     },
-                    submit: { Task { await model.submit() } }
+                    submit: {
+                        Task {
+                            await model.submit()
+                            if model.shouldFocusContinuationDraft {
+                                captureFocused = .trailingDraft
+                            }
+                        }
+                    }
                 )
                 .padding(.horizontal, 24)
                 .padding(.bottom, 14)
@@ -80,10 +89,26 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .task { await model.refreshContext() }
+        .task(id: model.shouldPollProcessing) {
+            if model.shouldPollProcessing {
+                await model.pollProcessingResult()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await model.refreshContext() }
             }
+        }
+        .alert("Interrupt processing?", isPresented: processingEditAlertPresented) {
+            Button("Keep processing", role: .cancel) {
+                model.cancelProcessingEditInterruption()
+            }
+            Button("Edit note", role: .destructive) {
+                model.confirmProcessingEditInterruption()
+                captureFocused = .draft
+            }
+        } message: {
+            Text("Editing this note will stop tracking the current processing. You can submit the edited note again when you're ready.")
         }
         .sheet(item: $model.presentedResult) { result in
             CaptureDetailSheet(result: result)
@@ -125,6 +150,17 @@ struct ContentView: View {
             }
             .presentationDetents([.height(320)])
         }
+    }
+
+    private var processingEditAlertPresented: Binding<Bool> {
+        Binding(
+            get: { model.activeAlert == .processingEditInterruption },
+            set: { isPresented in
+                if !isPresented {
+                    model.cancelProcessingEditInterruption()
+                }
+            }
+        )
     }
 
     private func perform(_ action: LaresChromeAction) {
