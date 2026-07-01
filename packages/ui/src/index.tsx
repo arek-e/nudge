@@ -52,17 +52,19 @@ import { DotmSquare3 } from "./components/ui/dotm-square-3";
 
 export type RichTextDocument = Value;
 
-const shellClass = "mx-auto grid h-dvh w-full max-w-[44rem] grid-rows-[1fr] text-neutral-100";
+const shellClass =
+  "mx-auto grid h-dvh w-full max-w-[44rem] grid-rows-[1fr] text-[var(--ui-text-body)]";
 const contentViewportClass =
   "min-h-0 overflow-y-auto overscroll-contain px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(5.75rem+env(safe-area-inset-bottom))]";
 const surfaceClass =
-  "relative overflow-hidden rounded-[1.45rem] border border-white/6 bg-[#1f1f1f]/95 p-5 shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl";
+  "relative overflow-hidden rounded-[1.45rem] border border-[var(--ui-border-subtle)] bg-[var(--ui-surface-primary-overlay)] p-5 shadow-[var(--ui-shadow-surface)] backdrop-blur-xl";
 const buttonClass =
-  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-[#f4f1eb] px-4 text-[0.8125rem] font-medium text-[#080808] shadow-none disabled:opacity-70";
+  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-[var(--ui-action-primary-bg)] px-4 text-[0.8125rem] font-medium text-[var(--ui-action-primary-fg)] shadow-none disabled:opacity-70";
 const secondaryButtonClass =
-  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-white/5 px-4 text-[0.8125rem] font-medium text-neutral-200 shadow-none disabled:opacity-70";
-const eyebrowClass = "mb-2 text-[0.75rem] font-medium uppercase tracking-[0.12em] text-neutral-400";
-const summaryClass = "mt-4 text-[0.875rem] leading-[1.55] text-neutral-300";
+  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-[var(--ui-surface-interactive)] px-4 text-[0.8125rem] font-medium text-[var(--ui-text-body)] shadow-none disabled:opacity-70";
+const eyebrowClass =
+  "mb-2 text-[0.75rem] font-medium uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]";
+const summaryClass = "mt-4 text-[0.875rem] leading-[1.55] text-[var(--ui-text-secondary)]";
 const cx = (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(" ");
 
 export interface EventListItem {
@@ -290,11 +292,11 @@ export function buildLoopFunnelData(input: {
   readonly synthesisCount: number;
 }): ReadonlyArray<LoopFunnelDatum> {
   return [
-    { fill: "#9cc9e8", label: "Signals", value: input.signalCount },
-    { fill: "#c4a76f", label: "Insights", value: input.synthesisCount },
-    { fill: "#e7a5a1", label: "Review", value: input.pendingProposalCount },
-    { fill: "#f4efe8", label: "Commit", value: input.activeCommitmentCount },
-    { fill: "#9fbf9f", label: "Closed", value: input.closedOutcomeCount },
+    { fill: "var(--ui-data-signal)", label: "Signals", value: input.signalCount },
+    { fill: "var(--ui-data-insight)", label: "Insights", value: input.synthesisCount },
+    { fill: "var(--ui-data-review)", label: "Review", value: input.pendingProposalCount },
+    { fill: "var(--ui-data-commit)", label: "Commit", value: input.activeCommitmentCount },
+    { fill: "var(--ui-data-closed)", label: "Closed", value: input.closedOutcomeCount },
   ];
 }
 
@@ -368,32 +370,32 @@ export function LoginCard(props: {
       : "Continue with email";
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#161616] p-6 text-white md:p-10">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[var(--ui-bg-login)] p-6 text-[var(--ui-text-primary)] md:p-10">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <a
-          className="flex items-center gap-2 self-center text-sm font-medium text-white no-underline"
+          className="flex items-center gap-2 self-center text-sm font-medium text-[var(--ui-text-primary)] no-underline"
           href="/"
         >
-          <span className="flex size-6 items-center justify-center rounded-md bg-[#f4f1eb] text-[#080808]">
+          <span className="flex size-6 items-center justify-center rounded-md bg-[var(--ui-action-primary-bg)] text-[var(--ui-action-primary-fg)]">
             <Sparkles className="size-4" aria-hidden="true" strokeWidth={2.2} />
           </span>
           Lares
         </a>
-        <section className="rounded-2xl border border-white/8 bg-[#1f1f1f] p-6 shadow-[0_18px_42px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <section className="rounded-2xl border border-[var(--ui-border-default)] bg-[var(--ui-surface-primary)] p-6 shadow-[var(--ui-shadow-surface-strong)]">
           <header className="text-center">
-            <h1 className="m-0 text-xl font-semibold tracking-[-0.02em] text-white">
+            <h1 className="m-0 text-xl font-semibold tracking-[-0.02em] text-[var(--ui-text-primary)]">
               Welcome back
             </h1>
-            <p className="mt-2 mb-0 text-sm leading-6 text-neutral-400">
+            <p className="mt-2 mb-0 text-sm leading-6 text-[var(--ui-text-subtle)]">
               Sign in with a passkey, Google, or an email code.
             </p>
           </header>
           <div className="mt-6 grid gap-4">
             <form className="grid gap-4" onSubmit={props.onSubmit}>
-              <label className="grid gap-2 text-sm font-medium text-neutral-200">
+              <label className="grid gap-2 text-sm font-medium text-[var(--ui-text-body)]">
                 Email
                 <input
-                  className="min-h-11 rounded-xl border border-white/10 bg-[#111] px-3 text-base text-white outline-none focus:border-white/35"
+                  className="min-h-11 rounded-xl border border-[var(--ui-border-control)] bg-[var(--ui-bg-app)] px-3 text-base text-[var(--ui-text-primary)] outline-none focus:border-[var(--ui-border-focus)]"
                   autoComplete="email"
                   inputMode="email"
                   required
@@ -403,10 +405,10 @@ export function LoginCard(props: {
                 />
               </label>
               {props.sentTo ? (
-                <label className="grid gap-2 text-sm font-medium text-neutral-200">
+                <label className="grid gap-2 text-sm font-medium text-[var(--ui-text-body)]">
                   Code
                   <input
-                    className="min-h-11 rounded-xl border border-white/10 bg-[#111] px-3 text-base text-white outline-none focus:border-white/35"
+                    className="min-h-11 rounded-xl border border-[var(--ui-border-control)] bg-[var(--ui-bg-app)] px-3 text-base text-[var(--ui-text-primary)] outline-none focus:border-[var(--ui-border-focus)]"
                     autoComplete="one-time-code"
                     inputMode="numeric"
                     required
@@ -417,11 +419,13 @@ export function LoginCard(props: {
                 </label>
               ) : null}
               {props.sentTo ? (
-                <p className="m-0 text-sm text-emerald-300">
+                <p className="m-0 text-sm text-[var(--ui-feedback-success)]">
                   Enter the code sent to {props.sentTo}.
                 </p>
               ) : null}
-              {props.error ? <p className="m-0 text-sm text-red-300">{props.error}</p> : null}
+              {props.error ? (
+                <p className="m-0 text-sm text-[var(--ui-feedback-critical)]">{props.error}</p>
+              ) : null}
               <button
                 className={buttonClass}
                 disabled={!props.emailOtpEnabled || props.pendingEmail}
@@ -432,14 +436,16 @@ export function LoginCard(props: {
             </form>
             {hasProvider ? (
               <div className="grid gap-3">
-                <div className="relative py-1 text-center text-xs text-neutral-500">
-                  <span className="absolute inset-x-0 top-1/2 border-t border-white/8" />
-                  <span className="relative bg-[#1f1f1f] px-2">Other ways to continue</span>
+                <div className="relative py-1 text-center text-xs text-[var(--ui-text-muted)]">
+                  <span className="absolute inset-x-0 top-1/2 border-t border-[var(--ui-border-default)]" />
+                  <span className="relative bg-[var(--ui-surface-primary)] px-2">
+                    Other ways to continue
+                  </span>
                 </div>
                 <div className="flex justify-center gap-2">
                   {props.passkeyEnabled ? (
                     <button
-                      className="grid size-11 place-items-center rounded-full border border-white/8 bg-white/5 text-neutral-100 disabled:opacity-70"
+                      className="grid size-11 place-items-center rounded-full border border-[var(--ui-border-default)] bg-[var(--ui-surface-interactive)] text-[var(--ui-text-body)] disabled:opacity-70"
                       aria-label="Continue with passkey"
                       disabled={props.pendingPasskey}
                       onClick={props.onPasskey}
@@ -450,7 +456,7 @@ export function LoginCard(props: {
                     </button>
                   ) : null}
                   <button
-                    className="grid size-11 place-items-center rounded-full border border-white/8 bg-white/5 text-neutral-500 opacity-55"
+                    className="grid size-11 place-items-center rounded-full border border-[var(--ui-border-default)] bg-[var(--ui-surface-interactive)] text-[var(--ui-text-muted)] opacity-55"
                     aria-label="Gmail unavailable"
                     disabled
                     title="Gmail sign-in unavailable"
@@ -484,7 +490,7 @@ export function LoginCard(props: {
 
 export function DashboardHeader(props: { readonly title?: string }) {
   return (
-    <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[#191919] to-[#19191900] py-3">
+    <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[var(--ui-surface-primary)] to-transparent py-3">
       <div>
         <p className={eyebrowClass}>Lares</p>
         <h1 className="m-0 max-w-[14ch] text-2xl leading-[1.04] font-medium tracking-[-0.035em] text-balance">
@@ -492,7 +498,7 @@ export function DashboardHeader(props: { readonly title?: string }) {
         </h1>
       </div>
       <a
-        className="grid size-11 place-content-center rounded-full border border-white/5 bg-[#272727] text-sm font-semibold text-white no-underline"
+        className="grid size-11 place-content-center rounded-full border border-[var(--ui-border-faint)] bg-[var(--ui-surface-raised)] text-sm font-semibold text-[var(--ui-text-primary)] no-underline"
         aria-label="Settings"
         href="/settings"
       >
@@ -535,17 +541,17 @@ export function HomeDashboard(props: {
     >
       <div className="grid grid-cols-[2.25rem_1fr_2.25rem] items-center gap-3">
         <span
-          className="grid size-8 place-content-center rounded-full bg-[#232323]"
+          className="grid size-8 place-content-center rounded-full bg-[var(--ui-surface-selected)]"
           aria-hidden="true"
         >
-          <Sparkles className="size-4 text-neutral-400" strokeWidth={2.1} />
+          <Sparkles className="size-4 text-[var(--ui-text-subtle)]" strokeWidth={2.1} />
         </span>
-        <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
+        <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-[var(--ui-text-primary)] lowercase">
           good afternoon.
         </h1>
         <div className="relative justify-self-end">
           <button
-            className="grid size-8 place-content-center rounded-full border-0 bg-[#232323] text-[#f4f1eb]"
+            className="grid size-8 place-content-center rounded-full border-0 bg-[var(--ui-surface-selected)] text-[var(--ui-text-primary)]"
             type="button"
             aria-expanded={accountMenuOpen}
             aria-haspopup="menu"
@@ -556,12 +562,12 @@ export function HomeDashboard(props: {
           </button>
           {accountMenuOpen ? (
             <div
-              className="absolute top-10 right-0 z-10 grid min-w-44 gap-1 rounded-2xl border border-white/8 bg-[#272727] p-1.5 shadow-2xl"
+              className="absolute top-10 right-0 z-10 grid min-w-44 gap-1 rounded-2xl border border-[var(--ui-border-default)] bg-[var(--ui-surface-raised)] p-1.5 shadow-2xl"
               role="menu"
               aria-label="Account actions"
             >
               <button
-                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-neutral-100"
+                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-[var(--ui-text-body)]"
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -569,11 +575,15 @@ export function HomeDashboard(props: {
                   props.onOpenSettings?.();
                 }}
               >
-                <Settings className="size-4 text-neutral-400" aria-hidden="true" strokeWidth={2} />
+                <Settings
+                  className="size-4 text-[var(--ui-text-subtle)]"
+                  aria-hidden="true"
+                  strokeWidth={2}
+                />
                 Settings
               </button>
               <button
-                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-neutral-100"
+                className="flex min-h-10 items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm font-medium text-[var(--ui-text-body)]"
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -581,7 +591,11 @@ export function HomeDashboard(props: {
                   props.onSignOut?.();
                 }}
               >
-                <LogOut className="size-4 text-neutral-400" aria-hidden="true" strokeWidth={2} />
+                <LogOut
+                  className="size-4 text-[var(--ui-text-subtle)]"
+                  aria-hidden="true"
+                  strokeWidth={2}
+                />
                 Sign out
               </button>
             </div>
@@ -589,12 +603,12 @@ export function HomeDashboard(props: {
         </div>
       </div>
       <div
-        className="grid grid-cols-7 items-center gap-1 text-center text-neutral-500"
+        className="grid grid-cols-7 items-center gap-1 text-center text-[var(--ui-text-muted)]"
         aria-label="Week"
       >
         {days.map((day) => (
           <span
-            className={`grid min-h-9 place-content-center gap-0.5 rounded-xl ${day.isToday ? "bg-[#232323] text-white" : ""}`}
+            className={`grid min-h-9 place-content-center gap-0.5 rounded-xl ${day.isToday ? "bg-[var(--ui-surface-selected)] text-[var(--ui-text-primary)]" : ""}`}
             key={day.weekday}
           >
             <small className="text-[0.58rem]">{day.weekday}</small>
@@ -604,18 +618,26 @@ export function HomeDashboard(props: {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <DashboardCard label="Notes">
-          <Sun className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
+          <Sun
+            className="mx-auto size-5 text-[var(--ui-text-secondary)]"
+            aria-hidden="true"
+            strokeWidth={2}
+          />
           <strong>{props.hasJournalEntry ? "Written" : "Empty"}</strong>
           <span>{props.loading ? "..." : `${props.eventCount} items`}</span>
         </DashboardCard>
         <DashboardCard label="Open loops">
-          <Moon className="mx-auto size-5 text-neutral-300" aria-hidden="true" strokeWidth={2} />
+          <Moon
+            className="mx-auto size-5 text-[var(--ui-text-secondary)]"
+            aria-hidden="true"
+            strokeWidth={2}
+          />
           <strong>{props.openLoopCount}</strong>
           <span>{props.openLoopCount === 0 ? "Clear" : "Open"}</span>
         </DashboardCard>
       </div>
       <DashboardCard label="Calendar" wide>
-        <span className="text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-400 uppercase">
+        <span className="text-[0.68rem] font-semibold tracking-[0.18em] text-[var(--ui-text-subtle)] uppercase">
           This week
         </span>
         <WeeklyActivityChart data={props.weeklyActivity} />
@@ -636,14 +658,15 @@ export function DashboardCard(props: {
       transition={{ duration: 0.14 }}
     >
       <p className={eyebrowClass}>{props.label}</p>
-      <div className="grid h-full content-center gap-2 text-center [&>span]:text-[0.75rem] [&>span]:leading-snug [&>span]:text-neutral-300 [&>strong]:text-base [&>strong]:leading-tight [&>strong]:font-semibold [&>strong]:tracking-[-0.025em] [&>strong]:text-white">
+      <div className="grid h-full content-center gap-2 text-center [&>span]:text-[0.75rem] [&>span]:leading-snug [&>span]:text-[var(--ui-text-secondary)] [&>strong]:text-base [&>strong]:leading-tight [&>strong]:font-semibold [&>strong]:tracking-[-0.025em] [&>strong]:text-[var(--ui-text-primary)]">
         {props.children}
       </div>
     </motion.article>
   );
 }
 
-const chartFrameClass = "h-28 w-full [&_.recharts-cartesian-axis-tick_text]:fill-neutral-500";
+const chartFrameClass =
+  "h-28 w-full [&_.recharts-cartesian-axis-tick_text]:fill-[var(--ui-text-muted)]";
 
 function ChartTooltip(props: {
   readonly active?: boolean;
@@ -653,8 +676,8 @@ function ChartTooltip(props: {
   if (!props.active || !Array.isArray(props.payload) || props.payload.length === 0) return null;
   const first = props.payload[0] as { readonly name?: string; readonly value?: number };
   return (
-    <div className="rounded-xl border border-white/10 bg-[#111]/95 px-3 py-2 text-xs text-neutral-200 shadow-xl">
-      <strong className="block text-white">{props.label ?? first.name}</strong>
+    <div className="rounded-xl border border-[var(--ui-border-control)] bg-[var(--ui-bg-app-overlay)] px-3 py-2 text-xs text-[var(--ui-text-body)] shadow-xl">
+      <strong className="block text-[var(--ui-text-primary)]">{props.label ?? first.name}</strong>
       <span>{first.value ?? 0}</span>
     </div>
   );
@@ -669,7 +692,10 @@ export function WeeklyActivityChart(props: { readonly data: ReadonlyArray<Signal
           <Tooltip cursor={false} content={<ChartTooltip />} />
           <Bar dataKey="count" radius={[8, 8, 8, 8]} minPointSize={6}>
             {props.data.map((item) => (
-              <Cell key={item.label} fill={item.isToday ? "#f4efe8" : "#6b7280"} />
+              <Cell
+                key={item.label}
+                fill={item.isToday ? "var(--ui-data-commit)" : "var(--ui-data-muted)"}
+              />
             ))}
           </Bar>
         </BarChart>
@@ -707,8 +733,8 @@ export function LoopFunnelChart(props: { readonly data: ReadonlyArray<LoopFunnel
             key={item.label}
           >
             <span className="size-2.5 rounded-full" style={{ background: item.fill }} />
-            <span className="text-neutral-400">{item.label}</span>
-            <strong className="text-neutral-100">{item.value}</strong>
+            <span className="text-[var(--ui-text-subtle)]">{item.label}</span>
+            <strong className="text-[var(--ui-text-body)]">{item.value}</strong>
           </div>
         ))}
       </div>
@@ -723,24 +749,24 @@ export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeT
         <AreaChart data={props.data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
           <defs>
             <linearGradient id="lares-completed" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="5%" stopColor="#9fbf9f" stopOpacity={0.55} />
-              <stop offset="95%" stopColor="#9fbf9f" stopOpacity={0.02} />
+              <stop offset="5%" stopColor="var(--ui-data-closed)" stopOpacity={0.55} />
+              <stop offset="95%" stopColor="var(--ui-data-closed)" stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+          <CartesianGrid stroke="var(--ui-line-subtle)" vertical={false} />
           <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={8} fontSize={11} />
           <Tooltip content={<ChartTooltip />} />
           <Area
             type="monotone"
             dataKey="completed"
-            stroke="#9fbf9f"
+            stroke="var(--ui-data-closed)"
             fill="url(#lares-completed)"
             strokeWidth={2}
           />
           <Area
             type="monotone"
             dataKey="abandoned"
-            stroke="#e7a5a1"
+            stroke="var(--ui-data-review)"
             fill="transparent"
             strokeWidth={2}
           />
@@ -757,20 +783,22 @@ export function AgentState(props: {
 }) {
   return (
     <motion.div
-      className="inline-flex w-fit items-center gap-3 rounded-2xl border border-white/5 bg-[#272727] px-3 py-2 text-[0.8125rem] shadow-[0_1px_1px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.02)]"
+      className="inline-flex w-fit items-center gap-3 rounded-2xl border border-[var(--ui-border-faint)] bg-[var(--ui-surface-raised)] px-3 py-2 text-[0.8125rem] shadow-[var(--ui-shadow-inline-status)]"
       aria-label={`${props.label}: ${props.value}`}
       whileHover={{ y: -1 }}
       transition={{ duration: 0.14 }}
     >
       <span
-        className="size-3.5 border border-[#f4f1eb] bg-[radial-gradient(currentColor_1px,transparent_1px)] bg-[length:4px_4px] text-[#f4f1eb]"
+        className="size-3.5 border border-[var(--ui-text-primary)] bg-[radial-gradient(currentColor_1px,transparent_1px)] bg-[length:4px_4px] text-[var(--ui-text-primary)]"
         aria-hidden="true"
       />
       <span className="grid gap-0.5">
-        <span className="text-xs font-medium tracking-[0.12em] text-neutral-400 uppercase">
+        <span className="text-xs font-medium tracking-[0.12em] text-[var(--ui-text-subtle)] uppercase">
           {props.label}
         </span>
-        <strong className="text-[0.8125rem] font-medium text-white">{props.value}</strong>
+        <strong className="text-[0.8125rem] font-medium text-[var(--ui-text-primary)]">
+          {props.value}
+        </strong>
       </span>
     </motion.div>
   );
@@ -787,7 +815,7 @@ export function Surface(props: {
 
   return (
     <motion.section
-      className={`${surfaceClass} mt-4 ${props.primary ? "bg-[#232323]" : ""}`}
+      className={`${surfaceClass} mt-4 ${props.primary ? "bg-[var(--ui-surface-selected)]" : ""}`}
       aria-labelledby={titleId}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -796,7 +824,7 @@ export function Surface(props: {
       {props.eyebrow ? <p className={eyebrowClass}>{props.eyebrow}</p> : null}
       <h2
         id={titleId}
-        className="m-0 text-lg leading-tight font-medium tracking-[-0.02em] text-white"
+        className="m-0 text-lg leading-tight font-medium tracking-[-0.02em] text-[var(--ui-text-primary)]"
       >
         {props.title}
       </h2>
@@ -955,7 +983,7 @@ export function MessageAvatar(props: {
     <div
       data-slot="message-avatar"
       className={cx(
-        "grid size-8 shrink-0 place-content-center rounded-full bg-white/6 text-neutral-300",
+        "grid size-8 shrink-0 place-content-center rounded-full bg-[var(--ui-surface-interactive-strong)] text-[var(--ui-text-secondary)]",
         props.align === "end" && "order-2",
         props.className,
       )}
@@ -986,7 +1014,7 @@ export function MessageFooter(props: {
     <div
       data-slot="message-footer"
       className={cx(
-        "flex text-xs text-neutral-400",
+        "flex text-xs text-[var(--ui-text-subtle)]",
         props.align === "end" ? "justify-end" : "justify-start",
         props.className,
       )}
@@ -1005,14 +1033,14 @@ export function Bubble(props: {
   const variant = props.variant ?? "secondary";
   const variantClass =
     variant === "default"
-      ? "bg-[#f4f1eb] text-[#080808]"
+      ? "bg-[var(--ui-action-primary-bg)] text-[var(--ui-action-primary-fg)]"
       : variant === "muted"
-        ? "bg-white/5 text-neutral-200"
+        ? "bg-[var(--ui-surface-interactive)] text-[var(--ui-text-body)]"
         : variant === "ghost"
-          ? "max-w-none bg-transparent px-0 text-neutral-100"
+          ? "max-w-none bg-transparent px-0 text-[var(--ui-text-body)]"
           : variant === "destructive"
-            ? "bg-red-500/12 text-red-100 ring-1 ring-red-400/20"
-            : "bg-[#272727] text-neutral-100";
+            ? "bg-[var(--ui-feedback-critical-bg)] text-[var(--ui-feedback-critical-fg)] ring-1 ring-[var(--ui-feedback-critical-border)]"
+            : "bg-[var(--ui-surface-raised)] text-[var(--ui-text-body)]";
 
   return (
     <div
@@ -1055,9 +1083,9 @@ export function Marker(props: {
       data-variant={variant}
       role={props.role}
       className={cx(
-        "flex items-center gap-1.5 text-xs text-neutral-400",
-        variant === "border" && "border-t border-white/6 pt-3",
-        variant === "separator" && "justify-center border-y border-white/6 py-3",
+        "flex items-center gap-1.5 text-xs text-[var(--ui-text-subtle)]",
+        variant === "border" && "border-t border-[var(--ui-border-subtle)] pt-3",
+        variant === "separator" && "justify-center border-y border-[var(--ui-border-subtle)] py-3",
         props.className,
       )}
     >
@@ -1068,7 +1096,11 @@ export function Marker(props: {
 
 export function MarkerIcon(props: { readonly children: ReactNode; readonly className?: string }) {
   return (
-    <span data-slot="marker-icon" className={cx("text-neutral-500", props.className)} aria-hidden>
+    <span
+      data-slot="marker-icon"
+      className={cx("text-[var(--ui-text-muted)]", props.className)}
+      aria-hidden
+    >
       {props.children}
     </span>
   );
@@ -1125,7 +1157,7 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
         <DotmSquare3
           animated
           ariaLabel="Working"
-          color="#ffd166"
+          color="var(--ui-accent-working)"
           dotShape="square"
           dotSize={2.35}
           halo={0.14}
@@ -1144,7 +1176,7 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
             <DotmCircular3
               animated
               ariaLabel="Thinking"
-              color="#8ee8ff"
+              color="var(--ui-accent-thinking)"
               dotSize={2.2}
               halo={0.14}
               size={16}
@@ -1158,7 +1190,7 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
             <DotmCircular8
               animated
               ariaLabel="Thinking"
-              color="#8ee8ff"
+              color="var(--ui-accent-thinking)"
               dotSize={2.2}
               halo={0.12}
               size={16}
@@ -1172,7 +1204,7 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
             <DotmCircular17
               animated
               ariaLabel="Thinking"
-              color="#8ee8ff"
+              color="var(--ui-accent-thinking)"
               dotSize={2.2}
               halo={0.12}
               size={16}
@@ -1250,10 +1282,12 @@ function ActivityStatusDot(props: {
         props.status === "active" &&
           cx(
             "animate-spin border border-t-transparent bg-transparent",
-            props.state === "thinking" ? "border-[#8ee8ff]" : "border-[#ffd166]",
+            props.state === "thinking"
+              ? "border-[var(--ui-accent-thinking)]"
+              : "border-[var(--ui-accent-working)]",
           ),
-        props.status === "complete" && "bg-neutral-500",
-        props.status === "error" && "bg-red-500",
+        props.status === "complete" && "bg-[var(--ui-text-muted)]",
+        props.status === "error" && "bg-[var(--ui-feedback-critical)]",
       )}
       aria-hidden="true"
     />
@@ -1285,12 +1319,12 @@ function ActivitySteps(props: {
       <details
         data-slot="activity-steps"
         data-minimized={props.minimized || undefined}
-        className="group w-fit max-w-[min(34rem,100%)] rounded-lg bg-white/[0.035] px-2.5 py-2 text-xs text-neutral-400 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
+        className="group w-fit max-w-[min(34rem,100%)] rounded-lg bg-[var(--ui-surface-inline)] px-2.5 py-2 text-xs text-[var(--ui-text-subtle)] shadow-[var(--ui-shadow-outline-subtle)]"
         open={!props.minimized}
       >
         <summary
           data-slot="activity-steps-summary"
-          className="flex cursor-pointer list-none items-start gap-2 pr-1 transition-colors outline-none hover:text-neutral-300 [&::-webkit-details-marker]:hidden"
+          className="flex cursor-pointer list-none items-start gap-2 pr-1 transition-colors outline-none hover:text-[var(--ui-text-secondary)] [&::-webkit-details-marker]:hidden"
         >
           <span
             data-slot="activity-steps-loader"
@@ -1304,29 +1338,33 @@ function ActivitySteps(props: {
             )}
           </span>
           <span className="grid min-w-0 gap-0.5">
-            <span className="text-[0.78rem] leading-4 font-medium text-neutral-200">{title}</span>
-            <span className="text-[0.7rem] leading-3.5 text-neutral-500">{countLabel}</span>
+            <span className="text-[0.78rem] leading-4 font-medium text-[var(--ui-text-body)]">
+              {title}
+            </span>
+            <span className="text-[0.7rem] leading-3.5 text-[var(--ui-text-muted)]">
+              {countLabel}
+            </span>
           </span>
           <ChevronDown
-            className="mt-1 ml-1 size-3.5 shrink-0 text-neutral-500 transition-transform duration-200 group-open:rotate-180"
+            className="mt-1 ml-1 size-3.5 shrink-0 text-[var(--ui-text-muted)] transition-transform duration-200 group-open:rotate-180"
             aria-hidden="true"
             strokeWidth={2.2}
           />
         </summary>
         <ol
           data-slot="activity-step-rail"
-          className="mt-2 ml-2 grid gap-2 border-l border-white/10 py-0.5 pl-4"
+          className="mt-2 ml-2 grid gap-2 border-l border-[var(--ui-border-control)] py-0.5 pl-4"
         >
           {props.activities.map((activity) => (
             <li
               key={activity.id}
               data-slot="activity-step"
               data-kind={activity.kind}
-              className="relative min-w-0 text-[0.76rem] leading-5 text-neutral-300"
+              className="relative min-w-0 text-[0.76rem] leading-5 text-[var(--ui-text-secondary)]"
             >
               <span
                 data-slot="activity-step-node"
-                className="absolute top-[0.43rem] -left-[1.22rem] grid size-2 place-content-center rounded-full bg-[#111111] ring-4 ring-[#111111]"
+                className="absolute top-[0.43rem] -left-[1.22rem] grid size-2 place-content-center rounded-full bg-[var(--ui-bg-app)] ring-4 ring-[var(--ui-bg-app)]"
               >
                 <ActivityStatusDot state={activity.kind} status={activityStatus(activity)} />
               </span>
@@ -1401,16 +1439,18 @@ export function LaresChat(props: {
   return (
     <main
       className={cx(
-        "mx-auto grid h-dvh w-full max-w-[42rem] bg-[#111111] text-neutral-100",
+        "mx-auto grid h-dvh w-full max-w-[42rem] bg-[var(--ui-bg-app)] text-[var(--ui-text-body)]",
         props.className,
       )}
     >
       <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Lares chat">
         <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-          <p className="mb-1.5 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+          <p className="mb-1.5 text-[0.68rem] font-semibold tracking-[0.18em] text-[var(--ui-text-muted)] uppercase">
             Lares
           </p>
-          <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-white">Chat</h1>
+          <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-[var(--ui-text-primary)]">
+            Chat
+          </h1>
         </header>
 
         <MessageScrollerProvider autoScroll>
@@ -1461,8 +1501,8 @@ export function LaresChat(props: {
                             variant={message.role === "user" ? "default" : "ghost"}
                             className={
                               message.role === "user"
-                                ? "max-w-full px-3.5 py-2.5 text-[0.9375rem] leading-6 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
-                                : "max-w-full rounded-[1.35rem] bg-[#1b1b1b] px-4 py-3.5 text-[0.9375rem] leading-6 text-neutral-100 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                                ? "max-w-full px-3.5 py-2.5 text-[0.9375rem] leading-6 shadow-[var(--ui-shadow-outline-faint)]"
+                                : "max-w-full rounded-[1.35rem] bg-[var(--ui-surface-subtle)] px-4 py-3.5 text-[0.9375rem] leading-6 text-[var(--ui-text-body)] shadow-[var(--ui-shadow-outline-strong)]"
                             }
                           >
                             <BubbleContent>
@@ -1470,7 +1510,7 @@ export function LaresChat(props: {
                               {message.streaming ? (
                                 <span
                                   data-slot="streaming-cursor"
-                                  className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse rounded-full bg-neutral-300"
+                                  className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse rounded-full bg-[var(--ui-text-secondary)]"
                                   aria-hidden="true"
                                 />
                               ) : null}
@@ -1478,14 +1518,14 @@ export function LaresChat(props: {
                           </Bubble>
                           {message.draftTitle || memoryLabel ? (
                             <MessageFooter align={align}>
-                              <Marker className="w-fit rounded-full bg-white/[0.04] px-2.5 py-1 text-[0.72rem] leading-5 text-neutral-400 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+                              <Marker className="w-fit rounded-full bg-[var(--ui-surface-interactive-subtle)] px-2.5 py-1 text-[0.72rem] leading-5 text-[var(--ui-text-subtle)] shadow-[var(--ui-shadow-outline-subtle)]">
                                 <MarkerIcon>
                                   <Sparkles className="size-3" strokeWidth={2.2} />
                                 </MarkerIcon>
                                 <MarkerContent>
                                   {message.draftTitle ? (
                                     <>
-                                      <span className="font-medium text-neutral-300">
+                                      <span className="font-medium text-[var(--ui-text-secondary)]">
                                         Review draft
                                       </span>
                                       {": "}
@@ -1516,7 +1556,7 @@ export function LaresChat(props: {
         </MessageScrollerProvider>
 
         <form
-          className="bg-[#111111]/96 px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+          className="bg-[var(--ui-bg-app-overlay)] px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
           aria-label="Message Lares"
           onSubmit={(event) => {
             event.preventDefault();
@@ -1535,14 +1575,14 @@ export function LaresChat(props: {
             <div
               data-slot="chat-composer-surface"
               className={cx(
-                "relative grid gap-3 rounded-[1.55rem] bg-[#1d1d1d] px-4 pt-4 pb-3 text-neutral-100 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_0_1px_rgba(255,255,255,0.08)]",
-                draggingFiles && "shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_0_1px_#8ee8ff]",
+                "relative grid gap-3 rounded-[1.55rem] bg-[var(--ui-surface-composer)] px-4 pt-4 pb-3 text-[var(--ui-text-body)] shadow-[var(--ui-shadow-composer)]",
+                draggingFiles && "shadow-[var(--ui-shadow-drop-target)]",
               )}
             >
               {draggingFiles ? (
                 <div
                   data-slot="chat-composer-drop-hint"
-                  className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[1.2rem] bg-[#111111]/88 text-sm font-medium text-[#8ee8ff] shadow-[inset_0_0_0_1px_rgba(142,232,255,0.55)] backdrop-blur-sm"
+                  className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[1.2rem] bg-[var(--ui-bg-app-scrim)] text-sm font-medium text-[var(--ui-accent-thinking)] shadow-[var(--ui-shadow-drop-hint)] backdrop-blur-sm"
                 >
                   Drop files to attach
                 </div>
@@ -1563,10 +1603,10 @@ export function LaresChat(props: {
                       <div
                         key={attachment.id}
                         data-slot="chat-attachment"
-                        className="flex max-w-52 min-w-0 shrink-0 items-center gap-2 rounded-xl bg-white/[0.06] px-2.5 py-2 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                        className="flex max-w-52 min-w-0 shrink-0 items-center gap-2 rounded-xl bg-[var(--ui-surface-interactive-strong)] px-2.5 py-2 text-left shadow-[var(--ui-shadow-outline-strong)]"
                       >
                         <span
-                          className="grid size-8 shrink-0 place-content-center rounded-lg bg-white/[0.06] text-neutral-300"
+                          className="grid size-8 shrink-0 place-content-center rounded-lg bg-[var(--ui-surface-interactive-strong)] text-[var(--ui-text-secondary)]"
                           aria-hidden="true"
                         >
                           {isImage ? (
@@ -1576,16 +1616,18 @@ export function LaresChat(props: {
                           )}
                         </span>
                         <span className="grid min-w-0 flex-1">
-                          <span className="truncate text-[0.78rem] leading-4 font-medium text-neutral-100">
+                          <span className="truncate text-[0.78rem] leading-4 font-medium text-[var(--ui-text-body)]">
                             {attachment.name}
                           </span>
                           {size ? (
-                            <span className="text-[0.7rem] leading-4 text-neutral-500">{size}</span>
+                            <span className="text-[0.7rem] leading-4 text-[var(--ui-text-muted)]">
+                              {size}
+                            </span>
                           ) : null}
                         </span>
                         {props.onAttachmentRemove ? (
                           <button
-                            className="grid size-7 shrink-0 place-content-center rounded-full border-0 bg-transparent text-neutral-500 transition-colors hover:text-neutral-200"
+                            className="grid size-7 shrink-0 place-content-center rounded-full border-0 bg-transparent text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text-body)]"
                             aria-label={`Remove ${attachment.name}`}
                             type="button"
                             onClick={() => props.onAttachmentRemove?.(attachment.id)}
@@ -1599,7 +1641,7 @@ export function LaresChat(props: {
                 </div>
               ) : null}
               <textarea
-                className="max-h-40 min-h-18 resize-none border-0 bg-transparent p-0 text-[1rem] leading-6 text-white outline-none placeholder:text-neutral-500"
+                className="max-h-40 min-h-18 resize-none border-0 bg-transparent p-0 text-[1rem] leading-6 text-[var(--ui-text-primary)] outline-none placeholder:text-[var(--ui-text-muted)]"
                 aria-label="Message"
                 placeholder="Message Lares"
                 rows={2}
@@ -1611,7 +1653,7 @@ export function LaresChat(props: {
                 className="flex min-h-10 items-center justify-between gap-3"
               >
                 <button
-                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-transparent text-neutral-400 transition-colors hover:text-neutral-100 disabled:text-neutral-700"
+                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-transparent text-[var(--ui-text-subtle)] transition-colors hover:text-[var(--ui-text-body)] disabled:text-[var(--ui-text-disabled)]"
                   aria-label="Attach files"
                   disabled={!canAttach}
                   type="button"
@@ -1629,7 +1671,7 @@ export function LaresChat(props: {
                   onChange={handleFileInputChange}
                 />
                 <button
-                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-[#f4f1eb] text-[#080808] transition-transform active:scale-[0.96] disabled:bg-white/10 disabled:text-neutral-500"
+                  className="grid size-10 shrink-0 place-content-center rounded-full border-0 bg-[var(--ui-action-primary-bg)] text-[var(--ui-action-primary-fg)] transition-transform active:scale-[0.96] disabled:bg-[var(--ui-surface-disabled)] disabled:text-[var(--ui-text-muted)]"
                   aria-label="Send message"
                   disabled={!canSend}
                   type="submit"
@@ -1666,7 +1708,7 @@ export function CheckInForm(props: {
           API docs
         </a>
       </div>
-      <p id="status" role="status" className="mt-3 text-sm text-neutral-300">
+      <p id="status" role="status" className="mt-3 text-sm text-[var(--ui-text-secondary)]">
         {props.status}
       </p>
     </div>
@@ -1694,11 +1736,11 @@ export function BottomNav(props: {
 
   return (
     <nav
-      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-[#111111]/96 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-[var(--ui-bg-app-overlay)] px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
       aria-label="Primary navigation"
     >
       <a
-        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${todayActive ? "text-white" : "text-neutral-500"}`}
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${todayActive ? "text-[var(--ui-text-primary)]" : "text-[var(--ui-text-muted)]"}`}
         aria-current={todayActive ? "page" : undefined}
         href="/"
         onClick={(event) => navigate("/", event)}
@@ -1707,7 +1749,7 @@ export function BottomNav(props: {
         Today
       </a>
       <a
-        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${loopActive ? "text-white" : "text-neutral-500"}`}
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${loopActive ? "text-[var(--ui-text-primary)]" : "text-[var(--ui-text-muted)]"}`}
         aria-current={loopActive ? "page" : undefined}
         href="/actions"
         onClick={(event) => navigate("/actions", event)}
@@ -1716,7 +1758,7 @@ export function BottomNav(props: {
         Actions
       </a>
       <motion.button
-        className="grid size-14 min-h-14 justify-self-center rounded-full bg-[#f4f1eb] text-3xl leading-none text-[#080808] shadow-none"
+        className="grid size-14 min-h-14 justify-self-center rounded-full bg-[var(--ui-action-primary-bg)] text-3xl leading-none text-[var(--ui-action-primary-fg)] shadow-none"
         type="button"
         aria-label="Write capture"
         whileTap={{ scale: 0.95 }}
@@ -1725,7 +1767,7 @@ export function BottomNav(props: {
         <Plus className="m-auto size-7" aria-hidden="true" strokeWidth={2.4} />
       </motion.button>
       <a
-        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${journeyActive ? "text-white" : "text-neutral-500"}`}
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${journeyActive ? "text-[var(--ui-text-primary)]" : "text-[var(--ui-text-muted)]"}`}
         aria-current={journeyActive ? "page" : undefined}
         href="/journey"
         onClick={(event) => navigate("/journey", event)}
@@ -1734,7 +1776,7 @@ export function BottomNav(props: {
         Journey
       </a>
       <a
-        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${insightsActive ? "text-white" : "text-neutral-500"}`}
+        className={`grid min-h-12 place-items-center text-[0.68rem] no-underline ${insightsActive ? "text-[var(--ui-text-primary)]" : "text-[var(--ui-text-muted)]"}`}
         aria-current={insightsActive ? "page" : undefined}
         href="/insights"
         onClick={(event) => navigate("/insights", event)}
@@ -1755,12 +1797,15 @@ export function AddActionSheet(props: {
   return (
     <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onClose() : undefined)}>
       <Drawer.Portal>
-        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-black/55 transition-opacity" />
+        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[var(--ui-backdrop-scrim)] transition-opacity" />
         <Drawer.Viewport className="fixed inset-0 z-21">
-          <Drawer.Popup className="fixed inset-x-0 bottom-0 mx-auto max-h-[calc(100dvh-1rem)] w-full max-w-[44rem] overflow-y-auto overscroll-contain rounded-t-[2rem] rounded-b-none border border-white/6 bg-[#1f1f1f]/95 p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.02)] outline-0 backdrop-blur-xl">
+          <Drawer.Popup className="fixed inset-x-0 bottom-0 mx-auto max-h-[calc(100dvh-1rem)] w-full max-w-[44rem] overflow-y-auto overscroll-contain rounded-t-[2rem] rounded-b-none border border-[var(--ui-border-subtle)] bg-[var(--ui-surface-primary-overlay)] p-4 pb-[max(1.35rem,env(safe-area-inset-bottom))] shadow-[var(--ui-shadow-surface)] outline-0 backdrop-blur-xl">
             <Drawer.Content>
-              <div className="mx-auto mb-5 h-1 w-9 rounded-full bg-white/10" aria-hidden="true" />
-              <Drawer.Title className="m-0 text-center text-2xl font-semibold tracking-[-0.03em] text-white">
+              <div
+                className="mx-auto mb-5 h-1 w-9 rounded-full bg-[var(--ui-surface-disabled)]"
+                aria-hidden="true"
+              />
+              <Drawer.Title className="m-0 text-center text-2xl font-semibold tracking-[-0.03em] text-[var(--ui-text-primary)]">
                 Add
               </Drawer.Title>
               <div className="mt-6 grid gap-3">
@@ -1770,7 +1815,7 @@ export function AddActionSheet(props: {
                   whileTap={{ scale: 0.985 }}
                   onClick={props.onCaptureNote}
                 >
-                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                  <span className="grid size-9 place-content-center rounded-full bg-[var(--ui-bg-app)] text-[var(--ui-text-primary)]">
                     <PenLine className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
@@ -1783,7 +1828,7 @@ export function AddActionSheet(props: {
                   whileTap={{ scale: 0.985 }}
                   onClick={props.onOpenChat}
                 >
-                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                  <span className="grid size-9 place-content-center rounded-full bg-[var(--ui-bg-app)] text-[var(--ui-text-primary)]">
                     <Bot className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
@@ -1814,20 +1859,23 @@ export function SynthesisPanel(props: {
 
       {props.synthesis ? (
         <div className="flex flex-wrap gap-2">
-          <span className="rounded-full border border-white/5 bg-white/4 px-2 py-1 text-xs text-neutral-300">
+          <span className="rounded-full border border-[var(--ui-border-faint)] bg-[var(--ui-surface-interactive-subtle)] px-2 py-1 text-xs text-[var(--ui-text-secondary)]">
             {props.synthesis.sourceSignalIds.length} source signals
           </span>
-          <span className="rounded-full border border-white/5 bg-white/4 px-2 py-1 text-xs text-neutral-300">
+          <span className="rounded-full border border-[var(--ui-border-faint)] bg-[var(--ui-surface-interactive-subtle)] px-2 py-1 text-xs text-[var(--ui-text-secondary)]">
             {props.synthesis.themes.join(", ")}
           </span>
         </div>
       ) : null}
 
       {props.synthesis?.openQuestions.length ? (
-        <div className="border-t border-white/5 pt-4">
+        <div className="border-t border-[var(--ui-border-faint)] pt-4">
           <p className={eyebrowClass}>Open questions</p>
           {props.synthesis.openQuestions.map((question) => (
-            <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300" key={question}>
+            <p
+              className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-secondary)]"
+              key={question}
+            >
               {question}
             </p>
           ))}
@@ -1882,12 +1930,12 @@ export function ProposalReviewPanel(props: {
       {props.proposals?.length ? (
         <div className="grid gap-4">
           {props.proposals.map((proposal) => (
-            <article className="border-t border-white/5 pt-4" key={proposal.id}>
+            <article className="border-t border-[var(--ui-border-faint)] pt-4" key={proposal.id}>
               <p className={eyebrowClass}>{proposal.kind}</p>
-              <h3 className="m-0 text-base leading-tight font-medium text-white">
+              <h3 className="m-0 text-base leading-tight font-medium text-[var(--ui-text-primary)]">
                 {proposal.title}
               </h3>
-              <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">
+              <p className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-secondary)]">
                 {proposal.body}
               </p>
               <div className="mt-4 grid grid-cols-1 gap-2">
@@ -1947,28 +1995,28 @@ export function WritingDrawer(props: {
   return (
     <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onCancel() : undefined)}>
       <Drawer.Portal>
-        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[#111111] transition-opacity" />
+        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[var(--ui-bg-app)] transition-opacity" />
         <Drawer.Viewport className="fixed inset-0 z-21">
           <Drawer.Popup
-            className="fixed inset-0 mx-auto grid w-full max-w-[44rem] grid-rows-[auto_1fr] overflow-hidden bg-[#1f1f1f] px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-neutral-100 outline-0"
+            className="fixed inset-0 mx-auto grid w-full max-w-[44rem] grid-rows-[auto_1fr] overflow-hidden bg-[var(--ui-surface-primary)] px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-[var(--ui-text-body)] outline-0"
             style={visualViewportHeight ? { height: `${visualViewportHeight}px` } : undefined}
           >
             <Drawer.Content>
               <div className="grid h-full min-h-0 grid-rows-[auto_1fr]" aria-label="Edit proposal">
-                <div className="bg-[#1f1f1f] pb-3">
+                <div className="bg-[var(--ui-surface-primary)] pb-3">
                   <p className={eyebrowClass}>{props.eyebrow}</p>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <Drawer.Title className="m-0 text-2xl font-semibold tracking-[-0.02em] text-white">
+                      <Drawer.Title className="m-0 text-2xl font-semibold tracking-[-0.02em] text-[var(--ui-text-primary)]">
                         {props.drawerTitle}
                       </Drawer.Title>
                       {props.description ? (
-                        <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-400">
+                        <Drawer.Description className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-subtle)]">
                           {props.description}
                         </Drawer.Description>
                       ) : null}
                     </div>
-                    <Drawer.Close className="min-h-10 rounded-full border-0 bg-white/5 px-3 text-xs font-medium text-neutral-200 shadow-none">
+                    <Drawer.Close className="min-h-10 rounded-full border-0 bg-[var(--ui-surface-interactive)] px-3 text-xs font-medium text-[var(--ui-text-body)] shadow-none">
                       Cancel
                     </Drawer.Close>
                   </div>
@@ -1982,7 +2030,7 @@ export function WritingDrawer(props: {
                   </motion.button>
                 </div>
                 <div className="min-h-0 overflow-y-auto overscroll-contain pt-3">
-                  <label className="mb-2 block text-[0.8125rem] font-medium text-neutral-200">
+                  <label className="mb-2 block text-[0.8125rem] font-medium text-[var(--ui-text-body)]">
                     {props.bodyLabel}
                   </label>
                   <RichTextEditor
@@ -2054,7 +2102,7 @@ export function RichTextEditor(props: {
         <div className="mb-2 flex flex-wrap gap-1.5" aria-label="Editor formatting">
           <button
             type="button"
-            className="min-h-9 rounded-full border border-white/10 bg-white/5 px-3 text-xs text-neutral-300 shadow-none"
+            className="min-h-9 rounded-full border border-[var(--ui-border-control)] bg-[var(--ui-surface-interactive)] px-3 text-xs text-[var(--ui-text-secondary)] shadow-none"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setFirstBlockType("p")}
           >
@@ -2062,7 +2110,7 @@ export function RichTextEditor(props: {
           </button>
           <button
             type="button"
-            className="min-h-9 rounded-full border border-white/10 bg-[#f4f1eb] px-3 text-xs text-[#080808] shadow-none"
+            className="min-h-9 rounded-full border border-[var(--ui-border-control)] bg-[var(--ui-action-primary-bg)] px-3 text-xs text-[var(--ui-action-primary-fg)] shadow-none"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setFirstBlockType("h2")}
           >
@@ -2070,7 +2118,7 @@ export function RichTextEditor(props: {
           </button>
           <button
             type="button"
-            className="ml-auto min-h-9 rounded-full border border-white/10 bg-white/5 px-3 text-xs text-neutral-300 shadow-none"
+            className="ml-auto min-h-9 rounded-full border border-[var(--ui-border-control)] bg-[var(--ui-surface-interactive)] px-3 text-xs text-[var(--ui-text-secondary)] shadow-none"
             onClick={props.onAiDraft}
           >
             AI draft
@@ -2078,12 +2126,12 @@ export function RichTextEditor(props: {
         </div>
         {showSlashCommands ? (
           <div
-            className="mb-2 grid gap-1 rounded-2xl border border-white/5 bg-white/4 p-2"
+            className="mb-2 grid gap-1 rounded-2xl border border-[var(--ui-border-faint)] bg-[var(--ui-surface-interactive-subtle)] p-2"
             role="menu"
             aria-label="Slash commands"
           >
             <button
-              className="min-h-9 justify-start rounded-xl bg-transparent px-3 text-left text-neutral-100 shadow-none"
+              className="min-h-9 justify-start rounded-xl bg-transparent px-3 text-left text-[var(--ui-text-body)] shadow-none"
               type="button"
               role="menuitem"
               onClick={props.onAiDraft}
@@ -2094,7 +2142,7 @@ export function RichTextEditor(props: {
         ) : null}
         <PlateContent
           aria-label={props.label}
-          className="min-h-60 bg-transparent py-4 text-lg leading-relaxed text-neutral-100 outline-none"
+          className="min-h-60 bg-transparent py-4 text-lg leading-relaxed text-[var(--ui-text-body)] outline-none"
           onInput={(event) => props.onChange(event.currentTarget.textContent ?? "")}
           placeholder={
             props.label.toLowerCase().includes("capture")
@@ -2126,12 +2174,12 @@ export function CommitmentPanel(props: {
       {props.commitments?.length ? (
         <div className="grid gap-4">
           {props.commitments.map((commitment) => (
-            <article className="border-t border-white/5 pt-4" key={commitment.id}>
+            <article className="border-t border-[var(--ui-border-faint)] pt-4" key={commitment.id}>
               <p className={eyebrowClass}>{commitment.status}</p>
-              <h3 className="m-0 text-base leading-tight font-medium text-white">
+              <h3 className="m-0 text-base leading-tight font-medium text-[var(--ui-text-primary)]">
                 {commitment.title}
               </h3>
-              <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">
+              <p className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-secondary)]">
                 {commitment.body}
               </p>
               <motion.button
@@ -2168,12 +2216,12 @@ export function OutcomePanel(props: {
       {props.outcomes?.length ? (
         <div className="grid gap-4">
           {props.outcomes.map((outcome) => (
-            <article className="border-t border-white/5 pt-4" key={outcome.id}>
+            <article className="border-t border-[var(--ui-border-faint)] pt-4" key={outcome.id}>
               <p className={eyebrowClass}>{outcome.result}</p>
-              <h3 className="m-0 text-base leading-tight font-medium text-white">
+              <h3 className="m-0 text-base leading-tight font-medium text-[var(--ui-text-primary)]">
                 {outcome.note ?? "Closed without note"}
               </h3>
-              <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">
+              <p className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-secondary)]">
                 {formatEventTime(outcome.recordedAt)}
               </p>
             </article>
@@ -2190,18 +2238,22 @@ const eventColumns = [
   eventColumn.accessor("type", {
     header: "Event",
     cell: (info) => (
-      <span className="font-medium text-white">{formatEventType(info.getValue())}</span>
+      <span className="font-medium text-[var(--ui-text-primary)]">
+        {formatEventType(info.getValue())}
+      </span>
     ),
   }),
   eventColumn.accessor((event) => eventText(event.payload), {
     id: "detail",
     header: "Detail",
-    cell: (info) => <span className="text-neutral-300">{info.getValue()}</span>,
+    cell: (info) => <span className="text-[var(--ui-text-secondary)]">{info.getValue()}</span>,
   }),
   eventColumn.accessor((event) => event.occurredAt ?? "", {
     id: "time",
     header: "Time",
-    cell: (info) => <span className="text-neutral-500">{formatEventTime(info.getValue())}</span>,
+    cell: (info) => (
+      <span className="text-[var(--ui-text-muted)]">{formatEventTime(info.getValue())}</span>
+    ),
   }),
 ];
 
@@ -2225,14 +2277,14 @@ export function EventTable(props: {
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-white/5">
+    <div className="overflow-x-auto rounded-2xl border border-[var(--ui-border-faint)]">
       <table className="w-full border-collapse text-left text-[0.8125rem]">
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <th
-                  className="border-b border-white/5 px-3 py-3 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase"
+                  className="border-b border-[var(--ui-border-faint)] px-3 py-3 text-xs font-medium tracking-[0.12em] text-[var(--ui-text-muted)] uppercase"
                   key={header.id}
                 >
                   {header.isPlaceholder
@@ -2248,7 +2300,10 @@ export function EventTable(props: {
             table.getRowModel().rows.map((row) => (
               <motion.tr key={row.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 {row.getVisibleCells().map((cell) => (
-                  <td className="border-b border-white/5 px-3 py-3 align-top" key={cell.id}>
+                  <td
+                    className="border-b border-[var(--ui-border-faint)] px-3 py-3 align-top"
+                    key={cell.id}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -2278,14 +2333,21 @@ export function JourneyTimeline(props: {
     <div className="mt-4 grid gap-5">
       {props.groups.map((group) => (
         <section className="grid gap-3" key={group.dateLabel} aria-label={group.dateLabel}>
-          <h3 className="m-0 text-sm font-semibold tracking-[0.12em] text-neutral-400 uppercase">
+          <h3 className="m-0 text-sm font-semibold tracking-[0.12em] text-[var(--ui-text-subtle)] uppercase">
             {group.dateLabel}
           </h3>
           <div className="grid gap-2">
             {group.items.map((item) => (
-              <article className="rounded-2xl bg-white/4 p-4" key={item.id}>
-                <h4 className="m-0 text-base font-semibold text-white">{item.title}</h4>
-                <p className="mt-2 text-sm leading-relaxed text-neutral-300">{item.detail}</p>
+              <article
+                className="rounded-2xl bg-[var(--ui-surface-interactive-subtle)] p-4"
+                key={item.id}
+              >
+                <h4 className="m-0 text-base font-semibold text-[var(--ui-text-primary)]">
+                  {item.title}
+                </h4>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--ui-text-secondary)]">
+                  {item.detail}
+                </p>
               </article>
             ))}
           </div>
@@ -2299,12 +2361,17 @@ export function InsightsPanel(props: { readonly insights: ReadonlyArray<InsightV
   return (
     <div className="grid gap-4">
       {props.insights.map((insight) => (
-        <article className="rounded-2xl border border-white/5 bg-white/4 p-4" key={insight.label}>
+        <article
+          className="rounded-2xl border border-[var(--ui-border-faint)] bg-[var(--ui-surface-interactive-subtle)] p-4"
+          key={insight.label}
+        >
           <p className={eyebrowClass}>{insight.label}</p>
-          <h3 className="m-0 text-2xl leading-tight font-semibold tracking-[-0.03em] text-white">
+          <h3 className="m-0 text-2xl leading-tight font-semibold tracking-[-0.03em] text-[var(--ui-text-primary)]">
             {insight.value}
           </h3>
-          <p className="mt-2 text-[0.8125rem] leading-relaxed text-neutral-300">{insight.detail}</p>
+          <p className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--ui-text-secondary)]">
+            {insight.detail}
+          </p>
         </article>
       ))}
     </div>

@@ -1307,6 +1307,60 @@ describe("Lares Engine", () => {
     expect((await summariesResponse.json()).summaries).toEqual([]);
   });
 
+  test("custom integrations can list calendar day activity counts across history", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    for (const localDate of ["2026-06-18", "2026-06-20"]) {
+      const save = await app.request(
+        "/api/journal",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            bodyText: `journal for ${localDate}`,
+            localDate,
+            title: localDate,
+          }),
+        },
+        env,
+      );
+      expect(save.status).toBe(200);
+    }
+
+    for (const occurredAt of ["2026-06-19T01:30:00.000Z", "2026-06-20T09:00:00.000Z"]) {
+      const capture = await app.request(
+        "/api/captures",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: "calendar_signal",
+            source: "api",
+            occurredAt,
+            schemaVersion: 1,
+            payload: { note: occurredAt },
+          }),
+        },
+        env,
+      );
+      expect(capture.status).toBe(200);
+    }
+
+    const response = await app.request(
+      "/api/calendar/days?from=2026-06-18&to=2026-06-20&timeZone=America%2FLos_Angeles",
+      {},
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      days: [
+        { localDate: "2026-06-18", noteCount: 1, signalCount: 1 },
+        { localDate: "2026-06-20", noteCount: 1, signalCount: 1 },
+      ],
+    });
+  });
+
   test("agents can read workspace notes through the OKF filesystem API", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const save = await app.request(

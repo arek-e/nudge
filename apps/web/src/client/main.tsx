@@ -155,7 +155,7 @@ function AppShell() {
   });
 
   if (!session.data) {
-    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
+    return <main className="min-h-dvh bg-[var(--ui-bg-app)]" aria-label="Loading Lares" />;
   }
 
   const loginAuthMethods = loginAuthMethodsForView(session.data, window.location.search);
@@ -433,11 +433,11 @@ function ActionsScreen() {
       <Surface eyebrow="AI" title="Actions" primary>
         <div className="mt-4 grid gap-3">
           {latestRun ? (
-            <article className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/8">
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+            <article className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4 ring-1 ring-[var(--ui-border-default)]">
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
                 AI analysis · {latestRun.status}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-white">
+              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
                 {latestRun.status === "completed"
                   ? itemCount === 0
                     ? "Analyzed, no actions found"
@@ -446,43 +446,50 @@ function ActionsScreen() {
                     ? "Analysis failed"
                     : "Analyzing daily note"}
               </h2>
-              <p className="mt-2 mb-0 text-xs leading-5 text-neutral-400">
+              <p className="mt-2 mb-0 text-xs leading-5 text-[var(--ui-text-subtle)]">
                 {provider} · {latestRun.model ?? "model pending"}
               </p>
             </article>
           ) : null}
           {(actions.data?.actions ?? []).length > 0 ? (
             actions.data?.actions.map((action) => (
-              <article className="rounded-2xl bg-white/5 p-4" key={action.id}>
+              <article
+                className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
+                key={action.id}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
                       {action.kind} · {action.status}
                     </p>
-                    <h2 className="mt-1 mb-0 text-base font-semibold text-white">{action.title}</h2>
-                    <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{action.body}</p>
+                    <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
+                      {action.title}
+                    </h2>
+                    <p className="mt-2 mb-0 text-sm leading-6 text-[var(--ui-text-secondary)]">
+                      {action.body}
+                    </p>
                   </div>
-                  <span className="text-xs text-neutral-500">
+                  <span className="text-xs text-[var(--ui-text-muted)]">
                     {Math.round(action.confidence * 100)}%
                   </span>
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2">
                   <button
-                    className="min-h-10 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
+                    className="min-h-10 rounded-full bg-[var(--ui-action-primary-bg)] px-3 text-xs font-semibold text-[var(--ui-action-primary-fg)]"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
                   >
                     Accept
                   </button>
                   <button
-                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    className="min-h-10 rounded-full bg-[var(--ui-surface-interactive)] px-3 text-xs font-semibold text-[var(--ui-text-body)]"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
                   >
                     Done
                   </button>
                   <button
-                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
+                    className="min-h-10 rounded-full bg-[var(--ui-surface-interactive)] px-3 text-xs font-semibold text-[var(--ui-text-body)]"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
                   >
@@ -492,19 +499,24 @@ function ActionsScreen() {
               </article>
             ))
           ) : (
-            <p className="m-0 text-sm text-neutral-400">No actions.</p>
+            <p className="m-0 text-sm text-[var(--ui-text-subtle)]">No actions.</p>
           )}
         </div>
       </Surface>
       <Surface eyebrow="Summaries" title="Latest">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).slice(0, 3).map((summary) => (
-            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+            <article
+              className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
+              key={summary.id}
+            >
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
                 {summary.periodType} · {summary.periodStart}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
-              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-neutral-300">
+              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
+                {summary.title}
+              </h2>
+              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-[var(--ui-text-secondary)]">
                 {summary.body}
               </p>
             </article>
@@ -554,7 +566,7 @@ function SettingsScreen() {
             Add a passkey to sign in with Face ID, Touch ID, your device PIN, or a security key.
           </p>
           <button
-            className="mt-4 min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            className="mt-4 min-h-12 rounded-full bg-[var(--ui-action-primary-bg)] px-4 text-sm font-semibold text-[var(--ui-action-primary-fg)] disabled:opacity-60"
             disabled={addPasskey.isPending}
             type="button"
             onClick={() => addPasskey.mutate()}
@@ -562,24 +574,26 @@ function SettingsScreen() {
             {addPasskey.isPending ? "Opening passkey..." : "Add passkey"}
           </button>
           {addPasskey.isError ? (
-            <p className="m-0 mt-3 text-sm text-red-300">Could not add a passkey.</p>
+            <p className="m-0 mt-3 text-sm text-[var(--ui-feedback-critical)]">
+              Could not add a passkey.
+            </p>
           ) : null}
           {addPasskey.isSuccess ? (
-            <p className="m-0 mt-3 text-sm text-emerald-300">Passkey added.</p>
+            <p className="m-0 mt-3 text-sm text-[var(--ui-feedback-success)]">Passkey added.</p>
           ) : null}
         </Surface>
       ) : null}
       <Surface eyebrow="Data controls" title="Your data">
         <div className="mt-4 grid gap-2">
           <button
-            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
+            className="min-h-12 rounded-full bg-[var(--ui-action-primary-bg)] px-4 text-sm font-semibold text-[var(--ui-action-primary-fg)]"
             type="button"
             onClick={() => exportData.mutate()}
           >
             Export data
           </button>
           <button
-            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
+            className="min-h-12 rounded-full bg-[var(--ui-surface-interactive)] px-4 text-sm font-semibold text-[var(--ui-text-body)]"
             type="button"
             onClick={() => deleteData.mutate()}
           >
@@ -641,17 +655,20 @@ function TodayScreen() {
         <div className="mt-4 grid gap-2">
           {recentNotes.length > 0 ? (
             recentNotes.map((event) => (
-              <article className="rounded-2xl bg-white/5 p-4" key={event.id}>
-                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+              <article
+                className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
+                key={event.id}
+              >
+                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
                   {event.occurredAt ? new Date(event.occurredAt).toLocaleDateString() : "Saved"}
                 </p>
-                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-neutral-200">
+                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-[var(--ui-text-body)]">
                   {noteTextFromPayload(event.payload)}
                 </p>
               </article>
             ))
           ) : (
-            <p className="m-0 text-sm leading-6 text-neutral-400">No notes yet.</p>
+            <p className="m-0 text-sm leading-6 text-[var(--ui-text-subtle)]">No notes yet.</p>
           )}
         </div>
       </Surface>
@@ -680,12 +697,19 @@ function InsightsScreen() {
       <Surface id="insights-title" eyebrow="Archive" title="Summaries">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).map((summary) => (
-            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+            <article
+              className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
+              key={summary.id}
+            >
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
                 {summary.periodType} · {summary.periodStart}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
-              <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{summary.body}</p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
+                {summary.title}
+              </h2>
+              <p className="mt-2 mb-0 text-sm leading-6 text-[var(--ui-text-secondary)]">
+                {summary.body}
+              </p>
             </article>
           ))}
         </div>

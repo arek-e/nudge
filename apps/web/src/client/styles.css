@@ -11,6 +11,61 @@
     color-scheme: dark;
     -moz-osx-font-smoothing: grayscale;
     -webkit-font-smoothing: antialiased;
+    --ui-bg-app: #111111;
+    --ui-bg-app-overlay: rgba(17, 17, 17, 0.96);
+    --ui-bg-app-scrim: rgba(17, 17, 17, 0.88);
+    --ui-bg-login: #161616;
+    --ui-surface-primary: #1f1f1f;
+    --ui-surface-primary-overlay: rgba(31, 31, 31, 0.95);
+    --ui-surface-subtle: #1b1b1b;
+    --ui-surface-composer: #1d1d1d;
+    --ui-surface-raised: #272727;
+    --ui-surface-selected: #232323;
+    --ui-text-primary: #f4f1eb;
+    --ui-text-body: #eeeeee;
+    --ui-text-secondary: #d4d4d4;
+    --ui-text-subtle: #a3a3a3;
+    --ui-text-muted: #737373;
+    --ui-text-disabled: #404040;
+    --ui-text-inverse: #080808;
+    --ui-action-primary-bg: var(--ui-text-primary);
+    --ui-action-primary-fg: var(--ui-text-inverse);
+    --ui-data-signal: #9cc9e8;
+    --ui-data-insight: #c4a76f;
+    --ui-data-review: #e7a5a1;
+    --ui-data-commit: #f4efe8;
+    --ui-data-closed: #9fbf9f;
+    --ui-data-muted: #6b7280;
+    --ui-accent-thinking: #8ee8ff;
+    --ui-accent-working: #ffd166;
+    --ui-feedback-success: #6ee7b7;
+    --ui-feedback-critical: #fca5a5;
+    --ui-feedback-critical-bg: rgba(239, 68, 68, 0.12);
+    --ui-feedback-critical-fg: #fee2e2;
+    --ui-feedback-critical-border: rgba(248, 113, 113, 0.2);
+    --ui-surface-interactive: rgba(255, 255, 255, 0.05);
+    --ui-surface-interactive-strong: rgba(255, 255, 255, 0.06);
+    --ui-surface-interactive-subtle: rgba(255, 255, 255, 0.04);
+    --ui-surface-inline: rgba(255, 255, 255, 0.035);
+    --ui-surface-disabled: rgba(255, 255, 255, 0.1);
+    --ui-backdrop-scrim: rgba(0, 0, 0, 0.55);
+    --ui-border-faint: rgba(255, 255, 255, 0.05);
+    --ui-border-subtle: rgba(255, 255, 255, 0.06);
+    --ui-border-default: rgba(255, 255, 255, 0.08);
+    --ui-border-control: rgba(255, 255, 255, 0.1);
+    --ui-border-focus: rgba(255, 255, 255, 0.35);
+    --ui-line-subtle: rgba(255, 255, 255, 0.06);
+    --ui-shadow-surface: 0 18px 42px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    --ui-shadow-surface-strong:
+      0 18px 42px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    --ui-shadow-composer: 0 18px 48px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    --ui-shadow-drop-target: 0 18px 48px rgba(0, 0, 0, 0.34), 0 0 0 1px var(--ui-accent-thinking);
+    --ui-shadow-drop-hint: inset 0 0 0 1px rgba(142, 232, 255, 0.55);
+    --ui-shadow-inline-status:
+      0 1px 1px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    --ui-shadow-outline-faint: 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --ui-shadow-outline-subtle: 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --ui-shadow-outline-strong: 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
 
   * {
@@ -20,8 +75,8 @@
   body {
     margin: 0;
     min-height: 100vh;
-    background: #111111;
-    color: #eeeeee;
+    background: var(--ui-bg-app);
+    color: var(--ui-text-body);
     font-family: var(--font-sans);
   }
 }

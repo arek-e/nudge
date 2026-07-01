@@ -28,6 +28,40 @@ export const eventListInputSchema = z.object({
   to: z.string().datetime().optional(),
 });
 
+const calendarDayActivityInputSchema = z.object({
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  timeZone: z
+    .string()
+    .min(1)
+    .max(100)
+    .default("UTC")
+    .refine((value) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "Unsupported time zone"),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+export const calendarDayActivitySchema = z.object({
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  noteCount: z.number().int().min(0),
+  signalCount: z.number().int().min(0),
+});
+
+export const calendarDayActivityResponseSchema = z.object({
+  days: z.array(calendarDayActivitySchema),
+});
+
 export const frameRecordSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -563,6 +597,12 @@ export const apiContract = {
       .route({ method: "POST", path: "/captures" })
       .input(eventInputSchema)
       .output(eventRecordSchema),
+  },
+  calendar: {
+    days: oc
+      .route({ method: "GET", path: "/calendar/days" })
+      .input(calendarDayActivityInputSchema)
+      .output(calendarDayActivityResponseSchema),
   },
   dataExport: oc.route({ method: "GET", path: "/export" }).output(dataExportResponseSchema),
   okf: {
