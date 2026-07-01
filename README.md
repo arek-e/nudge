@@ -7,9 +7,9 @@
 
 # Vesta
 
-**A private operating layer for personal context and agentic work**
+**A private workspace for notes, context, and reviewed agent actions**
 
-Cloudflare-native. OpenAPI-first. Human-in-the-loop by default.
+Journal-first. Source-linked. Human-in-the-loop by default.
 
 [Live App](https://vesta-web.teampitch.workers.dev/) &middot; [API Docs](https://vesta-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://vesta-web.teampitch.workers.dev/api/openapi.json)
 
@@ -21,11 +21,13 @@ Cloudflare-native. OpenAPI-first. Human-in-the-loop by default.
 
 Your life leaves context everywhere: messages, calendar commitments, relationship details, travel constraints, personal notes, work decisions, and small observations that only make sense later.
 
-Most assistants either forget that context or hide it inside opaque prompts. Most productivity tools hardcode a niche workflow: a morning routine, a task inbox, a journal, a CRM, a daily planner.
+Most assistants either forget that context or hide it inside opaque prompts. Most productivity tools force you into a narrow workflow: a morning routine, a task inbox, a journal, a CRM, a daily planner.
 
-**Vesta takes a primitive-first approach.** Captures become Signals. Signals form Context. Frames bound what Vesta is helping with. Syntheses interpret the context. Later, Proposals, Reviews, Commitments, and Outcomes close the loop.
+**Vesta starts with writing things down.** Notes and captures become source-linked context that agents can read, interpret, and turn into draft actions for review.
 
-The goal is not a chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks for review before sensitive changes, and improves through evals.
+Internally, Vesta keeps that loop small and inspectable: Captures become Signals, Signals form Context, Frames define what Vesta is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
+
+The goal is not another chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks before it acts, and improves through evals.
 
 ## How It Works
 
@@ -54,25 +56,21 @@ User / Integration
                          +----------------+
 ```
 
-Current deployed slice:
+What is live now:
 
-- Capture context from the mobile-first app.
-- Persist user-owned Signals in D1.
-- Query Signals by time range.
-- Generate a deterministic, source-linked Synthesis for the current Frame.
-- Save daily notes and journal documents with revisions.
-- Extract reviewable actions, reminders, events, questions, ideas, and memory candidates from note revisions.
-- Run a durable `UserAgentSession` for conversations, memory retrieval, and reviewable loop drafts.
-- Index memory documents through the local memory index or Turbopuffer when configured.
-- Review Proposals into Commitments and close them with Outcomes.
-- List generated Summaries.
-- Sign in through Better Auth in configured environments, including passkeys and optional Google.
-- Export or delete user-owned data.
-- Read OpenAPI docs for custom integrations.
-- Use MCP tools to read/search workspace context, append simple captures, and create reviewable proposals.
-- Persist safe wide events and trace spans for debugging and evals.
+- Mobile-first captures, daily notes, and journal revisions.
+- User-owned Signals, notes, summaries, memory, and traces in D1/R2.
+- Source-linked Syntheses over a selected time frame.
+- Draft extraction of actions, reminders, events, questions, ideas, and memory candidates from note revisions.
+- Durable `UserAgentSession` conversations with memory retrieval and reviewable loop drafts.
+- Memory indexing through the local memory index or Turbopuffer when configured.
+- Proposal review flows that become Commitments and close with Outcomes.
+- Better Auth sign-in in configured environments, including passkeys and optional Google.
+- User data export and deletion.
+- OpenAPI and MCP surfaces for custom integrations and agent tools.
+- Safe wide events and trace spans for debugging and evals.
 
-Model-backed extraction is narrow and draft-first. External writes and behavior-changing automation still require explicit review before they are added.
+Model-backed extraction is narrow and draft-first. Vesta can suggest actions and memories, but behavior-changing automation stays reviewable before it becomes a commitment or external action.
 
 ## Quick Start
 
@@ -113,7 +111,7 @@ default each worktree gets a deterministic high-band `VESTA_DEV_PORT`,
 multiple dev stacks can run side by side. Use `.envrc.local` for untracked local
 overrides.
 
-`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Vesta Engine with `wrangler dev` on the first available local port starting at `VESTA_DEV_PORT`.
+`bun run dev` builds the web app, applies local D1 migrations, and starts the Vesta Worker with `wrangler dev` on the first available local port starting at `VESTA_DEV_PORT`.
 
 Then open:
 
@@ -124,16 +122,16 @@ Then open:
 
 ## Features
 
-|                   | Feature                     | Description                                                    |
-| ----------------- | --------------------------- | -------------------------------------------------------------- |
-| :memo:            | **Captures**                | User or integration input recorded as source-linked Signals    |
-| :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload        |
-| :compass:         | **Frames**                  | Bounded questions like “What matters now?”                     |
-| :sparkles:        | **Syntheses**               | Deterministic, source-linked interpretations over Signals      |
-| :link:            | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows   |
-| :shield:          | **Human-in-the-loop model** | Review-first posture for future memory/actions/automation      |
-| :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement    |
-| :iphone:          | **Mobile-first app**        | React dashboard with TanStack Router, Query, Table, and Motion |
+|                   | Feature                     | Description                                                  |
+| ----------------- | --------------------------- | ------------------------------------------------------------ |
+| :memo:            | **Captures**                | User or integration input recorded as source-linked Signals  |
+| :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload      |
+| :compass:         | **Frames**                  | Bounded questions like “What matters now?”                   |
+| :sparkles:        | **Syntheses**               | Deterministic, source-linked interpretations over Signals    |
+| :link:            | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows |
+| :shield:          | **Human-in-the-loop model** | Review-first posture for memory, actions, and automation     |
+| :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement  |
+| :iphone:          | **Mobile-first app**        | PWA surface optimized for capture, notes, and review         |
 
 ## Brand Assets
 
@@ -152,7 +150,7 @@ app shell.
 
 ```text
 +--------------------------------------------------+
-|                    Vesta Engine                  |
+|                    Vesta Worker                  |
 |       Cloudflare Worker - Hono - oRPC/OpenAPI     |
 +---------------------+----------------------------+
                       |
@@ -176,9 +174,8 @@ app shell.
 +--------------------+       +----------------------+
 ```
 
-- **`apps/web`**: unified Vesta app layer, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, and PWA surface.
-- **`apps/web`**: React App Surface served by the Engine.
-- **`apps/ios`**: Native SwiftUI App Surface for iOS and Siri.
+- **`apps/web`**: unified Vesta app layer: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
+- **`apps/ios`**: native SwiftUI app for iOS and Siri.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
@@ -189,7 +186,7 @@ app shell.
 ## Stack
 
 - Cloudflare Workers, D1, R2, Durable Objects, Workers Workflows.
-- Cloudflare Agents, Think, Workers AI, and optional Turbopuffer memory search.
+- Cloudflare Agents, Workers AI, and optional Turbopuffer memory search.
 - Hono for Worker routing and middleware.
 - oRPC/OpenAPI for public API contracts and typed frontend clients.
 - React, TanStack Router, TanStack Query, TanStack Table, Motion.
@@ -203,7 +200,7 @@ app shell.
 ```bash
 bun run check          # format + lint + typecheck + unit tests
 bun run test:e2e       # mobile Playwright smoke test
-bun run dev            # build web and start the Engine with wrangler dev
+bun run dev            # build web and start the Worker with wrangler dev
 ```
 
 Useful operational commands:
@@ -222,7 +219,7 @@ Deploys are tied to Git commits.
 bun run deploy
 ```
 
-Run `bun run check` and `bun run test:e2e` before deploying. The deploy script refuses dirty working trees, builds the web App Surface, stamps `APP_VERSION` with the short Git SHA, and deploys the Engine with a matching Cloudflare Worker version tag/message.
+Run `bun run check` and `bun run test:e2e` before deploying. The deploy script refuses dirty working trees, builds the web app, stamps `APP_VERSION` with the short Git SHA, and deploys the Worker with a matching Cloudflare version tag/message.
 
 For explicit prototype deploys only:
 
