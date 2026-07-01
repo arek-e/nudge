@@ -30,19 +30,27 @@ describe("Vesta iOS branding", () => {
 
 async function readInfoPlist() {
   const plistPath = new URL("Vesta/Info.plist", iosRoot).pathname;
-  const result = Bun.spawnSync(["plutil", "-convert", "json", "-o", "-", plistPath], {
-    stderr: "pipe",
-    stdout: "pipe",
-  });
+  const plist = await readFile(plistPath, "utf8");
 
-  if (!result.success) {
-    throw new Error(result.stderr.toString());
-  }
-
-  return JSON.parse(result.stdout.toString()) as Record<string, unknown>;
+  return {
+    CFBundleDisplayName: readPlistString(plist, "CFBundleDisplayName"),
+    CFBundleSpokenName: readPlistString(plist, "CFBundleSpokenName"),
+    INAlternativeAppNames: readPlistStringArray(plist, "INAlternativeAppNames"),
+  };
 }
 
 function readAlternativeNames(info: Record<string, unknown>) {
   const value = Reflect.get(info, "INAlternativeAppNames");
   return Array.isArray(value) ? value : [];
+}
+
+function readPlistString(plist: string, key: string) {
+  const match = new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`).exec(plist);
+  return match?.[1] ?? "";
+}
+
+function readPlistStringArray(plist: string, key: string) {
+  const match = new RegExp(`<key>${key}</key>\\s*<array>([\\s\\S]*?)</array>`).exec(plist);
+  const body = match?.[1] ?? "";
+  return Array.from(body.matchAll(/<string>([^<]*)<\/string>/g), (item) => item[1] ?? "");
 }
