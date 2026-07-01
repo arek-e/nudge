@@ -45,6 +45,11 @@ import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 
 type AppDbLayer = Layer.Layer<Db>;
 
+const appShellTheme = {
+  appBackground: "#111111",
+  appIconForeground: "#f4f1eb",
+} as const;
+
 async function runBetterAuthApi<T>(c: Context, run: () => Promise<T>) {
   try {
     const result = await run();
@@ -103,6 +108,31 @@ function classifyVoiceLogRoute(spokenText: string) {
   return text.includes("?") || reasoningVoiceLogPrefixes.some((prefix) => text.startsWith(prefix))
     ? "reasoning_candidate"
     : "capture_only";
+}
+
+function localDateForTimestamp(timestamp: string, timeZone: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp.slice(0, 10);
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone,
+    year: "numeric",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "00";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function inLocalDateRange(
+  localDate: string,
+  range: { readonly from?: string | undefined; readonly to?: string | undefined },
+) {
+  return (
+    (range.from === undefined || localDate >= range.from) &&
+    (range.to === undefined || localDate <= range.to)
+  );
 }
 
 interface ApiContext {
@@ -319,6 +349,33 @@ export const apiRouter = api.router({
           ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
         }),
       );
+    }),
+  },
+  calendar: {
+    days: api.calendar.days.handler(async ({ context, input }) => {
+      const exported = await Effect.runPromise(context.db.exportUserData(context.user));
+      const days = new Map<string, { noteCount: number; signalCount: number }>();
+      const day = (localDate: string) => {
+        const value = days.get(localDate) ?? { noteCount: 0, signalCount: 0 };
+        days.set(localDate, value);
+        return value;
+      };
+
+      for (const note of exported.dailyNotes) {
+        if (inLocalDateRange(note.localDate, input)) day(note.localDate).noteCount += 1;
+      }
+
+      for (const event of exported.events) {
+        const localDate = localDateForTimestamp(event.occurredAt, input.timeZone);
+        if (inLocalDateRange(localDate, input)) day(localDate).signalCount += 1;
+      }
+
+      return {
+        days: [...days.entries()]
+          .map(([localDate, counts]) => ({ localDate, ...counts }))
+          .filter((counts) => counts.noteCount > 0 || counts.signalCount > 0)
+          .sort((a, b) => a.localDate.localeCompare(b.localDate)),
+      };
     }),
   },
   dataExport: api.dataExport.handler(async ({ context }) => {
@@ -1029,8 +1086,8 @@ export function createApp(options: CreateAppOptions = {}) {
       scope: "/",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
-      background_color: "#111111",
-      theme_color: "#111111",
+      background_color: appShellTheme.appBackground,
+      theme_color: appShellTheme.appBackground,
       categories: ["productivity", "lifestyle"],
       icons: [
         {
@@ -1071,7 +1128,7 @@ export function createApp(options: CreateAppOptions = {}) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111111" />
+    <meta name="theme-color" content="${appShellTheme.appBackground}" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Lares" />
     <title>Lares Offline</title>
@@ -1084,7 +1141,7 @@ export function createApp(options: CreateAppOptions = {}) {
     addWideEventFields(c, { routeName: "pwa.icon" });
     c.header("content-type", "image/svg+xml; charset=utf-8");
     return c.body(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111111"/><path d="M256 96c70.7 0 128 57.3 128 128 0 96-128 192-128 192S128 320 128 224c0-70.7 57.3-128 128-128Z" fill="#f4f1eb"/><circle cx="256" cy="224" r="56" fill="#111111"/></svg>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="${appShellTheme.appBackground}"/><path d="M256 96c70.7 0 128 57.3 128 128 0 96-128 192-128 192S128 320 128 224c0-70.7 57.3-128 128-128Z" fill="${appShellTheme.appIconForeground}"/><circle cx="256" cy="224" r="56" fill="${appShellTheme.appBackground}"/></svg>`,
     );
   });
 
@@ -1231,6 +1288,8 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use("/api/*", async (c, next) => {
     if (c.req.path.startsWith("/api/captures")) {
       addWideEventFields(c, { routeName: "api.captures" });
+    } else if (c.req.path.startsWith("/api/calendar")) {
+      addWideEventFields(c, { routeName: "api.calendar" });
     } else if (c.req.path.startsWith("/api/conversations")) {
       addWideEventFields(c, { routeName: "api.conversations" });
       if (c.req.path.includes("/tools/list-recent-signals")) {
@@ -1370,7 +1429,7 @@ export function createApp(options: CreateAppOptions = {}) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111111" />
+    <meta name="theme-color" content="${appShellTheme.appBackground}" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Lares" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -1382,17 +1441,33 @@ export function createApp(options: CreateAppOptions = {}) {
     <style>
       :root {
         color-scheme: dark;
+        --ui-bg-app: #0d1117;
+        --ui-bg-gradient-start: #15120f;
+        --ui-bg-gradient-end: #080a0f;
+        --ui-text-primary: #f4efe8;
+        --ui-text-secondary: #c9d1d9;
+        --ui-accent-primary: #c4a76f;
+        --ui-action-primary-fg: #15120f;
+        --ui-accent-wash: rgba(196, 167, 111, 0.24);
+        --ui-border-primary: rgba(244, 239, 232, 0.14);
+        --ui-border-control: rgba(244, 239, 232, 0.18);
+        --ui-border-subtle: rgba(244, 239, 232, 0.1);
+        --ui-surface-card: rgba(13, 17, 23, 0.72);
+        --ui-surface-control: rgba(255, 255, 255, 0.06);
+        --ui-surface-secondary-action: rgba(244, 239, 232, 0.1);
+        --ui-surface-list-item: rgba(255, 255, 255, 0.04);
+        --ui-shadow-card: 0 1.25rem 4rem rgba(0, 0, 0, 0.28);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #0d1117;
-        color: #f4efe8;
+        background: var(--ui-bg-app);
+        color: var(--ui-text-primary);
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at top left, rgba(196, 167, 111, 0.24), transparent 30rem),
-          linear-gradient(180deg, #15120f 0%, #0d1117 52%, #080a0f 100%);
+          radial-gradient(circle at top left, var(--ui-accent-wash), transparent 30rem),
+          linear-gradient(180deg, var(--ui-bg-gradient-start) 0%, var(--ui-bg-app) 52%, var(--ui-bg-gradient-end) 100%);
       }
       main {
         width: min(100%, 44rem);
@@ -1404,7 +1479,7 @@ export function createApp(options: CreateAppOptions = {}) {
       }
       .eyebrow {
         margin: 0 0 0.5rem;
-        color: #c4a76f;
+        color: var(--ui-accent-primary);
         font-size: 0.8rem;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -1418,17 +1493,17 @@ export function createApp(options: CreateAppOptions = {}) {
       }
       .summary {
         margin: 1rem 0 0;
-        color: #c9d1d9;
+        color: var(--ui-text-secondary);
         font-size: 1.05rem;
         line-height: 1.55;
       }
       .card {
         margin-top: 1rem;
         padding: 1rem;
-        border: 1px solid rgba(244, 239, 232, 0.14);
+        border: 1px solid var(--ui-border-primary);
         border-radius: 1.5rem;
-        background: rgba(13, 17, 23, 0.72);
-        box-shadow: 0 1.25rem 4rem rgba(0, 0, 0, 0.28);
+        background: var(--ui-surface-card);
+        box-shadow: var(--ui-shadow-card);
         backdrop-filter: blur(18px);
       }
       label {
@@ -1440,10 +1515,10 @@ export function createApp(options: CreateAppOptions = {}) {
         width: 100%;
         min-height: 9rem;
         resize: vertical;
-        border: 1px solid rgba(244, 239, 232, 0.18);
+        border: 1px solid var(--ui-border-control);
         border-radius: 1rem;
         padding: 0.9rem;
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--ui-surface-control);
         color: inherit;
         font: inherit;
         line-height: 1.45;
@@ -1456,8 +1531,8 @@ export function createApp(options: CreateAppOptions = {}) {
         border: 0;
         border-radius: 999px;
         padding: 0 1rem;
-        background: #c4a76f;
-        color: #15120f;
+        background: var(--ui-accent-primary);
+        color: var(--ui-action-primary-fg);
         font: inherit;
         font-weight: 800;
         text-decoration: none;
@@ -1469,18 +1544,18 @@ export function createApp(options: CreateAppOptions = {}) {
         margin-top: 0.9rem;
       }
       .secondary {
-        background: rgba(244, 239, 232, 0.1) !important;
-        color: #f4efe8 !important;
+        background: var(--ui-surface-secondary-action) !important;
+        color: var(--ui-text-primary) !important;
       }
       #status {
         min-height: 1.5rem;
         margin: 0.85rem 0 0;
-        color: #c9d1d9;
+        color: var(--ui-text-secondary);
       }
       #proposal-status {
         min-height: 1.5rem;
         margin: 0.85rem 0 0;
-        color: #c9d1d9;
+        color: var(--ui-text-secondary);
       }
       ul {
         display: grid;
@@ -1490,13 +1565,13 @@ export function createApp(options: CreateAppOptions = {}) {
         list-style: none;
       }
       li {
-        border: 1px solid rgba(244, 239, 232, 0.1);
+        border: 1px solid var(--ui-border-subtle);
         border-radius: 1rem;
         padding: 0.85rem;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--ui-surface-list-item);
       }
       .event-type {
-        color: #c4a76f;
+        color: var(--ui-accent-primary);
         font-size: 0.78rem;
         font-weight: 800;
         letter-spacing: 0.08em;
@@ -1513,7 +1588,7 @@ export function createApp(options: CreateAppOptions = {}) {
       }
       .proposal-body, .proposal-rationale {
         margin: 0.45rem 0 0;
-        color: #c9d1d9;
+        color: var(--ui-text-secondary);
         line-height: 1.45;
         overflow-wrap: anywhere;
       }

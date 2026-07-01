@@ -9,6 +9,10 @@ struct SignalsResponse: Decodable {
     let signals: [EventRecord]
 }
 
+struct CalendarDaysResponse: Decodable {
+    let days: [CalendarDayStats]
+}
+
 struct ActionsResponse: Decodable {
     let actions: [ActionItem]
     let latestRun: AgentRun?
@@ -195,12 +199,28 @@ enum LaresAPI {
         )
     }
 
-    static func listSignals(limit: Int = 50) async throws -> [EventRecord] {
+    static func listSignals(limit: Int = 50, from: String? = nil, to: String? = nil) async throws -> [EventRecord] {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let from {
+            queryItems.append(URLQueryItem(name: "from", value: from))
+        }
+        if let to {
+            queryItems.append(URLQueryItem(name: "to", value: to))
+        }
+
         let response: SignalsResponse = try await get(
             "/api/signals",
-            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+            queryItems: queryItems
         )
         return response.signals
+    }
+
+    static func listCalendarDays(timeZone: String = TimeZone.current.identifier) async throws -> [CalendarDayStats] {
+        let response: CalendarDaysResponse = try await get(
+            "/api/calendar/days",
+            queryItems: [URLQueryItem(name: "timeZone", value: timeZone)]
+        )
+        return response.days
     }
 
     static func listActions(limit: Int = 100) async throws -> ActionsResponse {
