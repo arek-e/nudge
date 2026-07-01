@@ -29,6 +29,12 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Lares connects to your development Engine on this network.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Lares can attach photos you take to your journal note.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lares can attach voice recordings to your journal note.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Lares can attach selected photos from your library to your journal note.</string>
 	<key>INAlternativeAppNames</key>
 	<array>
 		<dict>
