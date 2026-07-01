@@ -43,6 +43,7 @@
     "agents": "catalog:",
     "ai": "catalog:",
     "better-auth": "catalog:",
+    "braintrust": "3.20.0",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "evlog": "catalog:",

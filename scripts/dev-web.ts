@@ -2,7 +2,12 @@ import { findAvailablePort, preferredDevPort } from "./dev-ports";
 
 const repoRoot = new URL("..", import.meta.url).pathname;
 const port = await findAvailablePort({ preferredPort: preferredDevPort() });
-const url = `http://127.0.0.1:${port}`;
+const ip = "0.0.0.0";
+const url = `http://${ip}:${port}`;
+const braintrustEnvFile = `${repoRoot}.env.braintrust`;
+const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
+  ? ["--env-file", braintrustEnvFile]
+  : [];
 
 console.log(`Lares dev server: ${url}`);
 
@@ -13,8 +18,11 @@ await run([
   "dev",
   "--cwd",
   "apps/web",
+  "--ip",
+  ip,
   "--port",
   String(port),
+  ...braintrustEnvArgs,
   ...process.argv.slice(2),
 ]);
 

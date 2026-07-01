@@ -552,6 +552,43 @@ describe("web app", () => {
     });
   });
 
+  test("POST /api/voice/log stores a spoken capture and returns a Siri-friendly response", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/voice/log",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: "siri-log-1",
+          spokenText: "Log that I need to follow up with Maya tomorrow",
+        }),
+      },
+      env,
+    );
+    const body = await response.json();
+    const signalsResponse = await app.request("/api/signals", {}, env);
+    const signalsBody = await signalsResponse.json();
+
+    expect(response.status).toBe(200);
+    expect(body.spokenResponse).toBe("Understood. I logged it to Lares.");
+    expect(body.route).toBe("capture_only");
+    expect(body.capture).toMatchObject({
+      idempotencyKey: "siri-log-1",
+      payload: { route: "capture_only", text: "Log that I need to follow up with Maya tomorrow" },
+      source: "ios_siri",
+      type: "capture.voice_log",
+      userId: "dev-user",
+    });
+    expect(signalsBody.signals).toHaveLength(1);
+    expect(signalsBody.signals[0]).toMatchObject({
+      payload: { text: "Log that I need to follow up with Maya tomorrow" },
+      source: "ios_siri",
+      type: "capture.voice_log",
+    });
+  });
+
   test("GET /api/traces/recent lists safe trace span summaries", async () => {
     const rows = [
       {
@@ -1840,6 +1877,51 @@ describe("web app", () => {
         payload: { note: "primitive route" },
       }),
     ]);
+  });
+
+  test("voice logs append a primitive signal without queuing analysis", async () => {
+    const workflowCreates: Array<unknown> = [];
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/voice/log",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: "siri-log-1",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          spokenText: "Follow up with Maya tomorrow",
+        }),
+      },
+      {
+        ...env,
+        DAILY_DIGEST_WORKFLOW: {
+          create: async (input: unknown) => {
+            workflowCreates.push(input);
+            return { id: "unexpected-workflow" };
+          },
+        } as Workflow,
+      },
+    );
+    const voiceLog = await response.json();
+    const signals = await (await app.request("/api/signals", {}, env)).json();
+
+    expect(response.status).toBe(200);
+    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Lares.");
+    expect(voiceLog.route).toBe("reasoning_candidate");
+    expect(voiceLog.capture).toEqual(
+      expect.objectContaining({
+        source: "ios_siri",
+        type: "capture.voice_log",
+        payload: {
+          route: "reasoning_candidate",
+          text: "Follow up with Maya tomorrow",
+        },
+      }),
+    );
+    expect(signals.signals).toEqual([expect.objectContaining({ id: voiceLog.capture.id })]);
+    expect(workflowCreates).toEqual([]);
   });
 
   test("custom integrations can generate a source-linked synthesis for the current frame", async () => {

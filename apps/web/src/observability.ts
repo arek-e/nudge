@@ -17,6 +17,11 @@ import {
   safeErrorFields,
 } from "@lares/observability";
 import type { Env } from "./env";
+import {
+  ensureBraintrustTracing,
+  flushBraintrustTracing,
+  runBraintrustSpan,
+} from "./braintrust-tracing";
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
 
@@ -125,9 +130,23 @@ export const requestObservability = (): AppMiddleware => {
       userAgent: c.req.header("user-agent"),
     });
     c.get("log").set(c.get("wideEvent") ?? {});
+    ensureBraintrustTracing(c.env.BRAINTRUST_API_KEY);
 
     try {
-      await next();
+      await runBraintrustSpan(
+        {
+          attributes: {
+            "http.request.method": c.req.method,
+            "lares.environment": c.env.ENVIRONMENT ?? "unknown",
+            "lares.request_id": id,
+            "lares.version": c.env.APP_VERSION ?? "0.0.0",
+            "url.path": path,
+          },
+          name: `${c.req.method} ${path}`,
+          type: "task",
+        },
+        next,
+      );
     } catch (cause) {
       addWideEventFields(c, {
         status: 500,
@@ -190,6 +209,12 @@ export const requestObservability = (): AppMiddleware => {
           }),
         );
       }
+
+      runBackgroundPromise(
+        c,
+        flushBraintrustTracing(c.env.BRAINTRUST_API_KEY),
+        "braintrust_trace_flush_failed",
+      );
     }
   };
 };
@@ -206,7 +231,16 @@ export const runWithRequestSpan = async <A>(
   let spanStatus: "ok" | "error" = "ok";
 
   try {
-    return await task();
+    return await runBraintrustSpan(
+      {
+        attributes: {
+          ...(input.attributes ?? {}),
+          "span.kind": input.kind ?? "internal",
+        },
+        name: input.name,
+      },
+      task,
+    );
   } catch (cause) {
     spanStatus = "error";
     throw cause;
@@ -340,4 +374,20 @@ const runBackgroundEffect = (c: AppContext, effect: Effect.Effect<void, unknown>
     executionCtx.waitUntil(persistence);
     return;
   }
+};
+
+const runBackgroundPromise = (c: AppContext, promise: Promise<unknown>, failureEvent: string) => {
+  const guarded = promise.catch((cause) => {
+    console.warn(
+      JSON.stringify({
+        event: failureEvent,
+        logKind: "wide_event",
+        service: "lares-web",
+        requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+        ...safeErrorFields(cause),
+      }),
+    );
+  });
+  const executionCtx = safeExecutionContext(c);
+  if (executionCtx) executionCtx.waitUntil(guarded);
 };
