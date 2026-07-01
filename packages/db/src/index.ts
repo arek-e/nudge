@@ -139,9 +139,20 @@ export interface ReviewProposalInput {
   readonly editedTitle?: string;
   readonly editedBody?: string;
   readonly editedBodyDocument?: unknown;
+  readonly commitment?: {
+    readonly title: string;
+    readonly body: string;
+    readonly bodyDocument?: unknown;
+  };
 }
 
-export interface ReviewRecord extends ReviewProposalInput {
+export interface ReviewRecord {
+  readonly userId: string;
+  readonly proposalId: string;
+  readonly decision: ReviewDecision;
+  readonly editedTitle?: string;
+  readonly editedBody?: string;
+  readonly editedBodyDocument?: unknown;
   readonly id: string;
   readonly createdAt: string;
 }
@@ -1381,6 +1392,32 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }),
         reviewProposal: (input) =>
           Effect.sync(() => {
+            const proposal = proposalStore.get(input.proposalId);
+            const ensureCommitment = (review: ReviewRecord, timestamp: string) => {
+              if (!input.commitment) return;
+              if (!proposal || proposal.userId !== input.userId) {
+                throw new Error("Proposal not found");
+              }
+              const existingCommitment = [...commitmentStore.values()].find(
+                (commitment) => commitment.proposalId === input.proposalId,
+              );
+              if (existingCommitment) return;
+              const commitment = {
+                userId: input.userId,
+                proposalId: proposal.id,
+                reviewId: review.id,
+                title: input.commitment.title,
+                body: input.commitment.body,
+                ...(input.commitment.bodyDocument !== undefined
+                  ? { bodyDocument: input.commitment.bodyDocument }
+                  : {}),
+                id: eventId(),
+                status: "active",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              } satisfies CommitmentRecord;
+              commitmentStore.set(commitment.id, commitment);
+            };
             const existing = [...reviewStore.values()].find(
               (review) => review.proposalId === input.proposalId && review.userId === input.userId,
             );
@@ -1392,12 +1429,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 JSON.stringify(existing.editedBodyDocument) ===
                   JSON.stringify(input.editedBodyDocument)
               ) {
+                ensureCommitment(existing, nowIso());
                 return existing;
               }
               throw new Error("Proposal already reviewed");
             }
 
-            const proposal = proposalStore.get(input.proposalId);
             if (!proposal || proposal.userId !== input.userId || proposal.status !== "pending") {
               throw new Error("Proposal not found");
             }
@@ -1411,11 +1448,19 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               ...(input.editedBody !== undefined ? { body: input.editedBody } : {}),
             });
             const review = {
-              ...input,
+              userId: input.userId,
+              proposalId: input.proposalId,
+              decision: input.decision,
+              ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
+              ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+              ...(input.editedBodyDocument !== undefined
+                ? { editedBodyDocument: input.editedBodyDocument }
+                : {}),
               id: eventId(),
               createdAt: timestamp,
             } satisfies ReviewRecord;
             reviewStore.set(review.id, review);
+            ensureCommitment(review, timestamp);
             return review;
           }),
         recordMemoryRetrieval: (input) =>
@@ -2057,7 +2102,9 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const row = await db
                 .select()
                 .from(extractedItems)
-                .where(eq(extractedItems.id, input.itemId))
+                .where(
+                  and(eq(extractedItems.id, input.itemId), eq(extractedItems.userId, input.userId)),
+                )
                 .get();
               if (!row) throw new Error("Extracted item not found");
               return toExtractedItemRecord(row);
@@ -2499,7 +2546,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const existingOutcome = await db
                 .select()
                 .from(outcomes)
-                .where(eq(outcomes.commitmentId, input.commitmentId))
+                .where(
+                  and(
+                    eq(outcomes.commitmentId, input.commitmentId),
+                    eq(outcomes.userId, input.userId),
+                  ),
+                )
                 .get();
               if (existingOutcome) {
                 const outcome = toOutcomeRecord(existingOutcome);
@@ -2554,7 +2606,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const recorded = await db
                 .select()
                 .from(outcomes)
-                .where(eq(outcomes.commitmentId, input.commitmentId))
+                .where(
+                  and(
+                    eq(outcomes.commitmentId, input.commitmentId),
+                    eq(outcomes.userId, input.userId),
+                  ),
+                )
                 .get();
               if (!recorded) throw new Error("Commitment not found");
 
@@ -2564,6 +2621,40 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             }),
           reviewProposal: (input) =>
             Effect.promise(async () => {
+              const commitmentInsert = (reviewId: string, timestamp: string) =>
+                input.commitment
+                  ? database
+                      .prepare(
+                        `INSERT OR IGNORE INTO commitments (
+                          id,
+                          user_id,
+                          proposal_id,
+                          review_id,
+                          title,
+                          body,
+                          body_document,
+                          status,
+                          created_at,
+                          updated_at
+                        )
+                        SELECT ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?
+                        FROM reviews
+                        WHERE id = ? AND user_id = ?`,
+                      )
+                      .bind(
+                        eventId(),
+                        input.userId,
+                        input.proposalId,
+                        reviewId,
+                        input.commitment.title,
+                        input.commitment.body,
+                        optionalJsonText(input.commitment.bodyDocument),
+                        timestamp,
+                        timestamp,
+                        reviewId,
+                        input.userId,
+                      )
+                  : null;
               const existingReview = await db
                 .select()
                 .from(reviews)
@@ -2594,6 +2685,8 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   existing.editedBody === input.editedBody &&
                   sameJson(existing.editedBodyDocument, input.editedBodyDocument)
                 ) {
+                  const insertCommitment = commitmentInsert(existing.id, nowIso());
+                  if (insertCommitment) await insertCommitment.run();
                   return existing;
                 }
                 throw new Error("Proposal already reviewed");
@@ -2601,10 +2694,18 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
               const timestamp = nowIso();
               const review = {
-                ...input,
+                userId: input.userId,
+                proposalId: input.proposalId,
+                decision: input.decision,
+                ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
+                ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
+                ...(input.editedBodyDocument !== undefined
+                  ? { editedBodyDocument: input.editedBodyDocument }
+                  : {}),
                 id: eventId(),
                 createdAt: timestamp,
               } satisfies ReviewRecord;
+              const insertCommitment = commitmentInsert(review.id, timestamp);
               await database.batch([
                 database
                   .prepare(
@@ -2672,6 +2773,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     optionalJsonText(input.editedBodyDocument),
                     optionalJsonText(input.editedBodyDocument),
                   ),
+                ...(insertCommitment ? [insertCommitment] : []),
               ]);
 
               const stored = await db

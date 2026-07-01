@@ -396,48 +396,27 @@ export const PrimitiveWorkflows = {
       });
       if (!proposal) return yield* Effect.fail(new Error("Proposal not found"));
 
-      if (proposal.status !== "pending") {
-        const existingReview = yield* db.getReviewForProposal({
-          proposalId: input.proposalId,
-          userId: input.user.id,
-        });
-        if (
-          existingReview?.decision === input.decision &&
-          existingReview.editedTitle === input.editedTitle &&
-          existingReview.editedBody === input.editedBody &&
-          JSON.stringify(existingReview.editedBodyDocument) ===
-            JSON.stringify(input.editedBodyDocument)
-        ) {
-          return existingReview;
-        }
-        return yield* Effect.fail(new Error("Proposal already reviewed"));
-      }
-
-      const review = yield* db.reviewProposal({
+      return yield* db.reviewProposal({
         decision: input.decision,
         ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
         ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
         ...(input.editedBodyDocument !== undefined
           ? { editedBodyDocument: input.editedBodyDocument }
           : {}),
+        ...(input.decision !== "rejected"
+          ? {
+              commitment: {
+                body: input.editedBody ?? proposal.body,
+                ...(input.editedBodyDocument !== undefined
+                  ? { bodyDocument: input.editedBodyDocument }
+                  : {}),
+                title: input.editedTitle ?? proposal.title,
+              },
+            }
+          : {}),
         proposalId: input.proposalId,
         userId: input.user.id,
       });
-
-      if (input.decision !== "rejected") {
-        yield* db.appendCommitment({
-          body: input.editedBody ?? proposal.body,
-          ...(input.editedBodyDocument !== undefined
-            ? { bodyDocument: input.editedBodyDocument }
-            : {}),
-          proposalId: proposal.id,
-          reviewId: review.id,
-          title: input.editedTitle ?? proposal.title,
-          userId: input.user.id,
-        });
-      }
-
-      return review;
     }),
 
   listCommitments: (input: { readonly user: DbUser; readonly limit: number }) =>
