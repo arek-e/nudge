@@ -1,0 +1,43 @@
+# Layers and Services
+
+Lares copies the production discipline from `pingdotgg/t3code`, not its runtime shape. The
+top-level Worker runtime is intentionally split into a service interface and live layer; smaller
+modules still earn that split case by case.
+
+## What We Keep
+
+- `apps/web/src/app.ts` owns Hono app composition, middleware installation, runtime caching, and request context construction.
+- `apps/web/src/routes/` owns HTTP route registration by surface: static/PWA routes, Better Auth routes, and authenticated API middleware.
+- `apps/web/src/api-router.ts` owns the oRPC/OpenAPI handler implementations. It is intentionally separate from Worker composition.
+- `apps/web/src/Services/LaresApp.ts` owns the `LaresApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
+- `apps/web/src/Layers/LaresAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
+- `packages/db` owns persistence and row decoding. Runtime code should call the `Db` Effect service, not D1 or Drizzle directly.
+- `packages/effect-services` owns primitive Loop Composition modules such as memory indexing, OKF projection, and primitive workflows.
+- `apps/web/src/index.ts` owns Cloudflare Agent and Workflow entrypoints. Durable background work lives there until a repeated reactor pattern justifies a deeper module.
+- `apps/web/src/api-contract.ts` owns public OpenAPI/oRPC input and output schemas.
+
+## Practices Borrowed From T3 Code
+
+- Name composition seams. If runtime assembly grows, add named layer groups before adding anonymous setup inside route handlers.
+- Decode at trust boundaries. Request JSON, provider responses, persisted strings, metadata, and MCP payloads must become validated domain values before domain logic sees them.
+- Test through public seams. Prefer Hono routes, Effect services with memory adapters, Workers Workflow behavior, and user-visible UI behavior over private helper tests.
+- Use deterministic async seams when background reactors appear. Add a `drain()` or typed receipt only when tests would otherwise sleep or poll.
+- Turn repeated review comments into executable checks. Keep custom guards narrow and tied to mistakes this repo has actually made.
+
+## What Not To Copy
+
+- Do not migrate to t3code's Node/Bun server runtime, WebSocket RPC, Effect HTTP stack, SQLite lifecycle, desktop provider registry, or DPoP/OAuth server stack.
+- Do not split every module into `Services/` and `Layers/`. The Worker app runtime has earned the split; other modules still need two adapters, test pressure, or module size before the locality is real.
+- Do not introduce an event-sourced OrchestrationEngine until replay, fanout projections, or cross-agent command dedupe are actual production pressure.
+- Do not add t3code-style release/smoke/deploy jobs until `bun run check` and the existing deploy flow miss real regressions.
+
+## Split Rules
+
+Split a Lares module only when at least one is true:
+
+- The interface is stable and the implementation is forcing route handlers or UI code to know too much.
+- Two real adapters exist, such as memory and durable storage, or test and production adapters that cannot stay tiny.
+- Tests need to wait for async work and are starting to sleep or poll.
+- The module has become the place where Capture, Signal, Context, Frame, Synthesis, Proposal, Review, Commitment, Outcome, or Loop Composition rules are leaking into unrelated code.
+
+Otherwise keep the module boring and local.

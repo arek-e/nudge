@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import {
   buildRootServerSpan,
+  buildDebugWideEventFields,
   buildTraceSpanRow,
   buildTraceEventRow,
   createSpanId,
@@ -10,7 +11,6 @@ import {
   isTransientBackpressureError,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
-  listRecentTraceSpans,
   pruneTraceCache,
   retryAfterSecondsFor,
   safeErrorFields,
@@ -179,6 +179,69 @@ describe("observability", () => {
       expect.stringContaining("http.request.method"),
       expect.any(String),
     ]);
+    expect(JSON.parse(String(span.values[18]))).toMatchObject({
+      "otel.name": "health",
+      "otel.status_code": "ERROR",
+      "http.request.method": "GET",
+      "http.response.status_code": 500,
+      "http.route": "health",
+      "url.path": "/health",
+      "user_agent.original": "test-agent",
+      "lares.request_id": "ray-1",
+      "lares.outcome": "error",
+      "lares.debug_kind": "http",
+      "lares.sampled": true,
+    });
+  });
+
+  test("adds wide-event fields useful for automatic debugging", () => {
+    expect(
+      buildDebugWideEventFields({
+        event: {
+          event: "http_request_completed",
+          service: "lares-web",
+          environment: "test",
+          version: "test-version",
+          requestId: "ray-1",
+          routeName: "api.journal.save",
+          method: "POST",
+          path: "/api/journal",
+          status: 504,
+          outcome: "error",
+          durationMs: 10_001,
+          sampleReason: "error",
+          userAgent: "Lares/1",
+          aiSystem: "cloudflare-think",
+          aiModel: "@cf/zai-org/glm-4.7-flash",
+          aiRunId: "run-1",
+          aiErrorCode: "AI_EXTRACTION_TIMEOUT",
+          errorType: "TimeoutError",
+          errorMessage: "The operation was aborted due to timeout",
+        },
+      }),
+    ).toEqual({
+      "otel.name": "api.journal.save",
+      "otel.status_code": "ERROR",
+      "http.request.method": "POST",
+      "http.response.status_code": 504,
+      "http.route": "api.journal.save",
+      "url.path": "/api/journal",
+      "user_agent.original": "Lares/1",
+      "service.name": "lares-web",
+      "service.version": "test-version",
+      "deployment.environment.name": "test",
+      "lares.request_id": "ray-1",
+      "lares.outcome": "error",
+      "lares.duration_ms": 10001,
+      "lares.sample_reason": "error",
+      "lares.debug_kind": "ai",
+      "lares.ai.system": "cloudflare-think",
+      "lares.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "lares.ai.run_id": "run-1",
+      "lares.ai.error_code": "AI_EXTRACTION_TIMEOUT",
+      "exception.type": "TimeoutError",
+      "exception.message": "The operation was aborted due to timeout",
+    });
   });
 
   test("builds reusable child spans without feature-specific route knowledge", () => {
@@ -281,62 +344,6 @@ describe("observability", () => {
       expect.stringContaining("DELETE FROM trace_spans"),
       expect.stringContaining("DELETE FROM trace_events"),
       expect.stringContaining("DELETE FROM trace_events"),
-    ]);
-  });
-
-  test("lists recent trace spans as a reusable route read model", async () => {
-    let capturedLimit: unknown;
-    let capturedSql = "";
-    const db = {
-      prepare: (sql: string) => {
-        capturedSql = sql;
-        return {
-          bind: (limit: unknown) => ({
-            all: async () => {
-              capturedLimit = limit;
-              return {
-                results: [
-                  {
-                    id: "span-1",
-                    trace_id: "trace-1",
-                    parent_span_id: null,
-                    name: "GET /health",
-                    kind: "server",
-                    status: "ok",
-                    started_at: "2026-06-12T10:00:00.000Z",
-                    ended_at: "2026-06-12T10:00:00.010Z",
-                    duration_ms: 10,
-                    route_name: "health",
-                    method: "GET",
-                    path: "/health",
-                  },
-                ],
-              };
-            },
-          }),
-        };
-      },
-    };
-
-    const spans = await Effect.runPromise(listRecentTraceSpans(db, 5));
-
-    expect(capturedLimit).toBe(5);
-    expect(capturedSql).toContain("route_name != 'api.traces'");
-    expect(spans).toEqual([
-      {
-        id: "span-1",
-        traceId: "trace-1",
-        parentSpanId: null,
-        name: "GET /health",
-        kind: "server",
-        status: "ok",
-        startedAt: "2026-06-12T10:00:00.000Z",
-        endedAt: "2026-06-12T10:00:00.010Z",
-        durationMs: 10,
-        routeName: "health",
-        method: "GET",
-        path: "/health",
-      },
     ]);
   });
 });

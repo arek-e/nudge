@@ -1,10 +1,4 @@
 import { Effect, Metric } from "effect";
-export {
-  ensureBraintrustTracing,
-  flushBraintrustTracing,
-  runBraintrustSpan,
-  wrapBraintrustAISDK,
-} from "./braintrust";
 
 export interface WideEvent {
   readonly [key: string]: unknown;
@@ -27,6 +21,10 @@ export interface FinalizeRequestWideEventInput {
   readonly durationMs: number;
   readonly now: string;
   readonly status: number;
+}
+
+export interface BuildDebugWideEventInput {
+  readonly event: WideEvent;
 }
 
 export interface TraceEventRowInput {
@@ -78,44 +76,6 @@ export interface TraceCacheDb {
       readonly run: () => Promise<unknown>;
     };
   };
-}
-
-export interface TraceCacheQueryDb {
-  readonly prepare: (sql: string) => {
-    readonly bind: (...values: ReadonlyArray<unknown>) => {
-      readonly all: <T = unknown>() => Promise<{ readonly results?: ReadonlyArray<T> }>;
-    };
-  };
-}
-
-export interface TraceSpanSummary {
-  readonly id: string;
-  readonly traceId: string;
-  readonly parentSpanId: string | null;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly startedAt: string;
-  readonly endedAt: string | null;
-  readonly durationMs: number | null;
-  readonly routeName: string | null;
-  readonly method: string | null;
-  readonly path: string | null;
-}
-
-interface TraceSpanSummaryRow {
-  readonly id: string;
-  readonly trace_id: string;
-  readonly parent_span_id: string | null;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly started_at: string;
-  readonly ended_at: string | null;
-  readonly duration_ms: number | null;
-  readonly route_name: string | null;
-  readonly method: string | null;
-  readonly path: string | null;
 }
 
 const randomHex = (bytes: number) => {
@@ -197,6 +157,44 @@ export const finalizeRequestWideEvent = (input: FinalizeRequestWideEventInput) =
   return { ...event, ...shouldSampleWideEvent(event) };
 };
 
+export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
+  const event = input.event;
+  const status = numberField(event, "status");
+  const path = nullableStringField(event, "path");
+  const routeName = nullableStringField(event, "routeName");
+  const aiSystem = nullableStringField(event, "aiSystem");
+  const aiModel = nullableStringField(event, "aiModel");
+  const errorType = nullableStringField(event, "errorType");
+
+  return {
+    "otel.name": stringField(event, "routeName", stringField(event, "event", "unknown")),
+    "otel.status_code": status && status >= 500 ? "ERROR" : "OK",
+    "http.request.method": nullableStringField(event, "method"),
+    "http.response.status_code": status,
+    "http.route": routeName,
+    "url.path": path,
+    "user_agent.original": nullableStringField(event, "userAgent"),
+    "service.name": stringField(event, "service", "lares-web"),
+    "service.version": stringField(event, "version", "0.0.0"),
+    "deployment.environment.name": stringField(event, "environment", "unknown"),
+    "lares.request_id": nullableStringField(event, "requestId"),
+    "lares.outcome": nullableStringField(event, "outcome"),
+    "lares.duration_ms": numberField(event, "durationMs"),
+    "lares.sample_reason": nullableStringField(event, "sampleReason"),
+    "lares.debug_kind": path?.startsWith("/api/agent-runs/")
+      ? "agent_run_poll"
+      : aiSystem
+        ? "ai"
+        : "http",
+    "lares.ai.system": aiSystem,
+    "lares.ai.model": aiModel,
+    "lares.ai.run_id": nullableStringField(event, "aiRunId"),
+    "lares.ai.error_code": nullableStringField(event, "aiErrorCode"),
+    "exception.type": errorType,
+    "exception.message": nullableStringField(event, "errorMessage"),
+  } satisfies WideEvent;
+};
+
 export const buildTraceEventRow = (input: TraceEventRowInput): SqlInsertRow => {
   return {
     sql: `INSERT INTO trace_events (
@@ -250,11 +248,7 @@ export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow =>
 
   return buildTraceSpanRow({
     attributes: {
-      "http.request.method": method,
-      "http.route": routeName,
-      "url.path": path,
-      "user_agent.original": nullableStringField(input.event, "userAgent"),
-      "lares.request_id": nullableStringField(input.event, "requestId"),
+      ...buildDebugWideEventFields({ event: input.event }),
       "lares.sampled": input.event.sampled === true,
     },
     durationMs: input.durationMs,
@@ -334,73 +328,23 @@ export const persistTraceCacheSpan = (db: TraceCacheDb, row: SqlInsertRow) => {
   return runTraceCacheRow(db, row);
 };
 
-export const pruneTraceCache = (db: TraceCacheDb) =>
-  Effect.gen(function* () {
-    yield* runTraceCacheStatement(
-      db,
-      "DELETE FROM trace_spans WHERE julianday(created_at) < julianday('now', '-7 days')",
-    );
-    yield* runTraceCacheStatement(
-      db,
-      "DELETE FROM trace_spans WHERE span_id NOT IN (SELECT span_id FROM trace_spans ORDER BY created_at DESC LIMIT 5000)",
-    );
-    yield* runTraceCacheStatement(
-      db,
-      "DELETE FROM trace_events WHERE julianday(created_at) < julianday('now', '-7 days')",
-    );
-    yield* runTraceCacheStatement(
-      db,
-      "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
-    );
-  });
-
-export const listRecentTraceSpans = (traceDb: TraceCacheQueryDb | undefined, limit: number) => {
-  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
-
-  return Effect.tryPromise({
-    try: async () => {
-      const result = await traceDb
-        .prepare(
-          `SELECT
-            span_id AS id,
-            trace_id,
-            parent_span_id,
-            name,
-            kind,
-            status,
-            started_at,
-            ended_at,
-            duration_ms,
-            route_name,
-            method,
-            path
-          FROM trace_spans
-          WHERE route_name IS NULL OR route_name != 'api.traces'
-          ORDER BY started_at DESC
-          LIMIT ?`,
-        )
-        .bind(limit)
-        .all<TraceSpanSummaryRow>();
-
-      return (result.results ?? []).map(toTraceSpanSummary);
-    },
-    catch: (cause) => cause,
-  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
-};
-
-const toTraceSpanSummary = (row: TraceSpanSummaryRow): TraceSpanSummary => ({
-  id: row.id,
-  traceId: row.trace_id,
-  parentSpanId: row.parent_span_id,
-  name: row.name,
-  kind: row.kind,
-  status: row.status,
-  startedAt: row.started_at,
-  endedAt: row.ended_at,
-  durationMs: row.duration_ms,
-  routeName: row.route_name,
-  method: row.method,
-  path: row.path,
+export const pruneTraceCache = Effect.fn("pruneTraceCache")(function* (db: TraceCacheDb) {
+  yield* runTraceCacheStatement(
+    db,
+    "DELETE FROM trace_spans WHERE julianday(created_at) < julianday('now', '-7 days')",
+  );
+  yield* runTraceCacheStatement(
+    db,
+    "DELETE FROM trace_spans WHERE span_id NOT IN (SELECT span_id FROM trace_spans ORDER BY created_at DESC LIMIT 5000)",
+  );
+  yield* runTraceCacheStatement(
+    db,
+    "DELETE FROM trace_events WHERE julianday(created_at) < julianday('now', '-7 days')",
+  );
+  yield* runTraceCacheStatement(
+    db,
+    "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
+  );
 });
 
 const runTraceCacheRow = (db: TraceCacheDb, row: SqlInsertRow) => {
@@ -462,14 +406,27 @@ export const readHttpTelemetrySnapshot = async () => {
   );
 
   const statusCodes: Record<string, number> = {};
-  const occurrences = (statuses as { occurrences?: Map<string, number> }).occurrences ?? new Map();
-  for (const [status, count] of occurrences) {
-    statusCodes[status] = count;
+  const occurrences = readObjectProperty(statuses, "occurrences");
+  if (occurrences instanceof Map) {
+    for (const [status, count] of occurrences) {
+      if (typeof status === "string" && typeof count === "number") {
+        statusCodes[status] = count;
+      }
+    }
   }
 
   return {
-    requestCount: Number((requests as { count?: number }).count ?? 0),
-    durationSamples: Number((durations as { count?: number }).count ?? 0),
+    requestCount: readNumberProperty(requests, "count"),
+    durationSamples: readNumberProperty(durations, "count"),
     statusCodes,
   };
 };
+
+function readObjectProperty(value: unknown, key: string) {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
+function readNumberProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "number" ? property : 0;
+}

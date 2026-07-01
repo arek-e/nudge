@@ -1,10 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import {
   DotMatrixBase,
   spiralInwardNormFromIndex,
   spiralInwardOrderValue,
+  type DmxCSSProperties,
   type DotAnimationResolver,
   type DotMatrixCommonProps,
 } from "@/lib/dotmatrix-core";
@@ -19,7 +19,7 @@ const animationResolver: DotAnimationResolver = ({ isActive, index, reducedMotio
 
   const order = spiralInwardOrderValue(index);
   const pathNorm = spiralInwardNormFromIndex(index);
-  const style = { "--dmx-spiral-order": order } as CSSProperties;
+  const style: DmxCSSProperties = { "--dmx-spiral-order": order };
 
   if (reducedMotion || phase === "idle") {
     return {

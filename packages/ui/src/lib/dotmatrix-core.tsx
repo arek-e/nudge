@@ -5,6 +5,10 @@ import type { CSSProperties } from "react";
 import "@/components/dotmatrix-loader.css";
 import { useDotMatrixPhases, usePrefersReducedMotion } from "@/lib/dotmatrix-hooks";
 
+export type DmxCSSProperties = CSSProperties & {
+  [key: `--${string}`]: string | number | undefined;
+};
+
 export type MatrixPattern = "diamond" | "full" | "outline" | "rose" | "cross" | "rings";
 export type DotShape = "circle" | "square" | "diamond" | "hearts";
 export type DotMatrixPhase = "idle" | "collapse" | "hoverRipple" | "loadingRipple";
@@ -271,6 +275,14 @@ const C = Math.floor(MATRIX_SIZE / 2);
 const CELLS = N * N;
 const MAX_TRBL = (N - 1) * 2;
 
+function orderValueAt(order: readonly number[], index: number) {
+  const value = order[index];
+  if (value === undefined) {
+    throw new RangeError(`Dot matrix index out of range: ${index}`);
+  }
+  return value;
+}
+
 export function trBlPathNormFromIndex(index: number): number {
   const { row, col } = indexToCoord(index);
   return (row + (N - 1 - col)) / MAX_TRBL;
@@ -299,11 +311,11 @@ function buildSnakeOrderToIndexMap(): number[] {
 const SNAKE_ORDER: readonly number[] = buildSnakeOrderToIndexMap();
 
 export function snakePathNormFromIndex(index: number): number {
-  return SNAKE_ORDER[index]! / (CELLS - 1);
+  return orderValueAt(SNAKE_ORDER, index) / (CELLS - 1);
 }
 
 export function snakePathOrderValue(index: number): number {
-  return SNAKE_ORDER[index]!;
+  return orderValueAt(SNAKE_ORDER, index);
 }
 
 function buildSpiralInwardOrderToIndexMap(): number[] {
@@ -351,11 +363,11 @@ function buildSpiralInwardOrderToIndexMap(): number[] {
 const SPIRAL_INWARD_ORDER: readonly number[] = buildSpiralInwardOrderToIndexMap();
 
 export function spiralInwardNormFromIndex(index: number): number {
-  return SPIRAL_INWARD_ORDER[index]! / (CELLS - 1);
+  return orderValueAt(SPIRAL_INWARD_ORDER, index) / (CELLS - 1);
 }
 
 export function spiralInwardOrderValue(index: number): number {
-  return SPIRAL_INWARD_ORDER[index]!;
+  return orderValueAt(SPIRAL_INWARD_ORDER, index);
 }
 
 function buildOuterRingClockwiseOrderToIndexMap(): number[] {
@@ -379,8 +391,7 @@ function buildOuterRingClockwiseOrderToIndexMap(): number[] {
     [1, 0],
   ];
 
-  for (let t = 0; t < coords.length; t += 1) {
-    const [row, col] = coords[t]!;
+  for (const [t, [row, col]] of coords.entries()) {
     order[rowMajorIndex(row, col)] = t;
   }
 
@@ -400,8 +411,7 @@ function buildMiddleRingAntiClockwiseOrderToIndexMap(): number[] {
     [1, 2],
   ];
 
-  for (let t = 0; t < coords.length; t += 1) {
-    const [row, col] = coords[t]!;
+  for (const [t, [row, col]] of coords.entries()) {
     order[rowMajorIndex(row, col)] = t;
   }
 
@@ -413,7 +423,7 @@ const MIDDLE_RING_ANTI_CLOCKWISE_ORDER: readonly number[] =
   buildMiddleRingAntiClockwiseOrderToIndexMap();
 
 export function outerRingClockwiseOrderValue(index: number): number {
-  return OUTER_RING_CLOCKWISE_ORDER[index]!;
+  return orderValueAt(OUTER_RING_CLOCKWISE_ORDER, index);
 }
 
 export function outerRingClockwiseNormFromIndex(index: number): number {
@@ -422,7 +432,7 @@ export function outerRingClockwiseNormFromIndex(index: number): number {
 }
 
 export function middleRingAntiClockwiseOrderValue(index: number): number {
-  return MIDDLE_RING_ANTI_CLOCKWISE_ORDER[index]!;
+  return orderValueAt(MIDDLE_RING_ANTI_CLOCKWISE_ORDER, index);
 }
 
 export function middleRingAntiClockwiseNormFromIndex(index: number): number {
@@ -459,11 +469,11 @@ function buildDiagonalSnakeOrderToIndexMap(): number[] {
 const DIAGONAL_SNAKE_ORDER: readonly number[] = buildDiagonalSnakeOrderToIndexMap();
 
 export function diagonalSnakeOrderValue(index: number): number {
-  return DIAGONAL_SNAKE_ORDER[index]!;
+  return orderValueAt(DIAGONAL_SNAKE_ORDER, index);
 }
 
 export function diagonalSnakeNormFromIndex(index: number): number {
-  return DIAGONAL_SNAKE_ORDER[index]! / (CELLS - 1);
+  return orderValueAt(DIAGONAL_SNAKE_ORDER, index) / (CELLS - 1);
 }
 
 function buildRowWaveSnakeOrderToIndexMap(): number[] {
@@ -499,7 +509,7 @@ const ROW_WAVE_SNAKE_ORDER: readonly number[] = buildRowWaveSnakeOrderToIndexMap
 const ROW_WAVE_SNAKE_MAX_ORDER = Math.max(...ROW_WAVE_SNAKE_ORDER);
 
 export function rowWaveOrderValue(index: number): number {
-  return ROW_WAVE_SNAKE_ORDER[index]!;
+  return orderValueAt(ROW_WAVE_SNAKE_ORDER, index);
 }
 
 export function rowWaveNormFromIndex(index: number): number {
@@ -738,21 +748,21 @@ export function DotMatrixBase({
   const unit = dotSize + gap;
   const { resolvedColor, dotFill } = resolveDmxColorTokens(color, colorPreset);
 
-  const dmxVarStyle: CSSProperties & Record<`--${string}`, string | number> = {
+  const dmxVarStyle: DmxCSSProperties = {
     width: matrixSpan,
     height: matrixSpan,
     "--dmx-speed": speedScale,
-    ["--dmx-dot-size" as const]: `${dotSize}px`,
-    ["--dmx-halo-level" as const]: halo,
-    ["--dmx-dot-fill" as const]: dotFill,
+    "--dmx-dot-size": `${dotSize}px`,
+    "--dmx-halo-level": halo,
+    "--dmx-dot-fill": dotFill,
     color: resolvedColor,
-    ...(ob !== undefined && { ["--dmx-opacity-base" as const]: ob }),
-    ...(om !== undefined && { ["--dmx-opacity-mid" as const]: om }),
-    ...(op !== undefined && { ["--dmx-opacity-peak" as const]: op }),
+    ...(ob !== undefined && { "--dmx-opacity-base": ob }),
+    ...(om !== undefined && { "--dmx-opacity-mid": om }),
+    ...(op !== undefined && { "--dmx-opacity-peak": op }),
     ...(useWrapper
       ? {
           transform: `scale(${scale})`,
-          transformOrigin: "center center" as const,
+          transformOrigin: "center center",
         }
       : { minWidth: minSize, minHeight: minSize }),
   };
@@ -782,9 +792,11 @@ export function DotMatrixBase({
         })
       : {};
 
-    const resolvedAnimationStyle = animationState.style ? { ...animationState.style } : undefined;
+    const resolvedAnimationStyle: DmxCSSProperties | undefined = animationState.style
+      ? { ...animationState.style }
+      : undefined;
     let isBloomDot = false;
-    let stylePatch: CSSProperties | undefined = resolvedAnimationStyle;
+    let stylePatch: DmxCSSProperties | undefined = resolvedAnimationStyle;
 
     if (isActive) {
       const rawOpacity = stylePatch?.opacity;
@@ -792,22 +804,21 @@ export function DotMatrixBase({
         const remappedOpacity = remapOpacityToTriplet(rawOpacity, ob, om, op);
         stylePatch = { ...stylePatch, opacity: remappedOpacity };
         const parts = dmxDotBloomParts(true, rawOpacity, bloom, halo, ob, om, op);
-        (stylePatch as CSSProperties & { "--dmx-bloom-level"?: number })["--dmx-bloom-level"] =
-          parts.level;
+        stylePatch["--dmx-bloom-level"] = parts.level;
         isBloomDot = parts.bloomDot;
       } else {
         const parts = dmxDotBloomParts(true, 0, bloom, halo, ob, om, op);
         if (parts.level > 0) {
           stylePatch = {
             ...(stylePatch ?? {}),
-            ["--dmx-bloom-level" as const]: parts.level,
-          } as CSSProperties & { "--dmx-bloom-level"?: number };
+            "--dmx-bloom-level": parts.level,
+          };
         }
         isBloomDot = parts.bloomDot;
       }
     }
 
-    const dotStyle = {
+    const dotStyle: DmxCSSProperties = {
       width: dotSize,
       height: dotSize,
       "--dmx-distance": distance,
@@ -822,12 +833,12 @@ export function DotMatrixBase({
       ...(!isActive
         ? {
             opacity: 0,
-            visibility: "hidden" as const,
-            pointerEvents: "none" as const,
+            visibility: "hidden",
+            pointerEvents: "none",
             animation: "none",
           }
         : {}),
-    } as CSSProperties;
+    };
 
     return (
       <span
@@ -921,7 +932,7 @@ export function createPathWaveResolver(getPathNorm: NormFn): DotAnimationResolve
     }
 
     const path = getPathNorm({ row, col, index });
-    const style = { "--dmx-path": path } as CSSProperties;
+    const style: DmxCSSProperties = { "--dmx-path": path };
 
     if (reducedMotion || phase === "idle") {
       return {

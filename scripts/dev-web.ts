@@ -31,7 +31,7 @@ await run([
   "DB",
   "--local",
   "--cwd",
-  "apps/engine",
+  "apps/web",
   "--persist-to",
   persistTo,
 ]);
@@ -39,7 +39,7 @@ await run([
   "wrangler",
   "dev",
   "--cwd",
-  "apps/engine",
+  "apps/web",
   "--ip",
   ip,
   "--port",

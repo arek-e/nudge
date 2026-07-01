@@ -1,14 +1,15 @@
+import type { Sandbox } from "@cloudflare/sandbox";
+
 export interface Env {
   DB: D1Database;
   OKF_FILES?: R2Bucket;
   TRACE_ARTIFACTS: R2Bucket;
   DAILY_DIGEST_WORKFLOW: Workflow;
   USER_AGENT_SESSION: DurableObjectNamespace;
-  OKF_SANDBOX?: DurableObjectNamespace;
+  OKF_SANDBOX?: DurableObjectNamespace<Sandbox>;
   ENVIRONMENT?: string;
   APP_VERSION?: string;
   LOG_HTTP_REQUESTS?: string;
-  ALLOW_DEV_AUTH?: string;
   BRAINTRUST_API_KEY?: string;
   BETTER_AUTH_SECRET?: string;
   AGENT_INTERNAL_SECRET?: string;
@@ -19,6 +20,7 @@ export interface Env {
   GOOGLE_CLIENT_SECRET?: string;
   SEND_EMAIL?: SendEmail;
   AI: Ai;
+  EXTRACTION_MODEL?: string;
   THINK_MODEL: string;
   TURBOPUFFER_API_KEY?: string;
   TURBOPUFFER_REGION?: string;

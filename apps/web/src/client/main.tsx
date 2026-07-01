@@ -155,7 +155,7 @@ function AppShell() {
   });
 
   if (!session.data) {
-    return <main className="min-h-dvh bg-[var(--ui-bg-app)]" aria-label="Loading Lares" />;
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
   }
 
   const loginAuthMethods = loginAuthMethodsForView(session.data, window.location.search);
@@ -331,12 +331,13 @@ function LoginScreen(props: {
     readonly passkey: boolean;
   };
 }) {
+  type EmailOtpFlowResult = "sent" | "signed-in";
   const [email, setEmail] = useState("alek@teampitch.app");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [sentTo, setSentTo] = useState("");
   const continueWithEmail = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<EmailOtpFlowResult> => {
       if (sentTo) {
         const result = await authClient.signIn.emailOtp({
           email,
@@ -344,7 +345,7 @@ function LoginScreen(props: {
           otp,
         });
         if (result.error) throw new Error("Could not verify sign-in code");
-        return "signed-in" as const;
+        return "signed-in";
       }
 
       const result = await authClient.emailOtp.sendVerificationOtp({
@@ -352,7 +353,7 @@ function LoginScreen(props: {
         type: "sign-in",
       });
       if (result.error) throw new Error("Could not send sign-in code");
-      return "sent" as const;
+      return "sent";
     },
     onError: () =>
       setError(
@@ -406,16 +407,18 @@ function LoginScreen(props: {
   );
 }
 
+function readObjectProperty(value: unknown, key: string) {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
 function ActionsScreen() {
   const actions = useActions();
   const summaries = useSummaries();
   const latestRun = actions.data?.latestRun;
-  const runMetadata = latestRun?.metadata as
-    | { readonly itemCount?: unknown; readonly provider?: unknown }
-    | undefined;
-  const itemCount = typeof runMetadata?.itemCount === "number" ? runMetadata.itemCount : undefined;
-  const provider =
-    typeof runMetadata?.provider === "string" ? runMetadata.provider : "cloudflare-think";
+  const metadataItemCount = readObjectProperty(latestRun?.metadata, "itemCount");
+  const itemCount = typeof metadataItemCount === "number" ? metadataItemCount : undefined;
+  const metadataProvider = readObjectProperty(latestRun?.metadata, "provider");
+  const provider = typeof metadataProvider === "string" ? metadataProvider : "cloudflare-think";
   const updateStatus = useMutation({
     mutationFn: async (input: {
       readonly itemId: string;
@@ -433,11 +436,11 @@ function ActionsScreen() {
       <Surface eyebrow="AI" title="Actions" primary>
         <div className="mt-4 grid gap-3">
           {latestRun ? (
-            <article className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4 ring-1 ring-[var(--ui-border-default)]">
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
+            <article className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/8">
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
                 AI analysis · {latestRun.status}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">
                 {latestRun.status === "completed"
                   ? itemCount === 0
                     ? "Analyzed, no actions found"
@@ -446,50 +449,43 @@ function ActionsScreen() {
                     ? "Analysis failed"
                     : "Analyzing daily note"}
               </h2>
-              <p className="mt-2 mb-0 text-xs leading-5 text-[var(--ui-text-subtle)]">
+              <p className="mt-2 mb-0 text-xs leading-5 text-neutral-400">
                 {provider} · {latestRun.model ?? "model pending"}
               </p>
             </article>
           ) : null}
           {(actions.data?.actions ?? []).length > 0 ? (
             actions.data?.actions.map((action) => (
-              <article
-                className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
-                key={action.id}
-              >
+              <article className="rounded-2xl bg-white/5 p-4" key={action.id}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
+                    <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
                       {action.kind} · {action.status}
                     </p>
-                    <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
-                      {action.title}
-                    </h2>
-                    <p className="mt-2 mb-0 text-sm leading-6 text-[var(--ui-text-secondary)]">
-                      {action.body}
-                    </p>
+                    <h2 className="mt-1 mb-0 text-base font-semibold text-white">{action.title}</h2>
+                    <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{action.body}</p>
                   </div>
-                  <span className="text-xs text-[var(--ui-text-muted)]">
+                  <span className="text-xs text-neutral-500">
                     {Math.round(action.confidence * 100)}%
                   </span>
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2">
                   <button
-                    className="min-h-10 rounded-full bg-[var(--ui-action-primary-bg)] px-3 text-xs font-semibold text-[var(--ui-action-primary-fg)]"
+                    className="min-h-10 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
                   >
                     Accept
                   </button>
                   <button
-                    className="min-h-10 rounded-full bg-[var(--ui-surface-interactive)] px-3 text-xs font-semibold text-[var(--ui-text-body)]"
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
                   >
                     Done
                   </button>
                   <button
-                    className="min-h-10 rounded-full bg-[var(--ui-surface-interactive)] px-3 text-xs font-semibold text-[var(--ui-text-body)]"
+                    className="min-h-10 rounded-full bg-white/5 px-3 text-xs font-semibold text-neutral-100"
                     type="button"
                     onClick={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
                   >
@@ -499,24 +495,19 @@ function ActionsScreen() {
               </article>
             ))
           ) : (
-            <p className="m-0 text-sm text-[var(--ui-text-subtle)]">No actions.</p>
+            <p className="m-0 text-sm text-neutral-400">No actions.</p>
           )}
         </div>
       </Surface>
       <Surface eyebrow="Summaries" title="Latest">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).slice(0, 3).map((summary) => (
-            <article
-              className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
-              key={summary.id}
-            >
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
                 {summary.periodType} · {summary.periodStart}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
-                {summary.title}
-              </h2>
-              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-[var(--ui-text-secondary)]">
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 line-clamp-4 text-sm leading-6 text-neutral-300">
                 {summary.body}
               </p>
             </article>
@@ -566,7 +557,7 @@ function SettingsScreen() {
             Add a passkey to sign in with Face ID, Touch ID, your device PIN, or a security key.
           </p>
           <button
-            className="mt-4 min-h-12 rounded-full bg-[var(--ui-action-primary-bg)] px-4 text-sm font-semibold text-[var(--ui-action-primary-fg)] disabled:opacity-60"
+            className="mt-4 min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
             disabled={addPasskey.isPending}
             type="button"
             onClick={() => addPasskey.mutate()}
@@ -574,26 +565,24 @@ function SettingsScreen() {
             {addPasskey.isPending ? "Opening passkey..." : "Add passkey"}
           </button>
           {addPasskey.isError ? (
-            <p className="m-0 mt-3 text-sm text-[var(--ui-feedback-critical)]">
-              Could not add a passkey.
-            </p>
+            <p className="m-0 mt-3 text-sm text-red-300">Could not add a passkey.</p>
           ) : null}
           {addPasskey.isSuccess ? (
-            <p className="m-0 mt-3 text-sm text-[var(--ui-feedback-success)]">Passkey added.</p>
+            <p className="m-0 mt-3 text-sm text-emerald-300">Passkey added.</p>
           ) : null}
         </Surface>
       ) : null}
       <Surface eyebrow="Data controls" title="Your data">
         <div className="mt-4 grid gap-2">
           <button
-            className="min-h-12 rounded-full bg-[var(--ui-action-primary-bg)] px-4 text-sm font-semibold text-[var(--ui-action-primary-fg)]"
+            className="min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808]"
             type="button"
             onClick={() => exportData.mutate()}
           >
             Export data
           </button>
           <button
-            className="min-h-12 rounded-full bg-[var(--ui-surface-interactive)] px-4 text-sm font-semibold text-[var(--ui-text-body)]"
+            className="min-h-12 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100"
             type="button"
             onClick={() => deleteData.mutate()}
           >
@@ -655,20 +644,17 @@ function TodayScreen() {
         <div className="mt-4 grid gap-2">
           {recentNotes.length > 0 ? (
             recentNotes.map((event) => (
-              <article
-                className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
-                key={event.id}
-              >
-                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
+              <article className="rounded-2xl bg-white/5 p-4" key={event.id}>
+                <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
                   {event.occurredAt ? new Date(event.occurredAt).toLocaleDateString() : "Saved"}
                 </p>
-                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-[var(--ui-text-body)]">
+                <p className="mt-1 mb-0 line-clamp-3 text-sm leading-6 text-neutral-200">
                   {noteTextFromPayload(event.payload)}
                 </p>
               </article>
             ))
           ) : (
-            <p className="m-0 text-sm leading-6 text-[var(--ui-text-subtle)]">No notes yet.</p>
+            <p className="m-0 text-sm leading-6 text-neutral-400">No notes yet.</p>
           )}
         </div>
       </Surface>
@@ -697,19 +683,12 @@ function InsightsScreen() {
       <Surface id="insights-title" eyebrow="Archive" title="Summaries">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).map((summary) => (
-            <article
-              className="rounded-2xl bg-[var(--ui-surface-interactive)] p-4"
-              key={summary.id}
-            >
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[var(--ui-text-muted)] uppercase">
+            <article className="rounded-2xl bg-white/5 p-4" key={summary.id}>
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase">
                 {summary.periodType} · {summary.periodStart}
               </p>
-              <h2 className="mt-1 mb-0 text-base font-semibold text-[var(--ui-text-primary)]">
-                {summary.title}
-              </h2>
-              <p className="mt-2 mb-0 text-sm leading-6 text-[var(--ui-text-secondary)]">
-                {summary.body}
-              </p>
+              <h2 className="mt-1 mb-0 text-base font-semibold text-white">{summary.title}</h2>
+              <p className="mt-2 mb-0 text-sm leading-6 text-neutral-300">{summary.body}</p>
             </article>
           ))}
         </div>
@@ -751,7 +730,10 @@ function useSession() {
   });
 }
 
-createRoot(document.getElementById("root")!).render(
+const rootElement = document.getElementById("root");
+if (!rootElement) throw new Error("Missing #root element");
+
+createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />

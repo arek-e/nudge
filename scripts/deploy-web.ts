@@ -1,6 +1,5 @@
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
-const engine = new URL("../apps/engine", import.meta.url).pathname;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
@@ -65,6 +64,6 @@ const deployArgs = [
   .join(" ");
 
 run("mise exec -- bun run build", { cwd: web });
-run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: engine });
+run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 
-console.log(`${dryRun ? "Dry-run verified" : "Deployed"} Lares Engine at ${version}`);
+console.log(`${dryRun ? "Dry-run verified" : "Deployed"} lares-web at ${version}`);

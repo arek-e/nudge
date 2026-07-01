@@ -80,8 +80,8 @@ The system starts read-first and draft-first. External writes and behavior-chang
 - Workers Workflows own long-running multi-step jobs such as Daily Digest generation, calendar sync, memory consolidation, Human-in-the-Loop pause/resume, and evaluation runs.
 - D1 stores source-of-truth records: users, events, memories, Review Queue items, Resume Tokens, decisions, feedback, Consent Grants, skills, golden cases, and evaluations.
 - Queues, R2, and Vectorize are later additions, not MVP dependencies.
-- The repo starts as a monorepo with one Lares Engine app backed by a Cloudflare Worker.
-- The app structure is `apps/engine` for Hono routes, Workflows, and Agents SDK entrypoints; `apps/web` for the PWA App Surface; `apps/ios` for the native iOS App Surface; `packages/engine-contract` for the typed Engine API contract; `packages/domain` for product/domain types and pure logic; `packages/effect-services` for service definitions and workflows; `packages/db` for D1 schema/migrations/repositories; `packages/evals` for golden cases and evaluators; and `packages/ui` for shared React UI.
+- The repo starts as a monorepo with one Lares app layer backed by a Cloudflare Worker.
+- The app structure is `apps/web` for Hono routes, Workflows, Agents SDK entrypoints, the typed API contract, and the PWA App Surface; `apps/ios` for the native iOS App Surface; `packages/domain` for product/domain types and pure logic; `packages/effect-services` for service definitions and workflows; `packages/db` for D1 schema/migrations/repositories; `packages/evals` for golden cases and evaluators; and `packages/ui` for shared React UI.
 - The MVP starts in single-user local/dev mode, but every durable table includes `user_id` from day one.
 - An `AuthService` interface returns a hardcoded dev user initially and can later be backed by Clerk, WorkOS, Auth0, Ory, or Cloudflare Access.
 - Daily Digest Skill is the first evolvable artifact.
