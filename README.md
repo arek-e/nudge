@@ -7,27 +7,36 @@
 
 # Vesta
 
-**A private workspace for notes, context, and reviewed agent actions**
+**A native iOS journal and Siri capture app for private context**
 
-Journal-first. Source-linked. Human-in-the-loop by default.
+iOS-first. Journal-led. Source-linked. Human-in-the-loop.
 
-[Live App](https://vesta-web.teampitch.workers.dev/) &middot; [API Docs](https://vesta-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://vesta-web.teampitch.workers.dev/api/openapi.json)
+[Live Web App](https://vesta-web.teampitch.workers.dev/) &middot; [iOS App](apps/ios/Vesta) &middot; [API Docs](https://vesta-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://vesta-web.teampitch.workers.dev/api/openapi.json)
 
 </div>
 
 ---
 
-## The Problem
+## What Vesta Is
 
-Your life leaves context everywhere: messages, calendar commitments, relationship details, travel constraints, personal notes, work decisions, and small observations that only make sense later.
+Vesta is an iOS-first private workspace for writing things down, capturing notes with Siri, and letting agents turn that context into reviewable drafts.
 
-Most assistants either forget that context or hide it inside opaque prompts. Most productivity tools force you into a narrow workflow: a morning routine, a task inbox, a journal, a CRM, a daily planner.
+The native iOS app is the primary surface: quick captures, daily notes, calendar-aware context, and Siri phrases such as "Tell Vesta" or "Log this in Vesta." The Cloudflare backend stores the source material, runs analysis, and exposes OpenAPI/MCP surfaces for integrations and agents.
 
-**Vesta starts with writing things down.** Notes and captures become source-linked context that agents can read, interpret, and turn into draft actions for review.
+The web app is the companion surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development.
 
-Internally, Vesta keeps that loop small and inspectable: Captures become Signals, Signals form Context, Frames define what Vesta is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
+Internally, Vesta keeps the model small and inspectable: Captures become Signals, Signals form Context, Frames define what Vesta is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
 
 The goal is not another chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks before it acts, and improves through evals.
+
+## App Surfaces
+
+| Surface               | What it is                                                                  |
+| --------------------- | --------------------------------------------------------------------------- |
+| **Native iOS app**    | SwiftUI app for journal capture, calendar context, Siri capture, and review |
+| **Siri App Intents**  | Voice capture phrases that post directly to the Vesta API                   |
+| **Web app / PWA**     | Companion surface for capture, review, actions, summaries, and settings     |
+| **OpenAPI + MCP API** | Integration surface for custom tools and agent workflows                    |
 
 ## How It Works
 
@@ -58,7 +67,9 @@ User / Integration
 
 What is live now:
 
-- Mobile-first captures, daily notes, and journal revisions.
+- Native iOS app source in `apps/ios/Vesta`, including Siri App Intents and local run instructions.
+- Siri capture through `POST /api/voice/log`.
+- Mobile-first web captures, daily notes, and journal revisions.
 - User-owned Signals, notes, summaries, memory, and traces in D1/R2.
 - Source-linked Syntheses over a selected time frame.
 - Draft extraction of actions, reminders, events, questions, ideas, and memory candidates from note revisions.
@@ -120,10 +131,21 @@ Then open:
 - API docs: `$VESTA_DEV_URL/api/docs`
 - OpenAPI spec: `$VESTA_DEV_URL/api/openapi.json`
 
+To run the iOS app:
+
+1. Keep `bun run dev` running from the repo root.
+2. Open `apps/ios/Vesta/Vesta.xcodeproj` in Xcode.
+3. Run the `Vesta` scheme on an iOS Simulator or device.
+4. If needed, update the Engine URL from the iOS app settings screen.
+
+See [`apps/ios/Vesta/README.md`](apps/ios/Vesta/README.md) for Siri phrases and device networking notes.
+
 ## Features
 
 |                   | Feature                     | Description                                                  |
 | ----------------- | --------------------------- | ------------------------------------------------------------ |
+| :iphone:          | **Native iOS app**          | SwiftUI app for capture, notes, calendar context, and Siri   |
+| :microphone:      | **Siri capture**            | App Intents for hands-free note logging into Vesta           |
 | :memo:            | **Captures**                | User or integration input recorded as source-linked Signals  |
 | :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload      |
 | :compass:         | **Frames**                  | Bounded questions like “What matters now?”                   |
@@ -131,7 +153,6 @@ Then open:
 | :link:            | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows |
 | :shield:          | **Human-in-the-loop model** | Review-first posture for memory, actions, and automation     |
 | :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement  |
-| :iphone:          | **Mobile-first app**        | PWA surface optimized for capture, notes, and review         |
 
 ## Brand Assets
 
@@ -174,8 +195,8 @@ app shell.
 +--------------------+       +----------------------+
 ```
 
-- **`apps/web`**: unified Vesta app layer: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
-- **`apps/ios`**: native SwiftUI app for iOS and Siri.
+- **`apps/ios`**: native SwiftUI app, Siri App Intents, capture UI, calendar views, and local device docs.
+- **`apps/web`**: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
@@ -211,15 +232,26 @@ bun run logs:tail:pretty
 bun run traces:recent
 ```
 
+## CI And Release Status
+
+| Area                            | Status                                                                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                              |
+| **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                |
+| **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Vesta`. Siri branding and phrase docs are covered by Bun tests.          |
+| **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow. |
+
 ## Deployment
 
-Deploys are tied to Git commits.
+Web/backend deploys are tied to Git commits.
 
 ```bash
 bun run deploy
 ```
 
 Run `bun run check` and `bun run test:e2e` before deploying. The deploy script refuses dirty working trees, builds the web app, stamps `APP_VERSION` with the short Git SHA, and deploys the Worker with a matching Cloudflare version tag/message.
+
+The current CI does not deploy the iOS app. To ship iOS from the repo, add a macOS release workflow that runs `xcodebuild archive`, signs with App Store Connect credentials, and uploads to TestFlight or App Store Connect.
 
 For explicit prototype deploys only:
 

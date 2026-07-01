@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 
 const iosRoot = new URL(".", import.meta.url);
+const repoRoot = new URL("../../..", import.meta.url);
 const oldProductName = String.fromCharCode(76, 97, 114, 101, 115);
 const oldSpokenFallback = String.fromCharCode(76, 97, 121, 101, 114, 115);
 const oldPronunciationHint = "lair";
@@ -25,6 +26,15 @@ describe("Vesta iOS branding", () => {
     expect(readme).toContain("Log this in Vesta");
     expect(readme).not.toContain(oldProductName);
     expect(readme).not.toContain(oldSpokenFallback);
+  });
+
+  test("repository README presents the iOS app and release status honestly", async () => {
+    const readme = await readFile(new URL("README.md", repoRoot), "utf8");
+
+    expect(readme).toContain("Native iOS app");
+    expect(readme).toContain("Siri capture");
+    expect(readme).toContain("TestFlight/App Store deployment is not wired yet");
+    expect(readme).toContain("GitHub Actions deploys the Cloudflare Worker");
   });
 });
 
