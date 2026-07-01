@@ -1,10 +1,10 @@
 # Lares iOS
 
-Native SwiftUI shell for logging spoken captures into the Lares backend.
+Native SwiftUI App Surface for logging spoken captures into the Lares Engine.
 
 ## Run
 
-1. Start the backend from the repo root:
+1. Start the Engine from the repo root:
 
    ```sh
    bun dev
@@ -12,9 +12,9 @@ Native SwiftUI shell for logging spoken captures into the Lares backend.
 
 2. Open `apps/ios/Lares/Lares.xcodeproj` in Xcode.
 3. Run the `Lares` scheme on an iOS Simulator.
-4. In the app, use the gear button to edit the backend URL if your LAN IP changes.
+4. In the app, use the gear button to edit the Engine URL if your LAN IP changes.
 
-The checked-in default is `http://192.168.76.133:8787` so a plugged-in iPhone can reach the local backend. For simulator-only testing, `http://127.0.0.1:8787` also works.
+The checked-in default is `http://192.168.76.133:8787` so a plugged-in iPhone can reach the local Engine. For simulator-only testing, `http://127.0.0.1:8787` also works.
 If Siri says it cannot reach Lares, check that `bun dev` is running and that `http://192.168.76.133:8787/health` opens from the phone.
 
 ## Siri
@@ -35,4 +35,4 @@ Log this in Lares
 
 Use `Tell Layers` first; the app still displays as Lares, but registers "Layers" as its spoken Siri name because Siri recognizes it more reliably. The app refreshes its App Shortcuts on launch so installed users get this phrase without creating a custom Shortcut.
 
-Siri asks what to log, calls `POST /api/voice/log`, and speaks the backend response without opening the app. Action-like captures such as "Follow up with Maya tomorrow" are logged as processing candidates, and Lares sends a local notification after the backend accepts them.
+Siri asks what to log, calls `POST /api/voice/log`, and speaks the Engine response without opening the app. Action-like captures such as "Follow up with Maya tomorrow" are logged as processing candidates, and Lares sends a local notification after the Engine accepts them.

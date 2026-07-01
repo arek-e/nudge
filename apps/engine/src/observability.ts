@@ -8,20 +8,18 @@ import {
   buildTraceSpanRow,
   createSpanId,
   createTraceId,
+  ensureBraintrustTracing,
   finalizeRequestWideEvent,
+  flushBraintrustTracing,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
   pruneTraceCache,
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
+  runBraintrustSpan,
   safeErrorFields,
 } from "@lares/observability";
 import type { Env } from "./env";
-import {
-  ensureBraintrustTracing,
-  flushBraintrustTracing,
-  runBraintrustSpan,
-} from "./braintrust-tracing";
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
 

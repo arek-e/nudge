@@ -1,13 +1,12 @@
 {
-  "name": "@lares/observability",
+  "name": "@lares/engine-contract",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "braintrust": "3.20.0",
-    "effect": "catalog:",
+    "@orpc/contract": "catalog:",
     "zod": "catalog:"
   }
 }

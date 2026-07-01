@@ -2,6 +2,12 @@
 
 Lares uses OpenAPI as the first public API contract for user-owned data and custom integrations. The public HTTP API is a product surface: users should be able to inspect, script against, automate, and integrate with their own Lares data without reverse-engineering an app-internal RPC protocol.
 
+Native, desktop, and extension App Surfaces should consume this contract rather than reimplement Lares Engine rules locally. Surface-specific code may adapt presentation, authentication, local settings, and OS integrations, but shared behavior should move behind the API before a second App Surface depends on it.
+
+In-repo TypeScript App Surfaces may use `packages/engine-contract` for typed clients. Native and external surfaces should use the generated OpenAPI contract.
+
+MCP is the agent-workflow companion surface, not a replacement for OpenAPI. MCP tools expose read/search workspace context, simple capture appends, and reviewable proposal writes; durable user data routes remain documented through OpenAPI.
+
 Hono remains the Worker HTTP router because it matches the current Cloudflare architecture and keeps middleware, auth, observability, Durable Object, Workflow, and D1 binding behavior in one Worker app. However, Hono RPC should not be the primary public API contract because it optimizes for in-repo TypeScript inference rather than durable external integration contracts.
 
 oRPC is the public API implementation because it combines end-to-end TypeScript ergonomics with first-class OpenAPI support, contract-first workflows, schema validation, typed errors, and Hono/Cloudflare-compatible adapters.

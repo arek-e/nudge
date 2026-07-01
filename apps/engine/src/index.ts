@@ -16,10 +16,10 @@ import {
   workflowStepName,
   type WorkflowVersion,
 } from "@lares/effect-services";
+import { ensureBraintrustTracing, wrapBraintrustAISDK } from "@lares/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
-import { ensureBraintrustTracing, wrapBraintrustAISDK } from "./braintrust-tracing";
 
 const app = createApp();
 const { generateObject, smoothStream, streamText } = wrapBraintrustAISDK(ai);

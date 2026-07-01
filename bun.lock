@@ -16,8 +16,8 @@
         "wrangler": "catalog:",
       },
     },
-    "apps/web": {
-      "name": "@lares/web",
+    "apps/engine": {
+      "name": "@lares/engine",
       "dependencies": {
         "@better-auth/drizzle-adapter": "catalog:",
         "@better-auth/passkey": "catalog:",
@@ -26,30 +26,38 @@
         "@lares/db": "workspace:*",
         "@lares/domain": "workspace:*",
         "@lares/effect-services": "workspace:*",
+        "@lares/engine-contract": "workspace:*",
         "@lares/evals": "workspace:*",
         "@lares/observability": "workspace:*",
-        "@lares/ui": "workspace:*",
         "@modelcontextprotocol/sdk": "catalog:",
-        "@orpc/client": "catalog:",
-        "@orpc/contract": "catalog:",
         "@orpc/openapi": "catalog:",
-        "@orpc/openapi-client": "catalog:",
         "@orpc/server": "catalog:",
         "@orpc/zod": "catalog:",
-        "@tanstack/react-query": "catalog:",
-        "@tanstack/react-router": "catalog:",
         "agents": "catalog:",
         "ai": "catalog:",
         "better-auth": "catalog:",
-        "braintrust": "3.20.0",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "evlog": "catalog:",
         "hono": "catalog:",
-        "react": "catalog:",
-        "react-dom": "catalog:",
         "workers-ai-provider": "catalog:",
         "zod": "catalog:",
+      },
+    },
+    "apps/web": {
+      "name": "@lares/web",
+      "dependencies": {
+        "@better-auth/passkey": "catalog:",
+        "@lares/engine-contract": "workspace:*",
+        "@lares/ui": "workspace:*",
+        "@orpc/client": "catalog:",
+        "@orpc/contract": "catalog:",
+        "@orpc/openapi-client": "catalog:",
+        "@tanstack/react-query": "catalog:",
+        "@tanstack/react-router": "catalog:",
+        "better-auth": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
       },
       "devDependencies": {
         "@playwright/test": "catalog:",
@@ -80,6 +88,13 @@
         "effect": "catalog:",
       },
     },
+    "packages/engine-contract": {
+      "name": "@lares/engine-contract",
+      "dependencies": {
+        "@orpc/contract": "catalog:",
+        "zod": "catalog:",
+      },
+    },
     "packages/evals": {
       "name": "@lares/evals",
       "dependencies": {
@@ -91,7 +106,9 @@
     "packages/observability": {
       "name": "@lares/observability",
       "dependencies": {
+        "braintrust": "3.20.0",
         "effect": "catalog:",
+        "zod": "catalog:",
       },
     },
     "packages/ui": {
@@ -592,6 +609,10 @@
     "@lares/domain": ["@lares/domain@workspace:packages/domain"],
 
     "@lares/effect-services": ["@lares/effect-services@workspace:packages/effect-services"],
+
+    "@lares/engine": ["@lares/engine@workspace:apps/engine"],
+
+    "@lares/engine-contract": ["@lares/engine-contract@workspace:packages/engine-contract"],
 
     "@lares/evals": ["@lares/evals@workspace:packages/evals"],
 

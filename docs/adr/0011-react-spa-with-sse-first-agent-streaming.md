@@ -2,7 +2,7 @@
 
 Status: accepted direction. Current conversation endpoints use request/response POSTs; SSE is the first choice when token or workflow-progress streaming is added.
 
-Lares uses a React single-page app served by the Cloudflare Worker as the first frontend architecture. The app should use TanStack Router for client routing and TanStack Query for API state. Hono and oRPC remain the backend API boundary for user-owned data, OpenAPI documentation, auth, observability, D1, Durable Objects, and Workers Workflows.
+Lares uses a React single-page app served by the Lares Engine as the first frontend architecture. The app should use TanStack Router for client routing and TanStack Query for API state. Hono and oRPC remain the Engine API boundary for user-owned data, OpenAPI documentation, auth, observability, D1, Durable Objects, and Workers Workflows.
 
 TanStack Start server functions should not be introduced yet. They would create a second server-action boundary that overlaps with the existing Worker API and complicates the product's public OpenAPI integration contract before Lares needs SSR or colocated server mutations. Revisit TanStack Start if the app needs SSR for shareable pages, SEO-sensitive public surfaces, or route-level server loading that cannot be handled cleanly by the Worker API.
 

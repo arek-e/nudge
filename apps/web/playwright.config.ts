@@ -14,7 +14,7 @@ export default defineConfig({
   testMatch: "**/*.pw.ts",
   webServer: shouldStartWebServer
     ? {
-        command: `bun run build && wrangler d1 migrations apply DB --local && wrangler dev --port ${devPort}`,
+        command: `bun run build && bun run --cwd ../engine db:migrations:apply:local && wrangler dev --cwd ../engine --port ${devPort}`,
         reuseExistingServer: false,
         url: baseURL,
       }

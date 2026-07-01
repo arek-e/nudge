@@ -64,6 +64,7 @@ Current deployed slice:
 - Sign in through Better Auth in configured environments, including passkeys and optional Google.
 - Export or delete user-owned data.
 - Read OpenAPI docs for custom integrations.
+- Use MCP tools to read/search workspace context, append simple captures, and create reviewable proposals.
 - Persist safe wide events and trace spans for debugging and evals.
 
 Model-backed extraction is narrow and draft-first. External writes and behavior-changing automation still require explicit review before they are added.
@@ -84,7 +85,7 @@ mise exec -- bun run dev
 
 If your shell already activates `mise`, the `mise exec --` prefix is optional.
 
-`bun run dev` builds the web app, applies local D1 migrations, and starts `wrangler dev` on the first available local port.
+`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Lares Engine with `wrangler dev` on the first available local port.
 
 Then open:
 
@@ -110,8 +111,8 @@ Then open:
 
 ```text
 +--------------------------------------------------+
-|                  Cloudflare Worker               |
-|  Hono API  -  oRPC/OpenAPI  -  React static app   |
+|                    Lares Engine                  |
+|       Cloudflare Worker - Hono - oRPC/OpenAPI     |
 +---------------------+----------------------------+
                       |
       +---------------+---------------+
@@ -134,10 +135,13 @@ Then open:
 +--------------------+       +----------------------+
 ```
 
-- **`apps/web`**: Cloudflare Worker, Hono app, React app, oRPC/OpenAPI API, Better Auth, Workers Workflow, and Cloudflare Agent entrypoints.
+- **`apps/engine`**: Lares Engine, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, and Cloudflare Agent entrypoints.
+- **`apps/web`**: React App Surface served by the Engine.
+- **`apps/ios`**: Native SwiftUI App Surface for iOS and Siri.
+- **`packages/engine-contract`**: shared TypeScript contract for the Engine API.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
-- **`packages/observability`**: wide-event logging, request telemetry, and safe error fields.
+- **`packages/observability`**: shared tracing, Braintrust wrappers, trace-cache read models, request telemetry, and safe error fields.
 - **`packages/effect-services`**: Effect service seams for auth, primitive workflows, and memory indexing.
 - **`packages/evals`**: golden-case agent/product evals.
 
@@ -158,7 +162,7 @@ Then open:
 ```bash
 bun run check          # format + lint + typecheck + unit tests
 bun run test:e2e       # mobile Playwright smoke test
-bun run dev            # build client and start wrangler dev
+bun run dev            # build web and start the Engine with wrangler dev
 ```
 
 Useful operational commands:
@@ -177,7 +181,7 @@ Deploys are tied to Git commits.
 bun run deploy
 ```
 
-The deploy script refuses dirty working trees, runs checks and mobile e2e, builds the app, stamps `APP_VERSION` with the short Git SHA, and deploys with a matching Cloudflare Worker version tag/message.
+Run `bun run check` and `bun run test:e2e` before deploying. The deploy script refuses dirty working trees, builds the web App Surface, stamps `APP_VERSION` with the short Git SHA, and deploys the Engine with a matching Cloudflare Worker version tag/message.
 
 For explicit prototype deploys only:
 
