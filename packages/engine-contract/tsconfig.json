@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../.tsbuild/packages/engine-contract",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../.tsbuild/packages/engine-contract.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

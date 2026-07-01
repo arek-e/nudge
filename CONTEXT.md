@@ -4,6 +4,14 @@ Lares is an adaptive operating layer for personal work, relationships, memory, a
 
 ## Language
 
+**Lares Engine**:
+The durable runtime that owns Lares' API, reasoning, persistence, review boundaries, and integrations. App Surfaces call the Engine instead of reimplementing product behavior locally.
+_Avoid_: Backend as product language, duplicating Engine rules in clients
+
+**App Surface**:
+A platform-specific user interface for Lares, such as web, iOS, future macOS, Raycast, or Siri. App Surfaces may adapt presentation and OS integration, but they should keep durable behavior behind the Lares Engine.
+_Avoid_: Treating each app as its own product logic fork
+
 **Primitive**:
 A general building block that can be composed into many user-facing loops without locking Lares into one niche workflow.
 _Avoid_: Feature-specific nouns as core architecture

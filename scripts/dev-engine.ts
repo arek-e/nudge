@@ -12,12 +12,12 @@ const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
 console.log(`Lares dev server: ${url}`);
 
 await run(["bun", "run", "--cwd", "apps/web", "build"]);
-await run(["bun", "run", "db:migrations:apply:local"]);
+await run(["bun", "run", "--cwd", "apps/engine", "db:migrations:apply:local"]);
 await run([
   "wrangler",
   "dev",
   "--cwd",
-  "apps/web",
+  "apps/engine",
   "--ip",
   ip,
   "--port",

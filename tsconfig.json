@@ -1,6 +1,8 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/engine-contract" },
+    { "path": "./apps/engine" },
     { "path": "./apps/web" },
     { "path": "./packages/domain" },
     { "path": "./packages/effect-services" },

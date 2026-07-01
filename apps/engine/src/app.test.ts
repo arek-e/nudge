@@ -39,7 +39,7 @@ const createTraceDb = () => {
   return { db, rows };
 };
 
-describe("web app", () => {
+describe("Lares Engine", () => {
   test("GET / serves the Lares Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
@@ -1634,6 +1634,60 @@ describe("web app", () => {
 
     const commitments = await app.request("/api/commitments", {}, env);
     expect((await commitments.json()).commitments).toEqual([]);
+  });
+
+  test("agents can capture simple signals through MCP", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const capture = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: {
+              occurredAt: "2026-07-01T10:00:00.000Z",
+              text: "Remember that Maya prefers morning launch reviews.",
+            },
+            name: "capture_append",
+          },
+        }),
+      },
+      env,
+    );
+
+    expect(capture.status).toBe(200);
+    expect(await capture.json()).toMatchObject({
+      id: 1,
+      result: {
+        structuredContent: {
+          capture: expect.objectContaining({
+            occurredAt: "2026-07-01T10:00:00.000Z",
+            payload: { note: "Remember that Maya prefers morning launch reviews." },
+            source: "mcp",
+            type: "user_context_captured",
+            userId: "dev-user",
+          }),
+        },
+      },
+    });
+
+    const signals = await app.request("/api/signals?limit=10", {}, env);
+    expect((await signals.json()).signals).toEqual([
+      expect.objectContaining({
+        payload: { note: "Remember that Maya prefers morning launch reviews." },
+        source: "mcp",
+        type: "user_context_captured",
+        userId: "dev-user",
+      }),
+    ]);
   });
 
   test("agents can smoke test projected OKF files inside a sandbox", async () => {

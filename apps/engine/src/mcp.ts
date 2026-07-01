@@ -10,6 +10,7 @@ import {
   readOkfFile,
   searchOkfFiles,
 } from "@lares/effect-services";
+import { eventRecordSchema } from "@lares/engine-contract";
 
 export async function handleLaresMcpRequest(
   request: Request,
@@ -43,8 +44,7 @@ function createLaresMcpServer(input: {
     "okf_files",
     new ResourceTemplate("file:///okf/{+path}", {
       list: async () => {
-        const exported = await Effect.runPromise(input.db.exportUserData(input.user));
-        const projection = buildOkfProjection(exported);
+        const projection = await readOkfProjection(input);
         return {
           resources: [...projection.files.keys()].map((path) => ({
             mimeType: "text/markdown",
@@ -59,8 +59,7 @@ function createLaresMcpServer(input: {
       mimeType: "text/markdown",
     },
     async (uri) => {
-      const exported = await Effect.runPromise(input.db.exportUserData(input.user));
-      const projection = buildOkfProjection(exported);
+      const projection = await readOkfProjection(input);
       return {
         contents: [
           {
@@ -80,8 +79,7 @@ function createLaresMcpServer(input: {
       inputSchema: { path: z.string().min(1).default("/") },
     },
     async ({ path }) => {
-      const exported = await Effect.runPromise(input.db.exportUserData(input.user));
-      const projection = buildOkfProjection(exported);
+      const projection = await readOkfProjection(input);
       return {
         content: [{ text: JSON.stringify(listOkfDirectory(projection, path)), type: "text" }],
       };
@@ -95,8 +93,7 @@ function createLaresMcpServer(input: {
       inputSchema: { path: z.string().min(1) },
     },
     async ({ path }) => {
-      const exported = await Effect.runPromise(input.db.exportUserData(input.user));
-      const projection = buildOkfProjection(exported);
+      const projection = await readOkfProjection(input);
       return { content: [{ text: readOkfFile(projection, path), type: "text" }] };
     },
   );
@@ -114,8 +111,7 @@ function createLaresMcpServer(input: {
       },
     },
     async ({ limit, query }) => {
-      const exported = await Effect.runPromise(input.db.exportUserData(input.user));
-      const projection = buildOkfProjection(exported);
+      const projection = await readOkfProjection(input);
       const results = searchOkfFiles(projection, query, limit);
       const enrichedResults = results.map((result) => ({
         ...result,
@@ -179,6 +175,43 @@ function createLaresMcpServer(input: {
     },
   );
 
+  server.registerTool(
+    "capture_append",
+    {
+      description: "Capture a simple note as a user-owned Signal.",
+      inputSchema: {
+        idempotencyKey: z.string().min(1).max(256).optional(),
+        occurredAt: z.string().datetime().optional(),
+        source: z.string().min(1).default("mcp"),
+        text: z.string().min(1).max(5_000),
+      },
+      outputSchema: {
+        capture: eventRecordSchema,
+      },
+    },
+    async ({ idempotencyKey, occurredAt, source, text }) => {
+      const capture = await Effect.runPromise(
+        Effect.provide(
+          PrimitiveWorkflows.appendSignal({
+            ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+            occurredAt: occurredAt ?? new Date().toISOString(),
+            payload: { note: text },
+            schemaVersion: 1,
+            source,
+            type: "user_context_captured",
+            user: input.user,
+          }),
+          Layer.succeed(Db, input.db),
+        ),
+      );
+      const structuredContent = { capture };
+      return {
+        content: [{ text: JSON.stringify(structuredContent), type: "text" }],
+        structuredContent,
+      };
+    },
+  );
+
   return server;
 }
 
@@ -196,6 +229,13 @@ const proposalOutputSchema = z.object({
 });
 
 const okfFileUri = (path: string) => `file:///okf${path.startsWith("/") ? path : `/${path}`}`;
+
+async function readOkfProjection(input: {
+  readonly db: DbService;
+  readonly user: { readonly displayName: string; readonly id: string };
+}) {
+  return buildOkfProjection(await Effect.runPromise(input.db.exportUserData(input.user)));
+}
 
 const okfPathFromUri = (uri: URL) => {
   if (uri.protocol !== "file:" || !uri.pathname.startsWith("/okf/")) {

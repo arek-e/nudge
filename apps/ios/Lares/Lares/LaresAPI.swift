@@ -170,10 +170,19 @@ enum JSONValue: Decodable {
 }
 
 enum LaresAPI {
-    static let backendURLKey = "lares.backendURL"
-    static let defaultBackendURL = "http://192.168.76.133:8787"
-    static var configuredBackendURL: String {
-        UserDefaults.standard.string(forKey: backendURLKey) ?? defaultBackendURL
+    static let engineURLKey = "lares.engineURL"
+    private static let legacyEngineURLKey = "lares.backendURL"
+    static let defaultEngineURL = "http://192.168.76.133:8787"
+    static var configuredEngineURL: String {
+        let defaults = UserDefaults.standard
+        if let engineURL = defaults.string(forKey: engineURLKey) {
+            return engineURL
+        }
+        if let legacyURL = defaults.string(forKey: legacyEngineURLKey) {
+            defaults.set(legacyURL, forKey: engineURLKey)
+            return legacyURL
+        }
+        return defaultEngineURL
     }
 
     private static let decoder = JSONDecoder()
@@ -292,7 +301,7 @@ enum LaresAPI {
     }
 
     private static func url(_ path: String, queryItems: [URLQueryItem] = []) throws -> URL {
-        guard let baseURL = URL(string: configuredBackendURL) else {
+        guard let baseURL = URL(string: configuredEngineURL) else {
             throw LaresAPIError.badURL
         }
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
@@ -357,7 +366,7 @@ enum LaresAPIError: LocalizedError {
         case .badResponse:
             return "The server returned an unreadable response."
         case .badURL:
-            return "The backend URL is invalid."
+            return "The Engine URL is invalid."
         case .httpStatus(let status):
             return "The server returned HTTP \(status)."
         }
