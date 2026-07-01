@@ -19,8 +19,13 @@ export default defineConfig({
     VitePWA({
       filename: "sw.js",
       includeAssets: [
+        "favicon.ico",
+        "favicon.svg",
         "offline.html",
         "icons/icon.svg",
+        "icons/icon-16.png",
+        "icons/icon-32.png",
+        "icons/icon-48.png",
         "icons/icon-192.png",
         "icons/icon-512.png",
         "icons/apple-touch-icon.png",

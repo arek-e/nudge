@@ -2,16 +2,16 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { type Effect } from "effect";
-import { Db, type DbService } from "@lares/db";
+import { Db, type DbService } from "@vesta/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
-} from "@lares/effect-services";
+} from "@vesta/effect-services";
 
-type LaresMcpContent =
+type VestaMcpContent =
   | { readonly text: string; readonly type: "text" }
   | {
       readonly description: string;
@@ -21,12 +21,12 @@ type LaresMcpContent =
       readonly uri: string;
     };
 
-const textContent = (content: Extract<LaresMcpContent, { readonly type: "text" }>) => content;
+const textContent = (content: Extract<VestaMcpContent, { readonly type: "text" }>) => content;
 const resourceLinkContent = (
-  content: Extract<LaresMcpContent, { readonly type: "resource_link" }>,
+  content: Extract<VestaMcpContent, { readonly type: "resource_link" }>,
 ) => content;
 
-export async function handleLaresMcpRequest(
+export async function handleVestaMcpRequest(
   request: Request,
   input: {
     readonly db: DbService;
@@ -35,7 +35,7 @@ export async function handleLaresMcpRequest(
     readonly version: string;
   },
 ) {
-  const server = createLaresMcpServer(input);
+  const server = createVestaMcpServer(input);
   const transport = new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
@@ -48,13 +48,13 @@ export async function handleLaresMcpRequest(
   }
 }
 
-function createLaresMcpServer(input: {
+function createVestaMcpServer(input: {
   readonly db: DbService;
   readonly runEffect: <A, E>(effect: Effect.Effect<A, E, Db>) => Promise<A>;
   readonly user: { readonly displayName: string; readonly id: string };
   readonly version: string;
 }) {
-  const server = new McpServer({ name: "lares", version: input.version });
+  const server = new McpServer({ name: "vesta", version: input.version });
 
   server.registerResource(
     "okf_files",

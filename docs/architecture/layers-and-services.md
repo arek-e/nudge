@@ -1,6 +1,6 @@
 # Layers and Services
 
-Lares copies the production discipline from `pingdotgg/t3code`, not its runtime shape. The
+Vesta copies the production discipline from `pingdotgg/t3code`, not its runtime shape. The
 top-level Worker runtime is intentionally split into a service interface and live layer; smaller
 modules still earn that split case by case.
 
@@ -9,8 +9,8 @@ modules still earn that split case by case.
 - `apps/web/src/app.ts` owns Hono app composition, middleware installation, runtime caching, and request context construction.
 - `apps/web/src/routes/` owns HTTP route registration by surface: static/PWA routes, Better Auth routes, and authenticated API middleware.
 - `apps/web/src/api-router.ts` owns the oRPC/OpenAPI handler implementations. It is intentionally separate from Worker composition.
-- `apps/web/src/Services/LaresApp.ts` owns the `LaresApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
-- `apps/web/src/Layers/LaresAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
+- `apps/web/src/Services/VestaApp.ts` owns the `VestaApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
+- `apps/web/src/Layers/VestaAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
 - `packages/db` owns persistence and row decoding. Runtime code should call the `Db` Effect service, not D1 or Drizzle directly.
 - `packages/effect-services` owns primitive Loop Composition modules such as memory indexing, OKF projection, and primitive workflows.
 - `apps/web/src/index.ts` owns Cloudflare Agent and Workflow entrypoints. Durable background work lives there until a repeated reactor pattern justifies a deeper module.
@@ -33,7 +33,7 @@ modules still earn that split case by case.
 
 ## Split Rules
 
-Split a Lares module only when at least one is true:
+Split a Vesta module only when at least one is true:
 
 - The interface is stable and the implementation is forcing route handlers or UI code to know too much.
 - Two real adapters exist, such as memory and durable storage, or test and production adapters that cannot stay tiny.

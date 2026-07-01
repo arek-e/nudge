@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LoginCard } from "@lares/ui";
+import { LoginCard } from "@vesta/ui";
 
 describe("LoginCard", () => {
-  test("renders the shadcn login-03 shell with Lares auth methods", () => {
+  test("renders the shadcn login-03 shell with Vesta auth methods", () => {
     const html = renderToStaticMarkup(
       <LoginCard
         email="alex@example.com"
@@ -23,7 +23,7 @@ describe("LoginCard", () => {
       />,
     );
 
-    expect(html).toContain("Lares");
+    expect(html).toContain("Vesta");
     expect(html).toContain("Welcome back");
     expect(html).toContain("Sign in with a passkey, Google, or an email code.");
     expect(html).toContain("Continue with passkey");

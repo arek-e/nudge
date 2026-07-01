@@ -15,7 +15,7 @@ export function registerAuthRoutes(
     async (c) => {
       const { appServices } = await resolveRequestApp(c);
       const configuredSecret = appServices.env.AUTH_SEED_SECRET;
-      const providedSecret = c.req.header("x-lares-seed-secret");
+      const providedSecret = c.req.header("x-vesta-seed-secret");
       if (!configuredSecret || providedSecret !== configuredSecret) {
         return c.notFound();
       }

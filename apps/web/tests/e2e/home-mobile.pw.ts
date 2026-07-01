@@ -16,7 +16,7 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("link", { name: "Lares" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Vesta" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   await expect(page.getByText("Sign in with a passkey, Google, or an email code.")).toBeVisible();
   await expect(page.getByText("Other ways to continue")).toBeVisible();
@@ -141,12 +141,12 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await page.getByRole("button", { name: "Cancel" }).tap();
 
   await page.evaluate(() => {
-    Reflect.set(window, "__laresClientNavMarker", "still-mounted");
+    Reflect.set(window, "__vestaClientNavMarker", "still-mounted");
   });
   await page.getByRole("link", { name: "Actions" }).tap();
   await expect(page.getByRole("heading", { exact: true, name: "Actions" })).toBeVisible();
   await expect
-    .poll(async () => page.evaluate(() => Reflect.get(window, "__laresClientNavMarker")))
+    .poll(async () => page.evaluate(() => Reflect.get(window, "__vestaClientNavMarker")))
     .toBe("still-mounted");
   await expect(page.getByText(/AI analysis · (queued|running|completed)/)).toBeVisible();
   await expect(page.getByText(/cloudflare-think · @cf\/moonshotai\/kimi-k2\.7-code/)).toBeVisible();

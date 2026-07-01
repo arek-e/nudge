@@ -2,7 +2,7 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { emailOTP, magicLink } from "better-auth/plugins";
-import { createD1DrizzleDatabase, schema } from "@lares/db";
+import { createD1DrizzleDatabase, schema } from "@vesta/db";
 import type { Env } from "./env";
 
 export type AuthSessionUser = {
@@ -61,7 +61,7 @@ export function createBetterAuth(
       passkey({
         origin: env.BETTER_AUTH_URL,
         rpID: resolveRpId(env.BETTER_AUTH_URL),
-        rpName: "Lares",
+        rpName: "Vesta",
       }),
     ],
     secret: env.BETTER_AUTH_SECRET,
@@ -92,10 +92,10 @@ async function sendOtpEmail(
 ) {
   await sendAuthEmail(env, {
     email: input.email,
-    html: `<p>Your Lares sign-in code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:0.16em">${escapeHtml(input.otp)}</p><p>This code expires soon.</p>`,
+    html: `<p>Your Vesta sign-in code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:0.16em">${escapeHtml(input.otp)}</p><p>This code expires soon.</p>`,
     logLabel: "Email OTP requested without SEND_EMAIL binding",
-    subject: input.type === "sign-in" ? "Your Lares sign-in code" : "Your Lares verification code",
-    text: `Your Lares code is: ${input.otp}`,
+    subject: input.type === "sign-in" ? "Your Vesta sign-in code" : "Your Vesta verification code",
+    text: `Your Vesta code is: ${input.otp}`,
   });
 }
 
@@ -105,10 +105,10 @@ async function sendMagicLinkEmail(
 ) {
   await sendAuthEmail(env, {
     email: input.email,
-    html: `<p>Click this link to continue to Lares:</p><p><a href="${escapeHtml(input.url)}">Continue to Lares</a></p><p>This link expires soon.</p>`,
+    html: `<p>Click this link to continue to Vesta:</p><p><a href="${escapeHtml(input.url)}">Continue to Vesta</a></p><p>This link expires soon.</p>`,
     logLabel: "Magic link requested without SEND_EMAIL binding",
-    subject: "Continue to Lares",
-    text: `Continue to Lares: ${input.url}`,
+    subject: "Continue to Vesta",
+    text: `Continue to Vesta: ${input.url}`,
   });
 }
 
@@ -133,7 +133,7 @@ async function sendAuthEmail(
   }
 
   await env.SEND_EMAIL.send({
-    from: "Lares <auth@teampitch.app>",
+    from: "Vesta <auth@teampitch.app>",
     html: input.html,
     subject: input.subject,
     text: input.text,

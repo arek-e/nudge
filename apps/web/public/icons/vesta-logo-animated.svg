@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="vesta-logo-animated-title vesta-logo-animated-desc">
+  <title id="vesta-logo-animated-title">Animated Vesta logo</title>
+  <desc id="vesta-logo-animated-desc">An ember-shaped mark whose closed mouth opens into a rounded hearth.</desc>
+  <style>
+    #vesta-mouth-static {
+      display: none;
+    }
+
+    #vesta-mouth {
+      animation: vesta-mouth-settle 860ms 220ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+      transform-box: fill-box;
+      transform-origin: center;
+      will-change: transform;
+    }
+
+    #vesta-mouth-line {
+      animation: vesta-mouth-grow 860ms 220ms cubic-bezier(0.77, 0, 0.175, 1) forwards;
+      stroke-dasharray: 0.001 1;
+      stroke-dashoffset: -0.4995;
+    }
+
+    #vesta-spark {
+      animation: vesta-spark-activate 360ms 1260ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+      transform-box: fill-box;
+      transform-origin: center;
+      will-change: transform;
+    }
+
+    @keyframes vesta-mouth-grow {
+      0% {
+        stroke-dasharray: 0.001 1;
+        stroke-dashoffset: -0.4995;
+      }
+
+      58% {
+        stroke-dasharray: 0.82 0.18;
+        stroke-dashoffset: -0.09;
+      }
+
+      78%,
+      100% {
+        stroke-dasharray: 1 0;
+        stroke-dashoffset: 0;
+      }
+    }
+
+    @keyframes vesta-mouth-settle {
+      0%,
+      58% {
+        transform: scaleX(1) translateY(0);
+      }
+
+      78% {
+        transform: scaleX(1.028) translateY(0.4px);
+      }
+
+      90% {
+        transform: scaleX(0.994) translateY(-0.1px);
+      }
+
+      100% {
+        transform: scaleX(1) translateY(0);
+      }
+    }
+
+    @keyframes vesta-spark-activate {
+      0% {
+        transform: rotate(0deg) scale(0.96);
+      }
+
+      58% {
+        transform: rotate(2.5deg) scale(1.04);
+      }
+
+      100% {
+        transform: rotate(0deg) scale(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #vesta-spark {
+        animation: none;
+        transform: none;
+      }
+
+      #vesta-mouth {
+        display: none;
+      }
+
+      #vesta-mouth-static {
+        display: block;
+      }
+    }
+  </style>
+  <g transform="translate(-59.6519,-31.2324)">
+    <g transform="matrix(1.7664652,0,0,1.7664652,-71.621554,-202.73348)">
+      <g id="vesta-flame">
+        <path
+          fill="#ec5c29"
+          d="m 142.28728,226.43281 c -10.75786,-1.65243 -19.76579,-8.03254 -24.00309,-17.00074 -7.70875,-16.31563 -1.24475,-36.24872 20.656,-63.6971 5.20129,-6.51882 6.59975,-7.57737 9.16122,-6.93447 2.73501,0.68642 15.71807,16.93672 21.7567,27.23174 6.88418,11.73665 9.63779,20.15238 9.65419,29.50574 0.0153,9.32262 -2.72836,16.44328 -8.60225,22.31718 -6.64934,6.64931 -18.34955,10.15563 -28.62277,8.57765 z"
+        />
+        <path
+          id="vesta-spark"
+          fill="#fffaf4"
+          d="m 151.38539,203.44393 c 1.90984,-3.58676 7.20067,-8.59374 10.97361,-10.38504 1.67301,-0.79429 3.03758,-1.58435 3.03237,-1.7557 -0.005,-0.17131 -1.34262,-0.96572 -2.97204,-1.76536 -1.62944,-0.7996 -4.21751,-2.52646 -5.7512,-3.83742 -3.03812,-2.59692 -7.31858,-9.2707 -8.48945,-13.23614 -0.73758,-2.49807 -0.73758,-2.49807 -1.51429,0.0944 -2.04619,6.82961 -7.46369,13.38649 -13.89051,16.81196 -3.76852,2.0086 -3.76852,2.0086 -0.13335,3.82512 6.30673,3.15148 11.68431,9.44269 13.79505,16.13873 1.01301,3.21363 1.01301,3.21363 2.26196,0.0123 0.68692,-1.76052 1.89645,-4.41694 2.68783,-5.90312 z"
+        />
+      </g>
+      <g
+        id="vesta-mouth"
+        fill="none"
+        stroke="#1a2735"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="28"
+      >
+        <path
+          id="vesta-mouth-line"
+          pathLength="1"
+          d="M 103.8 226.3 C 115.5 247.5 130 257.5 147.5 257.5 C 165 257.5 179.5 247.5 191.2 226.3"
+        />
+      </g>
+      <path
+        id="vesta-mouth-static"
+        fill="#1a2735"
+        d="M 140.455 269.468 C 126.391 267.826 112.963 261.273 102.654 251.019 C 91.629 240.053 86.861 228.346 90.815 221.949 C 93.205 218.081 101.168 215.667 106.131 217.305 C 108.747 218.168 110.478 220.051 114.108 225.984 C 122.547 239.772 136.882 246.848 152.221 244.795 C 165.241 243.053 174.466 236.872 181.845 224.948 C 185.959 218.298 187.322 217.215 192.005 216.876 C 198.895 216.378 204.699 219.751 205.647 224.806 C 206.198 227.743 205.179 231.797 202.605 236.908 C 196.94 248.158 187.238 257.428 174.817 263.458 C 167.765 266.883 161.849 268.607 154.187 269.472 C 148.134 270.155 146.34 270.155 140.455 269.467 Z"
+      />
+    </g>
+  </g>
+</svg>

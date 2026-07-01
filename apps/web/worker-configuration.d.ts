@@ -9,7 +9,7 @@ interface __BaseEnv_Env {
   AI: Ai;
   ENVIRONMENT: "local";
   APP_VERSION: "0.0.0";
-  BETTER_AUTH_URL: "https://lares-web.teampitch.workers.dev";
+  BETTER_AUTH_URL: "https://vesta-web.teampitch.workers.dev";
   LOG_HTTP_REQUESTS: "true";
   THINK_MODEL: "@cf/moonshotai/kimi-k2.7-code";
   TURBOPUFFER_REGION: "aws-eu-west-1";
@@ -14070,11 +14070,11 @@ declare namespace Cloudflare {
   // A project should have a declaration like this:
   //
   //     interface GlobalProps {
-  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // Decvesta the main module's exports. Used to populate Cloudflare.Exports aka the type
   //       // of `ctx.exports`.
   //       mainModule: typeof import("my-main-module");
   //
-  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // Decvesta which of the main module's exports are configured with durable storage, and
   //       // thus should behave as Durable Object namsepace bindings.
   //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
   //     }

@@ -58,12 +58,14 @@ const contentViewportClass =
 const surfaceClass =
   "relative overflow-hidden rounded-[1.45rem] border border-white/6 bg-[#1f1f1f]/95 p-5 shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl";
 const buttonClass =
-  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-[#f4f1eb] px-4 text-[0.8125rem] font-medium text-[#080808] shadow-none disabled:opacity-70";
+  "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-[#ec5c29] px-4 text-[0.8125rem] font-medium text-[#1a2735] shadow-none disabled:opacity-70";
 const secondaryButtonClass =
   "inline-flex min-h-12 items-center justify-center rounded-full border-0 bg-white/5 px-4 text-[0.8125rem] font-medium text-neutral-200 shadow-none disabled:opacity-70";
 const eyebrowClass = "mb-2 text-[0.75rem] font-medium uppercase tracking-[0.12em] text-neutral-400";
 const summaryClass = "mt-4 text-[0.875rem] leading-[1.55] text-neutral-300";
 const cx = (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(" ");
+const vestaLogoSrc = "/icons/vesta-logo-dark.svg";
+const vestaLogoLongSrc = "/icons/vesta-logo-long-dark.svg";
 
 export interface EventListItem {
   readonly id: string;
@@ -291,7 +293,7 @@ export function buildLoopFunnelData(input: {
 }): ReadonlyArray<LoopFunnelDatum> {
   return [
     { fill: "#9cc9e8", label: "Signals", value: input.signalCount },
-    { fill: "#c4a76f", label: "Insights", value: input.synthesisCount },
+    { fill: "#ec5c29", label: "Insights", value: input.synthesisCount },
     { fill: "#e7a5a1", label: "Review", value: input.pendingProposalCount },
     { fill: "#f4efe8", label: "Commit", value: input.activeCommitmentCount },
     { fill: "#9fbf9f", label: "Closed", value: input.closedOutcomeCount },
@@ -334,7 +336,7 @@ const plateValueToPlainText = (value: Value) => {
     .trim();
 };
 
-export function LaresAppShell(props: { readonly children: ReactNode }) {
+export function VestaAppShell(props: { readonly children: ReactNode }) {
   return (
     <main className={shellClass}>
       <div className={contentViewportClass}>{props.children}</div>
@@ -371,13 +373,10 @@ export function LoginCard(props: {
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#161616] p-6 text-white md:p-10">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <a
-          className="flex items-center gap-2 self-center text-sm font-medium text-white no-underline"
+          className="flex items-center self-center text-sm font-medium text-white no-underline"
           href="/"
         >
-          <span className="flex size-6 items-center justify-center rounded-md bg-[#f4f1eb] text-[#080808]">
-            <Sparkles className="size-4" aria-hidden="true" strokeWidth={2.2} />
-          </span>
-          Lares
+          <img className="h-8 w-auto" src={vestaLogoLongSrc} alt="Vesta" />
         </a>
         <section className="rounded-2xl border border-white/8 bg-[#1f1f1f] p-6 shadow-[0_18px_42px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.03)]">
           <header className="text-center">
@@ -486,7 +485,12 @@ export function DashboardHeader(props: { readonly title?: string }) {
   return (
     <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[#191919] to-[#19191900] py-3">
       <div>
-        <p className={eyebrowClass}>Lares</p>
+        <div className="mb-2 flex items-center gap-2">
+          <img className="size-5" src={vestaLogoSrc} alt="" aria-hidden="true" />
+          <p className="m-0 text-[0.75rem] font-medium tracking-[0.12em] text-neutral-400 uppercase">
+            Vesta
+          </p>
+        </div>
         <h1 className="m-0 max-w-[14ch] text-2xl leading-[1.04] font-medium tracking-[-0.035em] text-balance">
           {props.title ?? "Home"}
         </h1>
@@ -534,11 +538,8 @@ export function HomeDashboard(props: {
       aria-label="Home dashboard"
     >
       <div className="grid grid-cols-[2.25rem_1fr_2.25rem] items-center gap-3">
-        <span
-          className="grid size-8 place-content-center rounded-full bg-[#232323]"
-          aria-hidden="true"
-        >
-          <Sparkles className="size-4 text-neutral-400" strokeWidth={2.1} />
+        <span className="grid size-8 place-content-center rounded-full" aria-hidden="true">
+          <img className="size-7" src={vestaLogoSrc} alt="" />
         </span>
         <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
           good afternoon.
@@ -738,7 +739,7 @@ export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeT
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={props.data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
           <defs>
-            <linearGradient id="lares-completed" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient id="vesta-completed" x1="0" x2="0" y1="0" y2="1">
               <stop offset="5%" stopColor="#9fbf9f" stopOpacity={0.55} />
               <stop offset="95%" stopColor="#9fbf9f" stopOpacity={0.02} />
             </linearGradient>
@@ -750,7 +751,7 @@ export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeT
             type="monotone"
             dataKey="completed"
             stroke="#9fbf9f"
-            fill="url(#lares-completed)"
+            fill="url(#vesta-completed)"
             strokeWidth={2}
           />
           <Area
@@ -825,9 +826,9 @@ type ChatAlign = "start" | "end";
 type BubbleVariant = "default" | "secondary" | "muted" | "ghost" | "destructive";
 type MarkerVariant = "default" | "border" | "separator";
 type DotMatrixVisualState = "thinking" | "tool";
-type LaresChatActivityStatus = "active" | "complete" | "error";
+type VestaChatActivityStatus = "active" | "complete" | "error";
 
-export interface LaresChatMessage {
+export interface VestaChatMessage {
   readonly content: string;
   readonly draftTitle?: string;
   readonly id: string;
@@ -836,37 +837,37 @@ export interface LaresChatMessage {
   readonly streaming?: boolean;
 }
 
-export interface LaresChatActivity {
+export interface VestaChatActivity {
   readonly id: string;
   readonly kind: "thinking" | "tool";
   readonly label: string;
-  readonly status?: LaresChatActivityStatus;
+  readonly status?: VestaChatActivityStatus;
 }
 
-export interface LaresChatAttachment {
+export interface VestaChatAttachment {
   readonly id: string;
   readonly name: string;
   readonly size?: number;
   readonly type?: string;
 }
 
-export type LaresChatEvent =
-  | ({ readonly type: "activity" } & LaresChatActivity)
-  | ({ readonly type: "message" } & LaresChatMessage);
+export type VestaChatEvent =
+  | ({ readonly type: "activity" } & VestaChatActivity)
+  | ({ readonly type: "message" } & VestaChatMessage);
 
-const chatActivity = (activity: LaresChatActivity) => activity;
-const chatEvent = (event: LaresChatEvent) => event;
+const chatActivity = (activity: VestaChatActivity) => activity;
+const chatEvent = (event: VestaChatEvent) => event;
 
 type ChatTimelineGroup =
   | {
-      readonly activities: ReadonlyArray<LaresChatActivity>;
+      readonly activities: ReadonlyArray<VestaChatActivity>;
       readonly id: string;
       readonly minimized: boolean;
       readonly type: "activity";
     }
   | {
       readonly id: string;
-      readonly message: LaresChatMessage;
+      readonly message: VestaChatMessage;
       readonly type: "message";
     };
 
@@ -1115,7 +1116,7 @@ function formatAttachmentSize(size?: number) {
   return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MB`;
 }
 
-function isImageAttachment(attachment: LaresChatAttachment) {
+function isImageAttachment(attachment: VestaChatAttachment) {
   return (
     attachment.type?.startsWith("image/") ||
     /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(attachment.name)
@@ -1204,13 +1205,13 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
 }
 
 function groupChatTimeline(
-  events: ReadonlyArray<LaresChatEvent>,
+  events: ReadonlyArray<VestaChatEvent>,
 ): ReadonlyArray<ChatTimelineGroup> {
   const groups: Array<
     | Omit<Extract<ChatTimelineGroup, { type: "activity" }>, "minimized">
     | Extract<ChatTimelineGroup, { type: "message" }>
   > = [];
-  let activities: Array<LaresChatActivity> = [];
+  let activities: Array<VestaChatActivity> = [];
   let activityGroupId = "";
   const flushActivities = () => {
     if (activities.length === 0) return;
@@ -1252,13 +1253,13 @@ function groupChatTimeline(
   );
 }
 
-function activityStatus(activity: LaresChatActivity): LaresChatActivityStatus {
+function activityStatus(activity: VestaChatActivity): VestaChatActivityStatus {
   return activity.status ?? "active";
 }
 
 function ActivityStatusDot(props: {
   readonly state?: DotMatrixVisualState;
-  readonly status: LaresChatActivityStatus;
+  readonly status: VestaChatActivityStatus;
 }) {
   return (
     <span
@@ -1280,7 +1281,7 @@ function ActivityStatusDot(props: {
 }
 
 function ActivitySteps(props: {
-  readonly activities: ReadonlyArray<LaresChatActivity>;
+  readonly activities: ReadonlyArray<VestaChatActivity>;
   readonly minimized?: boolean;
 }) {
   if (props.activities.length === 0) {
@@ -1345,7 +1346,7 @@ function ActivitySteps(props: {
             >
               <span
                 data-slot="activity-step-node"
-                className="absolute top-[0.43rem] -left-[1.22rem] grid size-2 place-content-center rounded-full bg-[#111111] ring-4 ring-[#111111]"
+                className="absolute top-[0.43rem] -left-[1.22rem] grid size-2 place-content-center rounded-full bg-[#1a2735] ring-4 ring-[#1a2735]"
               >
                 <ActivityStatusDot state={activity.kind} status={activityStatus(activity)} />
               </span>
@@ -1358,14 +1359,14 @@ function ActivitySteps(props: {
   );
 }
 
-export function LaresChat(props: {
-  readonly activities?: ReadonlyArray<LaresChatActivity>;
-  readonly attachments?: ReadonlyArray<LaresChatAttachment>;
+export function VestaChat(props: {
+  readonly activities?: ReadonlyArray<VestaChatActivity>;
+  readonly attachments?: ReadonlyArray<VestaChatAttachment>;
   readonly className?: string;
   readonly error?: string;
-  readonly events?: ReadonlyArray<LaresChatEvent>;
+  readonly events?: ReadonlyArray<VestaChatEvent>;
   readonly input: string;
-  readonly messages: ReadonlyArray<LaresChatMessage>;
+  readonly messages: ReadonlyArray<VestaChatMessage>;
   readonly sending: boolean;
   readonly onAttachmentRemove?: (id: string) => void;
   readonly onAttachmentsAdd?: (files: ReadonlyArray<File>) => void;
@@ -1387,7 +1388,7 @@ export function LaresChat(props: {
     ([
       ...props.messages.map((message) => chatEvent({ ...message, type: "message" })),
       ...activities.map((activity) => chatEvent({ ...activity, type: "activity" })),
-    ] satisfies ReadonlyArray<LaresChatEvent>);
+    ] satisfies ReadonlyArray<VestaChatEvent>);
   const timelineGroups = groupChatTimeline(timelineEvents);
   const hasMessages = timelineEvents.some((event) => event.type === "message");
   const addFiles = (files: ReadonlyArray<File>) => {
@@ -1422,15 +1423,18 @@ export function LaresChat(props: {
   return (
     <main
       className={cx(
-        "mx-auto grid h-dvh w-full max-w-[42rem] bg-[#111111] text-neutral-100",
+        "mx-auto grid h-dvh w-full max-w-[42rem] bg-[#1a2735] text-neutral-100",
         props.className,
       )}
     >
-      <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Lares chat">
+      <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Vesta chat">
         <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-          <p className="mb-1.5 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
-            Lares
-          </p>
+          <div className="mb-1.5 flex items-center gap-2">
+            <img className="size-5" src={vestaLogoSrc} alt="" aria-hidden="true" />
+            <p className="m-0 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+              Vesta
+            </p>
+          </div>
           <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-white">Chat</h1>
         </header>
 
@@ -1537,8 +1541,8 @@ export function LaresChat(props: {
         </MessageScrollerProvider>
 
         <form
-          className="bg-[#111111]/96 px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
-          aria-label="Message Lares"
+          className="bg-[#1a2735]/96 px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+          aria-label="Message Vesta"
           onSubmit={(event) => {
             event.preventDefault();
             if (canSend) props.onSubmit();
@@ -1563,7 +1567,7 @@ export function LaresChat(props: {
               {draggingFiles ? (
                 <div
                   data-slot="chat-composer-drop-hint"
-                  className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[1.2rem] bg-[#111111]/88 text-sm font-medium text-[#8ee8ff] shadow-[inset_0_0_0_1px_rgba(142,232,255,0.55)] backdrop-blur-sm"
+                  className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[1.2rem] bg-[#1a2735]/88 text-sm font-medium text-[#8ee8ff] shadow-[inset_0_0_0_1px_rgba(142,232,255,0.55)] backdrop-blur-sm"
                 >
                   Drop files to attach
                 </div>
@@ -1622,7 +1626,7 @@ export function LaresChat(props: {
               <textarea
                 className="max-h-40 min-h-18 resize-none border-0 bg-transparent p-0 text-[1rem] leading-6 text-white outline-none placeholder:text-neutral-500"
                 aria-label="Message"
-                placeholder="Message Lares"
+                placeholder="Message Vesta"
                 rows={2}
                 value={props.input}
                 onChange={(event) => props.onInputChange(event.currentTarget.value)}
@@ -1715,7 +1719,7 @@ export function BottomNav(props: {
 
   return (
     <nav
-      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-[#111111]/96 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
+      className="fixed right-1/2 bottom-0 z-3 grid w-full max-w-[44rem] translate-x-1/2 grid-cols-5 items-end gap-1 bg-[#1a2735]/96 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
       aria-label="Primary navigation"
     >
       <a
@@ -1791,7 +1795,7 @@ export function AddActionSheet(props: {
                   whileTap={{ scale: 0.985 }}
                   onClick={props.onCaptureNote}
                 >
-                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                  <span className="grid size-9 place-content-center rounded-full bg-[#1a2735] text-white">
                     <PenLine className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
@@ -1804,7 +1808,7 @@ export function AddActionSheet(props: {
                   whileTap={{ scale: 0.985 }}
                   onClick={props.onOpenChat}
                 >
-                  <span className="grid size-9 place-content-center rounded-full bg-[#111111] text-white">
+                  <span className="grid size-9 place-content-center rounded-full bg-[#1a2735] text-white">
                     <Bot className="size-4" aria-hidden="true" strokeWidth={2.3} />
                   </span>
                   <span className="grid text-left">
@@ -1968,7 +1972,7 @@ export function WritingDrawer(props: {
   return (
     <Drawer.Root open={props.open} onOpenChange={(open) => (!open ? props.onCancel() : undefined)}>
       <Drawer.Portal>
-        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[#111111] transition-opacity" />
+        <Drawer.Backdrop className="fixed inset-0 z-20 min-h-dvh bg-[#1a2735] transition-opacity" />
         <Drawer.Viewport className="fixed inset-0 z-21">
           <Drawer.Popup
             className="fixed inset-0 mx-auto grid w-full max-w-[44rem] grid-rows-[auto_1fr] overflow-hidden bg-[#1f1f1f] px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-neutral-100 outline-0"

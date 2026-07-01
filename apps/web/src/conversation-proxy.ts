@@ -1,10 +1,10 @@
 import { z } from "zod";
-import type { LaresUser } from "./Services/LaresApp";
+import type { VestaUser } from "./Services/VestaApp";
 
 export async function proxyConversationRequest<Schema extends z.ZodType>(
   agentSessions: DurableObjectNamespace,
   internalSecret: string | undefined,
-  user: LaresUser,
+  user: VestaUser,
   conversationId: string,
   pathOrUrl: string | URL,
   schema: Schema,
@@ -13,18 +13,18 @@ export async function proxyConversationRequest<Schema extends z.ZodType>(
   const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
   const agent = agentSessions.get(agentId);
   const url =
-    typeof pathOrUrl === "string" ? new URL(`https://lares.local${pathOrUrl}`) : pathOrUrl;
+    typeof pathOrUrl === "string" ? new URL(`https://vesta.local${pathOrUrl}`) : pathOrUrl;
   const internalSignature = internalSecret
     ? await signAgentRequest(internalSecret, user.id, conversationId)
     : undefined;
   const requestInit = {
     headers: {
       "content-type": "application/json",
-      "x-lares-conversation-id": conversationId,
-      "x-lares-user-display-name": user.displayName,
-      "x-lares-user-id": user.id,
+      "x-vesta-conversation-id": conversationId,
+      "x-vesta-user-display-name": user.displayName,
+      "x-vesta-user-id": user.id,
       ...(internalSignature !== undefined
-        ? { "x-lares-internal-signature": internalSignature }
+        ? { "x-vesta-internal-signature": internalSignature }
         : {}),
     },
     method: init.method ?? "GET",
@@ -47,7 +47,7 @@ export function conversationStreamPath(path: string) {
 export async function proxyConversationStream(
   agentSessions: DurableObjectNamespace,
   internalSecret: string | undefined,
-  user: LaresUser,
+  user: VestaUser,
   conversationId: string,
   message: string,
 ): Promise<Response> {
@@ -57,15 +57,15 @@ export async function proxyConversationStream(
     ? await signAgentRequest(internalSecret, user.id, conversationId)
     : undefined;
   const response = await agent.fetch(
-    new Request("https://lares.local/messages/stream", {
+    new Request("https://vesta.local/messages/stream", {
       body: JSON.stringify({ message }),
       headers: {
         "content-type": "application/json",
-        "x-lares-conversation-id": conversationId,
-        "x-lares-user-display-name": user.displayName,
-        "x-lares-user-id": user.id,
+        "x-vesta-conversation-id": conversationId,
+        "x-vesta-user-display-name": user.displayName,
+        "x-vesta-user-id": user.id,
         ...(internalSignature !== undefined
-          ? { "x-lares-internal-signature": internalSignature }
+          ? { "x-vesta-internal-signature": internalSignature }
           : {}),
       },
       method: "POST",

@@ -1,17 +1,17 @@
 import { Hono } from "hono";
 import { Layer } from "effect";
-import { Db } from "@lares/db";
+import { Db } from "@vesta/db";
 import type { Env } from "./env";
 import type { HonoHandlerContext } from "./request-context";
-import type { LaresAppRuntime, LaresOkfSandboxFactory, RunEffect } from "./Services/LaresApp";
+import type { VestaAppRuntime, VestaOkfSandboxFactory, RunEffect } from "./Services/VestaApp";
 import { resolveBetterAuthSession, type AuthSessionResolver } from "./auth";
 import {
-  makeLaresAppRuntime,
-  resolveLaresApp,
-  runLaresAppDbEffect,
-  type LaresAppDbLayer,
-} from "./Layers/LaresAppLive";
-import { handleLaresMcpRequest } from "./mcp";
+  makeVestaAppRuntime,
+  resolveVestaApp,
+  runVestaAppDbEffect,
+  type VestaAppDbLayer,
+} from "./Layers/VestaAppLive";
+import { handleVestaMcpRequest } from "./mcp";
 import {
   addWideEventFields,
   evlogWideEvents,
@@ -30,8 +30,8 @@ import { registerStaticRoutes } from "./routes/static";
 
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
-  readonly dbLayer?: LaresAppDbLayer;
-  readonly okfSandboxFactory?: LaresOkfSandboxFactory;
+  readonly dbLayer?: VestaAppDbLayer;
+  readonly okfSandboxFactory?: VestaOkfSandboxFactory;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -39,8 +39,8 @@ export function createApp(options: CreateAppOptions = {}) {
   const okfSandboxFactory = options.okfSandboxFactory ?? defaultOkfSandboxFactory;
   const resolveSession = options.authSessionResolver ?? resolveBetterAuthSession;
   const runtimeMemoMap = Layer.makeMemoMapUnsafe();
-  const appRuntimes = new WeakMap<Env, LaresAppRuntime>();
-  const d1Layers = new WeakMap<D1Database, LaresAppDbLayer>();
+  const appRuntimes = new WeakMap<Env, VestaAppRuntime>();
+  const d1Layers = new WeakMap<D1Database, VestaAppDbLayer>();
   const dbLayerForEnv = (env: Env) => {
     if (options.dbLayer) return options.dbLayer;
     const existing = d1Layers.get(env.DB);
@@ -52,7 +52,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const runtimeForEnv = (env: Env) => {
     const existing = appRuntimes.get(env);
     if (existing) return existing;
-    const runtime = makeLaresAppRuntime({
+    const runtime = makeVestaAppRuntime({
       dbLayer: dbLayerForEnv(env),
       env,
       memoMap: runtimeMemoMap,
@@ -67,13 +67,13 @@ export function createApp(options: CreateAppOptions = {}) {
     const appServices = await runWithRequestSpan(
       c,
       {
-        attributes: { "lares.layer": "LaresApp" },
+        attributes: { "vesta.layer": "VestaApp" },
         kind: "client",
         name: "app.resolve",
       },
-      () => resolveLaresApp(appRuntime),
+      () => resolveVestaApp(appRuntime),
     );
-    const runEffect: RunEffect = (effect) => runLaresAppDbEffect(appRuntime, effect);
+    const runEffect: RunEffect = (effect) => runVestaAppDbEffect(appRuntime, effect);
     return { appServices, runEffect };
   };
 
@@ -87,11 +87,11 @@ export function createApp(options: CreateAppOptions = {}) {
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
+      { attributes: { "vesta.auth.provider": "better-auth" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, headers: c.req.raw.headers }),
     );
     if (!auth.user) return c.json({ error: "Authentication required" }, 401);
-    return handleLaresMcpRequest(c.req.raw, {
+    return handleVestaMcpRequest(c.req.raw, {
       db: appServices.db,
       runEffect,
       user: auth.user,

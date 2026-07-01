@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Db } from "@lares/db";
-import { readHttpTelemetrySnapshot } from "@lares/observability";
+import { Db } from "@vesta/db";
+import { readHttpTelemetrySnapshot } from "@vesta/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
@@ -41,7 +41,7 @@ const createTraceDb = () => {
 };
 
 describe("web app", () => {
-  test("GET / serves the Lares Daily Operating Loop app", async () => {
+  test("GET / serves the Vesta Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
     const body = await response.text();
@@ -50,6 +50,8 @@ describe("web app", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
     expect(body).toContain('rel="manifest"');
+    expect(body).toContain('href="/favicon.ico"');
+    expect(body).toContain('href="/favicon.svg"');
     expect(body).toContain('rel="apple-touch-icon"');
     expect(body).toContain('name="theme-color"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style"');
@@ -73,7 +75,7 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       ok: true,
-      service: "lares-web",
+      service: "vesta-web",
       environment: "test",
       version: "test-version",
       bindings: {
@@ -90,10 +92,10 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      name: "Lares",
+      name: "Vesta",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
-      theme_color: "#111111",
+      theme_color: "#1a2735",
       icons: [
         expect.objectContaining({ sizes: "192x192", src: "/icons/icon-192.png" }),
         expect.objectContaining({ sizes: "512x512", src: "/icons/icon-512.png" }),
@@ -101,6 +103,17 @@ describe("web app", () => {
       ],
       shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
+  });
+
+  test("GET /icons/icon.svg serves the Vesta app icon", async () => {
+    const app = createApp();
+    const response = await app.request("/icons/icon.svg", {}, env);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/svg+xml");
+    expect(body).toContain("Vesta app icon");
+    expect(body).toContain("#ec5c29");
   });
 
   test("GET /offline.html serves a PWA offline fallback", async () => {
@@ -111,6 +124,8 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("You are offline");
+    expect(body).toContain('href="/favicon.ico"');
+    expect(body).toContain('href="/favicon.svg"');
     expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
@@ -173,9 +188,9 @@ describe("web app", () => {
   test("GET /api/auth/passkey/generate-register-options returns an auth error instead of 404 or 500", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(
-      "/api/auth/passkey/generate-register-options?name=Lares%20passkey",
+      "/api/auth/passkey/generate-register-options?name=Vesta%20passkey",
       {},
-      { ...env, BETTER_AUTH_SECRET: "test-secret", BETTER_AUTH_URL: "https://lares.test" },
+      { ...env, BETTER_AUTH_SECRET: "test-secret", BETTER_AUTH_URL: "https://vesta.test" },
     );
 
     expect(response.status).toBeGreaterThanOrEqual(400);
@@ -284,7 +299,7 @@ describe("web app", () => {
       expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
-        service: "lares-web",
+        service: "vesta-web",
         environment: "test",
         version: "test-version",
         requestId: "test-ray",
@@ -321,7 +336,7 @@ describe("web app", () => {
       expect.any(String),
       "http_request_completed",
       "wide_event",
-      "lares-web",
+      "vesta-web",
       "test",
       "test-version",
       "persisted-ray",
@@ -370,7 +385,7 @@ describe("web app", () => {
       expect.any(String),
       expect.any(String),
       expect.any(Number),
-      "lares-web",
+      "vesta-web",
       "test",
       "test-version",
       "span-ray",
@@ -536,7 +551,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "lares-web",
+      service: "vesta-web",
       version: "test-version",
     });
   });
@@ -548,7 +563,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "lares-web",
+      service: "vesta-web",
       version: "test-version",
     });
   });
@@ -573,7 +588,7 @@ describe("web app", () => {
     const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
-    expect(body.spokenResponse).toBe("Understood. I logged it to Lares.");
+    expect(body.spokenResponse).toBe("Understood. I logged it to Vesta.");
     expect(body.route).toBe("capture_only");
     expect(body.capture).toMatchObject({
       idempotencyKey: "siri-log-1",
@@ -697,7 +712,7 @@ describe("web app", () => {
     expect(agentNames).toEqual(["dev-user:focus"]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
     expect(loggedEvent).toMatchObject({
       agentTool: "listRecentSignals",
       routeName: "api.conversations",
@@ -774,8 +789,8 @@ describe("web app", () => {
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
-    expect(forwardedRequests[0]!.headers.get("x-lares-internal-signature")).toMatch(
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
     expect(loggedEvent).toMatchObject({
@@ -835,7 +850,7 @@ describe("web app", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(agentNames).toEqual(["dev-user:focus"]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       userId: "dev-user",
@@ -870,7 +885,7 @@ describe("web app", () => {
                 id: "signal-1",
                 userId: "dev-user",
                 type: "manual_check_in_submitted",
-                source: "lares_agent_intake",
+                source: "vesta_agent_intake",
                 occurredAt: "2026-06-12T10:00:00.000Z",
                 schemaVersion: 1,
                 payload: { note: "What should I do next?" },
@@ -926,9 +941,9 @@ describe("web app", () => {
     expect(agentNames).toEqual(["dev-user:focus"]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-display-name")).toBe("Dev User");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-display-name")).toBe("Dev User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
@@ -937,7 +952,7 @@ describe("web app", () => {
           id: "signal-1",
           userId: "dev-user",
           type: "manual_check_in_submitted",
-          source: "lares_agent_intake",
+          source: "vesta_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
           schemaVersion: 1,
           payload: { note: "What should I do next?" },
@@ -1010,8 +1025,8 @@ describe("web app", () => {
     expect(agentNames).toEqual(["dev-user:focus"]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
   });
@@ -1211,7 +1226,7 @@ describe("web app", () => {
     expect(calls).toHaveLength(1);
     const [url, init] = calls[0]!;
     expect(String(url)).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
     );
     expect(String(url)).not.toContain("dev-user");
     expect(init?.method).toBe("DELETE");
@@ -1359,7 +1374,7 @@ describe("web app", () => {
         headers: {
           "cf-ray": "journal-ray",
           "content-type": "application/json",
-          "user-agent": "Lares/1",
+          "user-agent": "Vesta/1",
         },
         body: JSON.stringify({
           bodyText: "I need to work on the guest list",
@@ -1390,14 +1405,14 @@ describe("web app", () => {
       "http.route": "api.journal",
       "http.response.status_code": 200,
       "url.path": "/api/journal",
-      "user_agent.original": "Lares/1",
-      "service.name": "lares-web",
+      "user_agent.original": "Vesta/1",
+      "service.name": "vesta-web",
       "deployment.environment.name": "test",
-      "lares.debug_kind": "ai",
-      "lares.ai.system": "cloudflare-think",
-      "lares.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "lares.ai.run_id": saved.analysisRun.id,
-      "lares.ai.error_code": null,
+      "vesta.debug_kind": "ai",
+      "vesta.ai.system": "cloudflare-think",
+      "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "vesta.ai.run_id": saved.analysisRun.id,
+      "vesta.ai.error_code": null,
     });
   });
 
@@ -2039,7 +2054,7 @@ describe("web app", () => {
     const signals = await (await app.request("/api/signals", {}, env)).json();
 
     expect(response.status).toBe(200);
-    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Lares.");
+    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Vesta.");
     expect(voiceLog.route).toBe("reasoning_candidate");
     expect(voiceLog.capture).toEqual(
       expect.objectContaining({
@@ -2378,7 +2393,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(spec.info).toEqual({
-      title: "Lares API",
+      title: "Vesta API",
       version: "0.1.0",
     });
     expect(spec.paths["/events"].get).toMatchObject({
@@ -2422,6 +2437,6 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(body).toContain("Lares API");
+    expect(body).toContain("Vesta API");
   });
 });

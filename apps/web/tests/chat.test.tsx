@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LaresChat } from "@lares/ui";
+import { VestaChat } from "@vesta/ui";
 
-describe("LaresChat", () => {
+describe("VestaChat", () => {
   test("renders a shadcn-style conversation with draft context and composer controls", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         messages={[
           {
             content: "What should I do next?",
@@ -27,7 +27,7 @@ describe("LaresChat", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Lares chat"');
+    expect(html).toContain('aria-label="Vesta chat"');
     expect(html).toContain('data-slot="message-scroller"');
     expect(html).toContain("What should I do next?");
     expect(html).toContain("I drafted a reviewable next step.");
@@ -43,7 +43,7 @@ describe("LaresChat", () => {
 
   test("keeps the transcript chrome quiet when there is no memory context", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         messages={[
           {
             content: "test",
@@ -72,7 +72,7 @@ describe("LaresChat", () => {
 
   test("renders the composer without a top divider", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         messages={[]}
         input=""
         sending={false}
@@ -81,13 +81,13 @@ describe("LaresChat", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Message Lares"');
+    expect(html).toContain('aria-label="Message Vesta"');
     expect(html).not.toContain("shadow-[0_-1px_0_rgba");
   });
 
   test("renders only supported composer controls", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         messages={[]}
         input=""
         sending={false}
@@ -97,7 +97,7 @@ describe("LaresChat", () => {
     );
 
     expect(html).toContain('data-slot="chat-composer-surface"');
-    expect(html).toContain('placeholder="Message Lares"');
+    expect(html).toContain('placeholder="Message Vesta"');
     expect(html).toContain("bg-[#1d1d1d]");
     expect(html).toContain("text-white");
     expect(html).toContain('aria-label="Send message"');
@@ -111,7 +111,7 @@ describe("LaresChat", () => {
 
   test("renders attachment picker, pending files, and dropzone", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         attachments={[
           { id: "image-1", name: "diagram.png", size: 2048, type: "image/png" },
           { id: "doc-1", name: "brief.pdf", size: 4096, type: "application/pdf" },
@@ -141,7 +141,7 @@ describe("LaresChat", () => {
 
   test("uses a sequenced dot-matrix loader for active thinking state", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         messages={[
           {
             content: "What should I do next?",
@@ -175,7 +175,7 @@ describe("LaresChat", () => {
 
   test("keeps dot-matrix loaders out of streaming message text", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         activities={[{ id: "tool-1", kind: "tool", label: "Searching memory" }]}
         messages={[
           {
@@ -205,7 +205,7 @@ describe("LaresChat", () => {
 
   test("groups active tool work into one collapsible step rail", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         activities={[
           { id: "tool-1", kind: "tool", label: "Searching memory" },
           { id: "tool-2", kind: "tool", label: "Drafting proposal" },
@@ -230,7 +230,7 @@ describe("LaresChat", () => {
 
   test("keeps pre-response work ordered and minimized once assistant content follows", () => {
     const html = renderToStaticMarkup(
-      <LaresChat
+      <VestaChat
         events={[
           { content: "What should I do next?", id: "user-1", role: "user", type: "message" },
           {

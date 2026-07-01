@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildLoopFunnelData, buildOutcomeTrendData, buildSignalCalendarData } from "./index";
 
-describe("Lares chart data", () => {
+describe("Vesta chart data", () => {
   test("builds a seven-day signal calendar from dated events", () => {
     const data = buildSignalCalendarData(
       [

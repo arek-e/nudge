@@ -4,20 +4,20 @@ const defaultDevPort = 8787;
 const defaultHost = "127.0.0.1";
 
 export function preferredDevPort(env: NodeJS.ProcessEnv = process.env) {
-  return parsePort(env.LARES_DEV_PORT) ?? parsePort(env.PORT) ?? defaultDevPort;
+  return parsePort(env.VESTA_DEV_PORT) ?? parsePort(env.PORT) ?? defaultDevPort;
 }
 
 export function preferredInspectorPort(devPort: number, env: NodeJS.ProcessEnv = process.env) {
-  return parsePort(env.LARES_WRANGLER_INSPECTOR_PORT) ?? devPort + 1;
+  return parsePort(env.VESTA_WRANGLER_INSPECTOR_PORT) ?? devPort + 1;
 }
 
 export function localDevUrl(devPort: number, env: NodeJS.ProcessEnv = process.env) {
-  return env.LARES_DEV_URL ?? `http://localhost:${devPort}`;
+  return env.VESTA_DEV_URL ?? `http://localhost:${devPort}`;
 }
 
 export function wranglerPersistTo(repoRoot: string, env: NodeJS.ProcessEnv = process.env) {
   return (
-    env.LARES_WRANGLER_PERSIST_TO ?? `${repoRoot.replace(/\/+$/, "")}/apps/engine/.wrangler/state`
+    env.VESTA_WRANGLER_PERSIST_TO ?? `${repoRoot.replace(/\/+$/, "")}/apps/engine/.wrangler/state`
   );
 }
 

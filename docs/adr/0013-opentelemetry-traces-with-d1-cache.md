@@ -1,6 +1,6 @@
 # OpenTelemetry Traces With D1 Cache
 
-Lares will use OpenTelemetry-shaped traces as the foundation for request, agent, workflow, and evaluation timing trees. Cloudflare Workers native traces and logs should be enabled and exported to an OTLP destination when one exists. The local product/debug surface may read a bounded D1 trace cache, while future infrastructure can export the same trace model to an OTLP collector for ClickHouse, Grafana, Tempo, or another observability store.
+Vesta will use OpenTelemetry-shaped traces as the foundation for request, agent, workflow, and evaluation timing trees. Cloudflare Workers native traces and logs should be enabled and exported to an OTLP destination when one exists. The local product/debug surface may read a bounded D1 trace cache, while future infrastructure can export the same trace model to an OTLP collector for ClickHouse, Grafana, Tempo, or another observability store.
 
 evlog is the maintained wide-event layer for request context accumulation, redaction, sampling policy, structured errors, and future log drains. It is not the primary trace tree model. Wide events remain useful for request completion records, safe error fields, and operational summaries. Trace trees need `trace_id`, `span_id`, `parent_span_id`, status, timing, and attributes as first-class fields.
 
@@ -13,7 +13,7 @@ D1 is not the long-term observability store. It is a small, queryable product/de
 Implementation rules:
 
 - Express observability read/write operations as Effects and run them at the Worker or route boundary.
-- Use evlog for wide-event accumulation, but keep D1 persistence and trace span construction behind Lares-owned Effect seams.
+- Use evlog for wide-event accumulation, but keep D1 persistence and trace span construction behind Vesta-owned Effect seams.
 - Enable Cloudflare Workers native `observability.traces` and `observability.logs`; configure OTLP destinations in Cloudflare when one exists.
 - Use OTel-compatible `traceparent`, 32-character hex trace IDs, 16-character hex span IDs, span kinds, status, timing, and semantic attribute names.
 - Continue valid inbound `traceparent` headers instead of always starting unrelated traces.

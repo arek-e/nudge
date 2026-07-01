@@ -174,22 +174,22 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "http.route": routeName,
     "url.path": path,
     "user_agent.original": nullableStringField(event, "userAgent"),
-    "service.name": stringField(event, "service", "lares-web"),
+    "service.name": stringField(event, "service", "vesta-web"),
     "service.version": stringField(event, "version", "0.0.0"),
     "deployment.environment.name": stringField(event, "environment", "unknown"),
-    "lares.request_id": nullableStringField(event, "requestId"),
-    "lares.outcome": nullableStringField(event, "outcome"),
-    "lares.duration_ms": numberField(event, "durationMs"),
-    "lares.sample_reason": nullableStringField(event, "sampleReason"),
-    "lares.debug_kind": path?.startsWith("/api/agent-runs/")
+    "vesta.request_id": nullableStringField(event, "requestId"),
+    "vesta.outcome": nullableStringField(event, "outcome"),
+    "vesta.duration_ms": numberField(event, "durationMs"),
+    "vesta.sample_reason": nullableStringField(event, "sampleReason"),
+    "vesta.debug_kind": path?.startsWith("/api/agent-runs/")
       ? "agent_run_poll"
       : aiSystem
         ? "ai"
         : "http",
-    "lares.ai.system": aiSystem,
-    "lares.ai.model": aiModel,
-    "lares.ai.run_id": nullableStringField(event, "aiRunId"),
-    "lares.ai.error_code": nullableStringField(event, "aiErrorCode"),
+    "vesta.ai.system": aiSystem,
+    "vesta.ai.model": aiModel,
+    "vesta.ai.run_id": nullableStringField(event, "aiRunId"),
+    "vesta.ai.error_code": nullableStringField(event, "aiErrorCode"),
     "exception.type": errorType,
     "exception.message": nullableStringField(event, "errorMessage"),
   } satisfies WideEvent;
@@ -222,7 +222,7 @@ export const buildTraceEventRow = (input: TraceEventRowInput): SqlInsertRow => {
       stringField(input.event, "timestamp", input.now),
       stringField(input.event, "event", "unknown"),
       stringField(input.event, "logKind", "wide_event"),
-      stringField(input.event, "service", "lares-web"),
+      stringField(input.event, "service", "vesta-web"),
       stringField(input.event, "environment", "unknown"),
       stringField(input.event, "version", "0.0.0"),
       nullableStringField(input.event, "requestId"),
@@ -249,7 +249,7 @@ export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow =>
   return buildTraceSpanRow({
     attributes: {
       ...buildDebugWideEventFields({ event: input.event }),
-      "lares.sampled": input.event.sampled === true,
+      "vesta.sampled": input.event.sampled === true,
     },
     durationMs: input.durationMs,
     endedAt: input.endedAt,
@@ -263,7 +263,7 @@ export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow =>
     path: nullableStringField(input.event, "path"),
     requestId: nullableStringField(input.event, "requestId"),
     routeName,
-    service: stringField(input.event, "service", "lares-web"),
+    service: stringField(input.event, "service", "vesta-web"),
     spanId: input.spanId,
     startedAt: input.startedAt,
     status: status && status >= 500 ? "error" : "ok",

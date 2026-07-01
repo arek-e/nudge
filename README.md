@@ -1,12 +1,17 @@
 <div align="center">
 
-# Lares
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/icons/vesta-logo-long-dark.svg">
+  <img src="apps/web/public/icons/vesta-logo-long-light.svg" alt="Vesta" width="220">
+</picture>
+
+# Vesta
 
 **A private operating layer for personal context and agentic work**
 
 Cloudflare-native. OpenAPI-first. Human-in-the-loop by default.
 
-[Live App](https://lares-web.teampitch.workers.dev/) &middot; [API Docs](https://lares-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://lares-web.teampitch.workers.dev/api/openapi.json)
+[Live App](https://vesta-web.teampitch.workers.dev/) &middot; [API Docs](https://vesta-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://vesta-web.teampitch.workers.dev/api/openapi.json)
 
 </div>
 
@@ -18,7 +23,7 @@ Your life leaves context everywhere: messages, calendar commitments, relationshi
 
 Most assistants either forget that context or hide it inside opaque prompts. Most productivity tools hardcode a niche workflow: a morning routine, a task inbox, a journal, a CRM, a daily planner.
 
-**Lares takes a primitive-first approach.** Captures become Signals. Signals form Context. Frames bound what Lares is helping with. Syntheses interpret the context. Later, Proposals, Reviews, Commitments, and Outcomes close the loop.
+**Vesta takes a primitive-first approach.** Captures become Signals. Signals form Context. Frames bound what Vesta is helping with. Syntheses interpret the context. Later, Proposals, Reviews, Commitments, and Outcomes close the loop.
 
 The goal is not a chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks for review before sensitive changes, and improves through evals.
 
@@ -80,7 +85,7 @@ mkdir -p ~/.config/direnv
 cat > ~/.config/direnv/direnv.toml <<'EOF'
 [whitelist]
 prefix = [
-  "/path/to/your/lares/worktree-parent",
+  "/path/to/your/vesta/worktree-parent",
 ]
 EOF
 exec zsh
@@ -88,7 +93,7 @@ exec zsh
 
 Also install [`mise`](https://mise.jdx.dev/) and authenticate Cloudflare/Wrangler
 for commands that use remote Cloudflare resources. The direnv whitelist lets every
-Lares worktree under the configured parent load its `.envrc` without a separate
+Vesta worktree under the configured parent load its `.envrc` without a separate
 `direnv allow`.
 
 Per-worktree setup:
@@ -103,19 +108,19 @@ mise exec -- bun run dev
 If your shell already activates `mise`, the `mise exec --` prefix is optional.
 
 The checked-in `.envrc` loads a stable per-worktree development environment. By
-default each worktree gets a deterministic high-band `LARES_DEV_PORT`,
-`LARES_DEV_URL`, Wrangler inspector port, and local Wrangler state path so
+default each worktree gets a deterministic high-band `VESTA_DEV_PORT`,
+`VESTA_DEV_URL`, Wrangler inspector port, and local Wrangler state path so
 multiple dev stacks can run side by side. Use `.envrc.local` for untracked local
 overrides.
 
-`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Lares Engine with `wrangler dev` on the first available local port starting at `LARES_DEV_PORT`.
+`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Vesta Engine with `wrangler dev` on the first available local port starting at `VESTA_DEV_PORT`.
 
 Then open:
 
-- App: `$LARES_DEV_URL/`
-- Health: `$LARES_DEV_URL/health`
-- API docs: `$LARES_DEV_URL/api/docs`
-- OpenAPI spec: `$LARES_DEV_URL/api/openapi.json`
+- App: `$VESTA_DEV_URL/`
+- Health: `$VESTA_DEV_URL/health`
+- API docs: `$VESTA_DEV_URL/api/docs`
+- OpenAPI spec: `$VESTA_DEV_URL/api/openapi.json`
 
 ## Features
 
@@ -130,11 +135,24 @@ Then open:
 | :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement    |
 | :iphone:          | **Mobile-first app**        | React dashboard with TanStack Router, Query, Table, and Motion |
 
+## Brand Assets
+
+Use the SVG assets directly when possible. The light variants are tuned for
+white or warm surfaces; the dark variants are tuned for the current dark Vesta
+app shell.
+
+| Asset         | Light                                                                          | Dark                                                                         |
+| ------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Short mark    | [`vesta-logo-light.svg`](apps/web/public/icons/vesta-logo-light.svg)           | [`vesta-logo-dark.svg`](apps/web/public/icons/vesta-logo-dark.svg)           |
+| Long lockup   | [`vesta-logo-long-light.svg`](apps/web/public/icons/vesta-logo-long-light.svg) | [`vesta-logo-long-dark.svg`](apps/web/public/icons/vesta-logo-long-dark.svg) |
+| App icon      | [`vesta-app-icon-light.svg`](apps/web/public/icons/vesta-app-icon-light.svg)   | [`vesta-app-icon.svg`](apps/web/public/icons/vesta-app-icon.svg)             |
+| Animated mark | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)     | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)   |
+
 ## Architecture
 
 ```text
 +--------------------------------------------------+
-|                    Lares Engine                  |
+|                    Vesta Engine                  |
 |       Cloudflare Worker - Hono - oRPC/OpenAPI     |
 +---------------------+----------------------------+
                       |
@@ -158,7 +176,7 @@ Then open:
 +--------------------+       +----------------------+
 ```
 
-- **`apps/web`**: unified Lares app layer, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, and PWA surface.
+- **`apps/web`**: unified Vesta app layer, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, and PWA surface.
 - **`apps/web`**: React App Surface served by the Engine.
 - **`apps/ios`**: Native SwiftUI App Surface for iOS and Siri.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
@@ -231,7 +249,7 @@ Private project for now.
 
 <div align="center">
 <pre>
-Lares — private context, source-linked memory,
+Vesta — private context, source-linked memory,
 and agents that ask before they act.
 </pre>
 </div>

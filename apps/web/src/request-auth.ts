@@ -1,15 +1,15 @@
 import type { RequestSession } from "./request-context";
-import type { LaresAppService } from "./Services/LaresApp";
+import type { VestaAppService } from "./Services/VestaApp";
 import { isBetterAuthConfigured } from "./auth";
 
 export async function resolveCurrentUser(input: {
-  readonly app: LaresAppService;
+  readonly app: VestaAppService;
   readonly headers: Headers;
 }): Promise<RequestSession> {
   const session = await input.app.resolveSession({ env: input.app.env, headers: input.headers });
   if (session) {
     const user = {
-      displayName: session.user.name ?? session.user.email ?? "Lares User",
+      displayName: session.user.name ?? session.user.email ?? "Vesta User",
       id: session.user.id,
     };
     return {

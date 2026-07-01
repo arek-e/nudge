@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { UserDataExport } from "@lares/db";
+import type { UserDataExport } from "@vesta/db";
 import { buildOkfProjection, listOkfDirectory, readOkfFile, searchOkfFiles } from "./okf";
 
 const exportedUserData = {
@@ -10,7 +10,7 @@ const exportedUserData = {
       userId: "user-1",
       localDate: "2026-06-29",
       title: "June 29",
-      bodyText: "Look into OKF as the filesystem shape for Lares agent memory.",
+      bodyText: "Look into OKF as the filesystem shape for Vesta agent memory.",
       createdAt: "2026-06-29T08:00:00.000Z",
       updatedAt: "2026-06-29T09:00:00.000Z",
     },
@@ -114,20 +114,20 @@ describe("OKF projection", () => {
       );
       expect(metadata.type, path).toBeString();
       expect(metadata.type, path).not.toBe('""');
-      expect(metadata.resource, path).toMatch(/^"lares:\/\/[^"]+"$/);
+      expect(metadata.resource, path).toMatch(/^"vesta:\/\/[^"]+"$/);
     }
 
     expect(readOkfFile(projection, "/daily/2026-06-29.md")).toContain(
-      'resource: "lares://daily/2026-06-29"',
+      'resource: "vesta://daily/2026-06-29"',
     );
     expect(readOkfFile(projection, "/items/item-1.md")).toContain(
-      'resource: "lares://items/item-1"',
+      'resource: "vesta://items/item-1"',
     );
     expect(readOkfFile(projection, "/memory/daily_note/memory-1.md")).toContain(
-      'resource: "lares://memory/daily_note/memory-1"',
+      'resource: "vesta://memory/daily_note/memory-1"',
     );
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
-      'resource: "lares://summaries/day/2026-06-29"',
+      'resource: "vesta://summaries/day/2026-06-29"',
     );
   });
 

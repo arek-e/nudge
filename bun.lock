@@ -17,18 +17,12 @@
       },
     },
     "apps/web": {
-      "name": "@lares/web",
+      "name": "@vesta/web",
       "dependencies": {
         "@better-auth/drizzle-adapter": "catalog:",
         "@better-auth/passkey": "catalog:",
         "@cloudflare/sandbox": "catalog:",
         "@cloudflare/think": "catalog:",
-        "@lares/db": "workspace:*",
-        "@lares/domain": "workspace:*",
-        "@lares/effect-services": "workspace:*",
-        "@lares/evals": "workspace:*",
-        "@lares/observability": "workspace:*",
-        "@lares/ui": "workspace:*",
         "@modelcontextprotocol/sdk": "catalog:",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
@@ -38,6 +32,12 @@
         "@orpc/zod": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@tanstack/react-router": "catalog:",
+        "@vesta/db": "workspace:*",
+        "@vesta/domain": "workspace:*",
+        "@vesta/effect-services": "workspace:*",
+        "@vesta/evals": "workspace:*",
+        "@vesta/observability": "workspace:*",
+        "@vesta/ui": "workspace:*",
         "agents": "catalog:",
         "ai": "catalog:",
         "better-auth": "catalog:",
@@ -63,33 +63,33 @@
       },
     },
     "packages/db": {
-      "name": "@lares/db",
+      "name": "@vesta/db",
       "dependencies": {
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
       },
     },
     "packages/domain": {
-      "name": "@lares/domain",
+      "name": "@vesta/domain",
     },
     "packages/effect-services": {
-      "name": "@lares/effect-services",
+      "name": "@vesta/effect-services",
       "dependencies": {
-        "@lares/db": "workspace:*",
-        "@lares/domain": "workspace:*",
+        "@vesta/db": "workspace:*",
+        "@vesta/domain": "workspace:*",
         "effect": "catalog:",
       },
     },
     "packages/evals": {
-      "name": "@lares/evals",
+      "name": "@vesta/evals",
       "dependencies": {
-        "@lares/db": "workspace:*",
-        "@lares/effect-services": "workspace:*",
+        "@vesta/db": "workspace:*",
+        "@vesta/effect-services": "workspace:*",
         "effect": "catalog:",
       },
     },
     "packages/observability": {
-      "name": "@lares/observability",
+      "name": "@vesta/observability",
       "dependencies": {
         "braintrust": "3.20.0",
         "effect": "catalog:",
@@ -97,7 +97,7 @@
       },
     },
     "packages/ui": {
-      "name": "@lares/ui",
+      "name": "@vesta/ui",
       "dependencies": {
         "@base-ui/react": "catalog:",
         "@platejs/basic-nodes": "catalog:",
@@ -589,20 +589,6 @@
 
     "@kwsites/promise-deferred": ["@kwsites/promise-deferred@1.1.1", "", {}, "sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw=="],
 
-    "@lares/db": ["@lares/db@workspace:packages/db"],
-
-    "@lares/domain": ["@lares/domain@workspace:packages/domain"],
-
-    "@lares/effect-services": ["@lares/effect-services@workspace:packages/effect-services"],
-
-    "@lares/evals": ["@lares/evals@workspace:packages/evals"],
-
-    "@lares/observability": ["@lares/observability@workspace:packages/observability"],
-
-    "@lares/ui": ["@lares/ui@workspace:packages/ui"],
-
-    "@lares/web": ["@lares/web@workspace:apps/web"],
-
     "@levischuck/tiny-cbor": ["@levischuck/tiny-cbor@0.2.11", "", {}, "sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow=="],
 
     "@mixmark-io/domino": ["@mixmark-io/domino@2.2.0", "", {}, "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw=="],
@@ -1010,6 +996,20 @@
     "@vercel/functions": ["@vercel/functions@1.6.0", "", { "peerDependencies": { "@aws-sdk/credential-provider-web-identity": "*" }, "optionalPeers": ["@aws-sdk/credential-provider-web-identity"] }, "sha512-R6FKQrYT5MZs5IE1SqeCJWxMuBdHawFcCZboKKw8p7s+6/mcd55Gx6tWmyKnQTyrSEA04NH73Tc9CbqpEle8RA=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.2.0", "", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
+
+    "@vesta/db": ["@vesta/db@workspace:packages/db"],
+
+    "@vesta/domain": ["@vesta/domain@workspace:packages/domain"],
+
+    "@vesta/effect-services": ["@vesta/effect-services@workspace:packages/effect-services"],
+
+    "@vesta/evals": ["@vesta/evals@workspace:packages/evals"],
+
+    "@vesta/observability": ["@vesta/observability@workspace:packages/observability"],
+
+    "@vesta/ui": ["@vesta/ui@workspace:packages/ui"],
+
+    "@vesta/web": ["@vesta/web@workspace:apps/web"],
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 

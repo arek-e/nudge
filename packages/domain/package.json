@@ -1,5 +1,5 @@
 {
-  "name": "@lares/domain",
+  "name": "@vesta/domain",
   "private": true,
   "type": "module",
   "exports": {

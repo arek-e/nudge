@@ -9,7 +9,7 @@ import {
   type DbService,
   type EventRecord,
   type JournalDocumentRecord,
-} from "@lares/db";
+} from "@vesta/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
@@ -17,9 +17,9 @@ import {
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
-} from "@lares/effect-services";
+} from "@vesta/effect-services";
 import type { RequestSession } from "./request-context";
-import type { RunEffect } from "./Services/LaresApp";
+import type { RunEffect } from "./Services/VestaApp";
 import {
   apiContract,
   conversationMessageResponseSchema,
@@ -240,7 +240,7 @@ export const apiRouter = api.router({
       );
     }),
     listRecentSignals: api.conversations.listRecentSignals.handler(async ({ context, input }) => {
-      const url = new URL("https://lares.local/tools/list-recent-signals");
+      const url = new URL("https://vesta.local/tools/list-recent-signals");
       url.searchParams.set("limit", String(input.limit ?? 10));
       return proxyConversationRequest(
         context.agentSessions,
@@ -252,7 +252,7 @@ export const apiRouter = api.router({
       );
     }),
     retrieveMemory: api.conversations.retrieveMemory.handler(async ({ context, input }) => {
-      const url = new URL("https://lares.local/tools/retrieve-memory");
+      const url = new URL("https://vesta.local/tools/retrieve-memory");
       url.searchParams.set("query", input.query);
       url.searchParams.set("limit", String(input.limit ?? 5));
       return proxyConversationRequest(
@@ -457,8 +457,8 @@ export const apiRouter = api.router({
                 "daily_note.analysis_workflow.create",
                 {
                   attributes: {
-                    "lares.ai.source_type": "note_revision",
-                    "lares.ai.system": "cloudflare-think",
+                    "vesta.ai.source_type": "note_revision",
+                    "vesta.ai.system": "cloudflare-think",
                     "workflow.name": "daily-note-analysis",
                   },
                   kind: "client",
@@ -513,7 +513,7 @@ export const apiRouter = api.router({
                   "memory.index_pending",
                   {
                     attributes: {
-                      "lares.memory_index.provider": "turbopuffer",
+                      "vesta.memory_index.provider": "turbopuffer",
                       "turbopuffer.region": turbopuffer.region,
                     },
                     kind: "client",
@@ -616,7 +616,7 @@ export const apiRouter = api.router({
     generate: api.proposals.generate.handler(async ({ context, input }) => {
       const proposals = await context.recordSpan(
         "proposals.generate",
-        { attributes: { "lares.frame_key": input.frameKey } },
+        { attributes: { "vesta.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -690,7 +690,7 @@ export const apiRouter = api.router({
     create: api.syntheses.create.handler(async ({ context, input }) => {
       return context.recordSpan(
         "syntheses.create",
-        { attributes: { "lares.frame_key": input.frameKey } },
+        { attributes: { "vesta.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -704,7 +704,7 @@ export const apiRouter = api.router({
     latest: api.syntheses.latest.handler(async ({ context, input }) => {
       return context.recordSpan(
         "syntheses.latest",
-        { attributes: { "lares.frame_key": input.frameKey } },
+        { attributes: { "vesta.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -729,8 +729,8 @@ export const apiRouter = api.router({
       const route = classifyVoiceLogRoute(input.spokenText);
       const spokenResponse =
         route === "reasoning_candidate"
-          ? "Understood. I'm processing it in Lares."
-          : "Understood. I logged it to Lares.";
+          ? "Understood. I'm processing it in Vesta."
+          : "Understood. I logged it to Vesta.";
       const capture = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.appendSignal({
@@ -891,7 +891,7 @@ export function makeApiHandler() {
           JSON.stringify({
             event: "api_handler_error",
             logKind: "wide_event",
-            service: "lares-web",
+            service: "vesta-web",
             errorType: safeError.name,
             errorMessage: safeError.message,
           }),
@@ -904,7 +904,7 @@ export function makeApiHandler() {
         docsProvider: "scalar",
         specGenerateOptions: {
           info: {
-            title: "Lares API",
+            title: "Vesta API",
             version: "0.1.0",
           },
         },

@@ -26,7 +26,7 @@ export function registerApiRoutes(
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "lares.auth.provider": "better-auth" }, name: "auth.current_user" },
+      { attributes: { "vesta.auth.provider": "better-auth" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, headers: c.req.raw.headers }),
     );
     if (!auth.user && !c.req.path.startsWith("/api/session")) {

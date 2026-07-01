@@ -1,11 +1,11 @@
 import type { LocalMountBucketOptions } from "@cloudflare/sandbox";
 import type { OkfSandbox } from "./okf-sandbox";
-import type { LaresOkfSandboxFactoryInput } from "./Services/LaresApp";
+import type { VestaOkfSandboxFactoryInput } from "./Services/VestaApp";
 
 const localBucketOptions = { localBucket: true } satisfies LocalMountBucketOptions;
 
 export async function defaultOkfSandboxFactory(
-  input: LaresOkfSandboxFactoryInput,
+  input: VestaOkfSandboxFactoryInput,
 ): Promise<OkfSandbox | null> {
   if (!input.env.OKF_SANDBOX) return null;
   const okfFiles = input.env.OKF_FILES;

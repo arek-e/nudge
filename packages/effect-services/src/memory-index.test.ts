@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Db } from "@lares/db";
+import { Db } from "@vesta/db";
 import { MemoryIndex } from "./index";
 
 const user = { id: "memory-user", displayName: "Memory User" };
@@ -98,7 +98,7 @@ describe("MemoryIndex", () => {
 
     expect(result.indexed.indexedChunkIds).toEqual([result.memory.chunks[0]?.id]);
     expect(requests[0]?.url).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
     );
     expect(requests[0]?.url).not.toContain(user.id);
     expect(requests[0]?.body).toMatchObject({
@@ -148,7 +148,7 @@ describe("MemoryIndex", () => {
       {
         method: "DELETE",
         url: expect.stringMatching(
-          /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+          /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
         ),
       },
     ]);

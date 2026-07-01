@@ -1,6 +1,6 @@
 import type { Handler } from "hono";
 import type { ObservabilityHonoEnv } from "./observability";
-import type { LaresAppService, RunEffect } from "./Services/LaresApp";
+import type { VestaAppService, RunEffect } from "./Services/VestaApp";
 
 export type HonoHandlerContext = Parameters<Handler<ObservabilityHonoEnv>>[0];
 
@@ -13,6 +13,6 @@ export type RequestSession = {
 };
 
 export type ResolveRequestApp = (c: HonoHandlerContext) => Promise<{
-  readonly appServices: LaresAppService;
+  readonly appServices: VestaAppService;
   readonly runEffect: RunEffect;
 }>;

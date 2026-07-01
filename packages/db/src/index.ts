@@ -1119,7 +1119,7 @@ const toMemoryRetrievalEventRecord = (row: typeof memoryRetrievalEvents.$inferSe
   createdAt: row.createdAt,
 });
 
-export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
+export class Db extends Context.Service<Db, DbService>()("vesta/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
     Effect.sync(() => {

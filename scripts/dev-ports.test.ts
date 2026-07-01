@@ -38,22 +38,22 @@ describe("dev ports", () => {
   });
 
   test("uses environment override before the default dev port", () => {
-    expect(preferredDevPort({ LARES_DEV_PORT: "18990", PORT: "18887" })).toBe(18990);
+    expect(preferredDevPort({ VESTA_DEV_PORT: "18990", PORT: "18887" })).toBe(18990);
     expect(preferredDevPort({ PORT: "18887" })).toBe(18887);
     expect(preferredDevPort({})).toBe(8787);
   });
 
   test("derives related local dev settings from the selected port and worktree", () => {
     expect(preferredInspectorPort(45555, {})).toBe(45556);
-    expect(preferredInspectorPort(45555, { LARES_WRANGLER_INSPECTOR_PORT: "46666" })).toBe(46666);
+    expect(preferredInspectorPort(45555, { VESTA_WRANGLER_INSPECTOR_PORT: "46666" })).toBe(46666);
     expect(localDevUrl(45555, {})).toBe("http://localhost:45555");
-    expect(localDevUrl(45555, { LARES_DEV_URL: "http://127.0.0.1:45555" })).toBe(
+    expect(localDevUrl(45555, { VESTA_DEV_URL: "http://127.0.0.1:45555" })).toBe(
       "http://127.0.0.1:45555",
     );
-    expect(wranglerPersistTo("/worktrees/lares", {})).toBe(
-      "/worktrees/lares/apps/engine/.wrangler/state",
+    expect(wranglerPersistTo("/worktrees/vesta", {})).toBe(
+      "/worktrees/vesta/apps/engine/.wrangler/state",
     );
-    expect(wranglerPersistTo("/worktrees/lares", { LARES_WRANGLER_PERSIST_TO: "/tmp/state" })).toBe(
+    expect(wranglerPersistTo("/worktrees/vesta", { VESTA_WRANGLER_PERSIST_TO: "/tmp/state" })).toBe(
       "/tmp/state",
     );
   });

@@ -1,6 +1,6 @@
 # Primitive-First Loop Composition
 
-Lares uses general primitives as its core domain model: Capture, Signal, Context, Frame, Synthesis, Proposal, Review, Commitment, Outcome, and Loop Composition. Product surfaces such as the Daily Operating Loop, morning check-ins, digests, and action points are compositions or UX labels built from those primitives.
+Vesta uses general primitives as its core domain model: Capture, Signal, Context, Frame, Synthesis, Proposal, Review, Commitment, Outcome, and Loop Composition. Product surfaces such as the Daily Operating Loop, morning check-ins, digests, and action points are compositions or UX labels built from those primitives.
 
 This prevents the architecture from hardcoding one niche workflow. A daily orientation experience, relationship preparation, travel context, weekly reflection, project decision support, or custom integration should all use the same underlying primitives rather than creating parallel feature-specific models.
 

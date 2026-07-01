@@ -1,4 +1,4 @@
-import type { DurableWorkflowStepConfig } from "@lares/effect-services";
+import type { DurableWorkflowStepConfig } from "@vesta/effect-services";
 
 export const dailyNoteAnalysisExtractionStepConfig = {
   retries: {

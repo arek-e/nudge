@@ -4,7 +4,7 @@ import type {
   MemoryDocumentRecord,
   SummaryDocumentRecord,
   UserDataExport,
-} from "@lares/db";
+} from "@vesta/db";
 
 export type OkfProjectionInput = Pick<
   UserDataExport,
@@ -32,7 +32,7 @@ export const buildOkfProjection = (input: OkfProjectionInput): OkfProjection => 
 
   files.set(
     "/index.md",
-    index("Lares Workspace Knowledge", [
+    index("Vesta Workspace Knowledge", [
       ["Daily Notes", "daily/", `${dailyNotes.length} daily note${plural(dailyNotes.length)}`],
       [
         "Items",
@@ -169,7 +169,7 @@ const dailyNoteFile = (note: DailyNoteRecord) =>
       ["type", "Daily Note"],
       ["title", note.title],
       ["description", firstLine(note.bodyText)],
-      ["resource", `lares://daily/${note.localDate}`],
+      ["resource", `vesta://daily/${note.localDate}`],
       ["timestamp", note.updatedAt],
       ["tags", ["daily"]],
       ["source_id", note.id],
@@ -184,7 +184,7 @@ const itemFile = (item: ExtractedItemRecord) =>
       ["type", "Extracted Item"],
       ["title", item.title],
       ["description", firstLine(item.body)],
-      ["resource", `lares://items/${item.id}`],
+      ["resource", `vesta://items/${item.id}`],
       ["timestamp", item.updatedAt],
       ["tags", ["item", item.kind, item.status]],
       ["source_id", item.id],
@@ -204,7 +204,7 @@ const memoryFile = (
       ["type", "Memory Document"],
       ["title", document.title],
       ["description", firstLine(document.bodyText)],
-      ["resource", `lares://memory/${document.sourceType}/${document.id}`],
+      ["resource", `vesta://memory/${document.sourceType}/${document.id}`],
       ["timestamp", document.updatedAt],
       ["tags", ["memory", document.sourceType]],
       ["source_type", document.sourceType],
@@ -225,7 +225,7 @@ const summaryFile = (summary: SummaryDocumentRecord) =>
       ["type", "Summary"],
       ["title", summary.title],
       ["description", firstLine(summary.body)],
-      ["resource", `lares://summaries/${summary.periodType}/${summary.periodStart}`],
+      ["resource", `vesta://summaries/${summary.periodType}/${summary.periodStart}`],
       ["timestamp", summary.updatedAt],
       ["tags", ["summary", summary.periodType, summary.status]],
       ["period_type", summary.periodType],

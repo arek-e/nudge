@@ -6,7 +6,7 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db, type AgentRunOutputRecord } from "@lares/db";
+import { Db, type AgentRunOutputRecord } from "@vesta/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
@@ -14,7 +14,7 @@ import {
   PrimitiveWorkflows,
   workflowStepName,
   type WorkflowVersion,
-} from "@lares/effect-services";
+} from "@vesta/effect-services";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
@@ -56,7 +56,7 @@ const recentToolEvent = (event: RecentToolEvent) => event;
 
 const agentRunOutput = (output: Pick<AgentRunOutputRecord, "outputId" | "outputType">) => output;
 
-interface LaresUserRef {
+interface VestaUserRef {
   readonly displayName: string;
   readonly id: string;
 }
@@ -71,7 +71,7 @@ interface LoopIntakeDraftInput {
     readonly text: string;
   }>;
   readonly message: string;
-  readonly user: LaresUserRef;
+  readonly user: VestaUserRef;
 }
 
 interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
@@ -201,19 +201,19 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private resolveUser(request: Request) {
     return {
-      displayName: request.headers.get("x-lares-user-display-name") ?? "Lares User",
-      id: request.headers.get("x-lares-user-id") ?? "dev-user",
+      displayName: request.headers.get("x-vesta-user-display-name") ?? "Vesta User",
+      id: request.headers.get("x-vesta-user-id") ?? "dev-user",
     };
   }
 
   private async verifyInternalRequest(
     request: Request,
-    user: LaresUserRef,
+    user: VestaUserRef,
     conversationId: string,
   ) {
     const secret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
     if (!secret) return true;
-    const providedSignature = request.headers.get("x-lares-internal-signature");
+    const providedSignature = request.headers.get("x-vesta-internal-signature");
     if (!providedSignature) return false;
     const expectedSignature = await signAgentRequest(secret, user.id, conversationId);
     return providedSignature === expectedSignature;
@@ -229,7 +229,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async metadata(request: Request) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -251,7 +251,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async listRecentSignals(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -298,7 +298,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async retrieveMemory(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -353,7 +353,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async prepareReply(request: Request) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -451,10 +451,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         extraction = await runBraintrustSpan(
           {
             attributes: {
-              "lares.ai.changed_text_chars": changedText.length,
-              "lares.ai.local_date": localDate,
-              "lares.ai.revision_id": String(body.revisionId ?? ""),
-              "lares.ai.system": "cloudflare-think",
+              "vesta.ai.changed_text_chars": changedText.length,
+              "vesta.ai.local_date": localDate,
+              "vesta.ai.revision_id": String(body.revisionId ?? ""),
+              "vesta.ai.system": "cloudflare-think",
             },
             name: "journal.interpret.extract_daily_note",
             type: "task",
@@ -505,7 +505,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json(extraction);
   }
 
-  private async retrieveMemoryResults(user: LaresUserRef, query: string, limit: number) {
+  private async retrieveMemoryResults(user: VestaUserRef, query: string, limit: number) {
     if (query.trim().length === 0) return [];
     try {
       const memoryIndexLayer = this.env.TURBOPUFFER_API_KEY
@@ -594,7 +594,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return result.toTextStreamResponse({
       headers: {
         "cache-control": "no-cache",
-        "x-lares-conversation-id": input.conversationId,
+        "x-vesta-conversation-id": input.conversationId,
       },
     });
   }
@@ -627,7 +627,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
           occurredAt,
           payload: { note: input.message },
           schemaVersion: 1,
-          source: "lares_agent_intake",
+          source: "vesta_agent_intake",
           type: "manual_check_in_submitted",
           user: input.user,
         }),
@@ -723,10 +723,10 @@ export interface DailyNoteAnalysisWorkflowParams {
   workflowVersion?: WorkflowVersion;
 }
 
-type LaresWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
+type VestaWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
 
-export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowParams> {
-  async run(event: WorkflowEvent<LaresWorkflowParams>, step: WorkflowStep) {
+export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowParams> {
+  async run(event: WorkflowEvent<VestaWorkflowParams>, step: WorkflowStep) {
     const input = event.payload;
     const workflowVersion = input.workflowVersion ?? currentWorkflowVersion;
 
@@ -783,7 +783,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
             ? await signAgentRequest(internalSecret, input.userId, "journal")
             : undefined;
           const response = await agent.fetch(
-            new Request("https://lares.local/journal/interpret", {
+            new Request("https://vesta.local/journal/interpret", {
               body: JSON.stringify({
                 changedText: input.changedText,
                 documentId: input.documentId,
@@ -792,10 +792,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               }),
               headers: {
                 "content-type": "application/json",
-                "x-lares-conversation-id": "journal",
-                ...(internalSignature ? { "x-lares-internal-signature": internalSignature } : {}),
-                "x-lares-user-display-name": input.userDisplayName,
-                "x-lares-user-id": input.userId,
+                "x-vesta-conversation-id": "journal",
+                ...(internalSignature ? { "x-vesta-internal-signature": internalSignature } : {}),
+                "x-vesta-user-display-name": input.userDisplayName,
+                "x-vesta-user-id": input.userId,
               },
               method: "POST",
             }),

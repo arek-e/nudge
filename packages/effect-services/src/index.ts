@@ -1,11 +1,11 @@
 import { Context, Effect, Layer } from "effect";
-import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@lares/db";
+import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@vesta/db";
 import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
   defaultFrame,
   type DevUser,
-} from "@lares/domain";
+} from "@vesta/domain";
 
 export * from "./okf";
 export * from "./agent-prompts";
@@ -40,7 +40,7 @@ export class AuthService extends Context.Service<
   {
     readonly currentUser: Effect.Effect<DevUser>;
   }
->()("lares/AuthService") {
+>()("vesta/AuthService") {
   static readonly layerDev = Layer.succeed(AuthService)({
     currentUser: Effect.succeed({
       id: "dev-user",
@@ -78,7 +78,7 @@ const sha256Hex = (value: string) =>
   });
 
 const memoryNamespaceForUser = (userId: string) =>
-  Effect.map(sha256Hex(userId), (hash) => `lares-user-${hash.slice(0, 48)}`);
+  Effect.map(sha256Hex(userId), (hash) => `vesta-user-${hash.slice(0, 48)}`);
 
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
@@ -201,7 +201,7 @@ export class MemoryIndex extends Context.Service<
     }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
     readonly deleteUserNamespace: (input: { readonly user: DbUser }) => Effect.Effect<void, Error>;
   }
->()("lares/MemoryIndex") {
+>()("vesta/MemoryIndex") {
   static readonly layerMemory = Layer.succeed(MemoryIndex)({
     deleteUserNamespace: () => Effect.void,
     indexPending: (input) =>

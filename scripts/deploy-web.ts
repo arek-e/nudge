@@ -66,4 +66,4 @@ const deployArgs = [
 run("mise exec -- bun run build", { cwd: web });
 run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 
-console.log(`${dryRun ? "Dry-run verified" : "Deployed"} lares-web at ${version}`);
+console.log(`${dryRun ? "Dry-run verified" : "Deployed"} vesta-web at ${version}`);

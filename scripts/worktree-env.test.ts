@@ -4,31 +4,31 @@ const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 describe("worktree direnv environment", () => {
   test("assigns a stable high-band dev environment for a worktree", () => {
-    const first = loadWorktreeEnv("/tmp/lares-alpha");
-    const second = loadWorktreeEnv("/tmp/lares-alpha");
+    const first = loadWorktreeEnv("/tmp/vesta-alpha");
+    const second = loadWorktreeEnv("/tmp/vesta-alpha");
 
     expect(second).toEqual(first);
 
-    const devPort = Number(first.LARES_DEV_PORT);
+    const devPort = Number(first.VESTA_DEV_PORT);
     expect(devPort).toBeGreaterThanOrEqual(40000);
     expect(devPort).toBeLessThanOrEqual(60999);
-    expect(Number(first.LARES_WRANGLER_INSPECTOR_PORT)).toBe(devPort + 1);
-    expect(first.LARES_DEV_URL).toBe(`http://localhost:${devPort}`);
-    expect(first.BETTER_AUTH_URL).toBe(first.LARES_DEV_URL);
-    expect(first.LARES_WORKTREE_ROOT).toBe("/tmp/lares-alpha");
-    expect(first.LARES_WRANGLER_PERSIST_TO).toBe("/tmp/lares-alpha/apps/engine/.wrangler/state");
+    expect(Number(first.VESTA_WRANGLER_INSPECTOR_PORT)).toBe(devPort + 1);
+    expect(first.VESTA_DEV_URL).toBe(`http://localhost:${devPort}`);
+    expect(first.BETTER_AUTH_URL).toBe(first.VESTA_DEV_URL);
+    expect(first.VESTA_WORKTREE_ROOT).toBe("/tmp/vesta-alpha");
+    expect(first.VESTA_WRANGLER_PERSIST_TO).toBe("/tmp/vesta-alpha/apps/engine/.wrangler/state");
   });
 
   test("keeps explicit local overrides while deriving dependent defaults", () => {
-    const env = loadWorktreeEnv("/tmp/lares-alpha", {
+    const env = loadWorktreeEnv("/tmp/vesta-alpha", {
       BETTER_AUTH_URL: "http://localhost:45557",
-      LARES_DEV_PORT: "45555",
+      VESTA_DEV_PORT: "45555",
     });
 
-    expect(env.LARES_DEV_PORT).toBe("45555");
-    expect(env.LARES_DEV_URL).toBe("http://localhost:45555");
+    expect(env.VESTA_DEV_PORT).toBe("45555");
+    expect(env.VESTA_DEV_URL).toBe("http://localhost:45555");
     expect(env.BETTER_AUTH_URL).toBe("http://localhost:45557");
-    expect(env.LARES_WRANGLER_INSPECTOR_PORT).toBe("45556");
+    expect(env.VESTA_WRANGLER_INSPECTOR_PORT).toBe("45556");
   });
 });
 
@@ -42,7 +42,7 @@ function loadWorktreeEnv(root: string, env: Record<string, string> = {}) {
     ${assignments}
     ${exportLine}
     . ./scripts/worktree-env.sh
-    lares_export_worktree_env ${shellQuote(root)}
+    vesta_export_worktree_env ${shellQuote(root)}
     env | sort
   `;
   const result = Bun.spawnSync({
@@ -58,7 +58,7 @@ function loadWorktreeEnv(root: string, env: Record<string, string> = {}) {
     result.stdout
       .toString()
       .split("\n")
-      .filter((line) => line.startsWith("LARES_") || line.startsWith("BETTER_AUTH_URL="))
+      .filter((line) => line.startsWith("VESTA_") || line.startsWith("BETTER_AUTH_URL="))
       .map((line) => {
         const equalsIndex = line.indexOf("=");
         return [line.slice(0, equalsIndex), line.slice(equalsIndex + 1)];

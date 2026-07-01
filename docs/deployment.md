@@ -1,6 +1,6 @@
 # Deployment
 
-Lares deploys should be tied to Git commits so Cloudflare Worker versions, trace logs, and rollback decisions can be mapped back to source code.
+Vesta deploys should be tied to Git commits so Cloudflare Worker versions, trace logs, and rollback decisions can be mapped back to source code.
 
 ## Normal Flow
 
@@ -68,7 +68,7 @@ Preferred rollback paths:
 After rollback, verify:
 
 ```bash
-curl https://lares-web.teampitch.workers.dev/health
+curl https://vesta-web.teampitch.workers.dev/health
 bun run traces:recent
 ```
 

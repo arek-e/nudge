@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Db } from "@lares/db";
+import { Db } from "@vesta/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,

@@ -16,7 +16,7 @@ import {
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
   safeErrorFields,
-} from "@lares/observability";
+} from "@vesta/observability";
 import type { Env } from "./env";
 import {
   ensureBraintrustTracing,
@@ -33,7 +33,7 @@ type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;
 
 initLogger({
   drain: () => {},
-  env: { service: "lares-web" },
+  env: { service: "vesta-web" },
   redact: true,
   silent: true,
 });
@@ -136,7 +136,7 @@ export const requestObservability = (): AppMiddleware => {
     c.set("wideEvent", {
       event: "http_request_completed",
       logKind: "wide_event",
-      service: "lares-web",
+      service: "vesta-web",
       environment: c.env.ENVIRONMENT ?? "unknown",
       version: c.env.APP_VERSION ?? "0.0.0",
       requestId: id,
@@ -155,9 +155,9 @@ export const requestObservability = (): AppMiddleware => {
         {
           attributes: {
             "http.request.method": c.req.method,
-            "lares.environment": c.env.ENVIRONMENT ?? "unknown",
-            "lares.request_id": id,
-            "lares.version": c.env.APP_VERSION ?? "0.0.0",
+            "vesta.environment": c.env.ENVIRONMENT ?? "unknown",
+            "vesta.request_id": id,
+            "vesta.version": c.env.APP_VERSION ?? "0.0.0",
             "url.path": path,
           },
           name: `${c.req.method} ${path}`,
@@ -217,7 +217,7 @@ export const requestObservability = (): AppMiddleware => {
                     JSON.stringify({
                       event: "trace_cache_prune_failed",
                       logKind: "wide_event",
-                      service: "lares-web",
+                      service: "vesta-web",
                       requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
                       ...safeErrorFields(cause),
                     }),
@@ -280,7 +280,7 @@ export const runWithRequestSpan = async <A>(
         path: nullableStringField(event, "path"),
         requestId: nullableStringField(event, "requestId"),
         routeName: nullableStringField(event, "routeName"),
-        service: stringField(event, "service", "lares-web"),
+        service: stringField(event, "service", "vesta-web"),
         spanId,
         startedAt: startedAtIso,
         status: spanStatus,
@@ -329,7 +329,7 @@ const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
           JSON.stringify({
             event: "trace_event_persist_failed",
             logKind: "wide_event",
-            service: "lares-web",
+            service: "vesta-web",
             requestId: nullableStringField(event, "requestId"),
             ...safeErrorFields(cause),
           }),
@@ -367,7 +367,7 @@ const persistTraceSpanRow = (
           JSON.stringify({
             event: "trace_span_persist_failed",
             logKind: "wide_event",
-            service: "lares-web",
+            service: "vesta-web",
             requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
             ...safeErrorFields(cause),
           }),
@@ -401,7 +401,7 @@ const runBackgroundPromise = (c: AppContext, promise: Promise<unknown>, failureE
       JSON.stringify({
         event: failureEvent,
         logKind: "wide_event",
-        service: "lares-web",
+        service: "vesta-web",
         requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
         ...safeErrorFields(cause),
       }),

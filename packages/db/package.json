@@ -1,5 +1,5 @@
 {
-  "name": "@lares/db",
+  "name": "@vesta/db",
   "private": true,
   "type": "module",
   "exports": {

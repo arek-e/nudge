@@ -25,10 +25,10 @@ const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
 
 await mkdir(logDir, { recursive: true });
 
-console.log(`Lares dev server: ${url}`);
-console.log(`Lares local auth URL: ${authUrl}`);
-console.log(`Lares Wrangler state: ${persistTo}`);
-console.log(`Lares local logs: ${logDir}`);
+console.log(`Vesta dev server: ${url}`);
+console.log(`Vesta local auth URL: ${authUrl}`);
+console.log(`Vesta Wrangler state: ${persistTo}`);
+console.log(`Vesta local logs: ${logDir}`);
 
 await run(["bun", "run", "--cwd", "apps/web", "build"], "build.log");
 await run(

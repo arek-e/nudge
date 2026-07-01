@@ -1,13 +1,13 @@
 {
-  "name": "@lares/effect-services",
+  "name": "@vesta/effect-services",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@lares/db": "workspace:*",
-    "@lares/domain": "workspace:*",
+    "@vesta/db": "workspace:*",
+    "@vesta/domain": "workspace:*",
     "effect": "catalog:"
   }
 }

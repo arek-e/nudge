@@ -7,7 +7,7 @@ export const ensureBraintrustTracing = (apiKey?: string) => {
   const normalizedApiKey = apiKey?.trim() || undefined;
   if (loggerInitialized && loggerApiKey === normalizedApiKey) return;
   initLogger({
-    projectName: "Lares",
+    projectName: "Vesta",
     ...(normalizedApiKey ? { apiKey: normalizedApiKey } : {}),
   });
   loggerInitialized = true;

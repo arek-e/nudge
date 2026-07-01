@@ -1,10 +1,12 @@
 import type { Handler, Hono } from "hono";
 import { type ObservabilityHonoEnv, wideEventFields } from "../observability";
 
+const vestaAppIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="vesta-app-icon-title vesta-app-icon-desc"><title id="vesta-app-icon-title">Vesta app icon</title><desc id="vesta-app-icon-desc">A Vesta ember mark on a warm rounded square background.</desc><rect width="256" height="256" rx="46" fill="#f7f3ec"/><g transform="translate(-59.6519,-31.2324)"><g transform="matrix(1.7664652,0,0,1.7664652,-71.621554,-202.73348)"><path fill="#ec5c29" d="m 142.28728,226.43281 c -10.75786,-1.65243 -19.76579,-8.03254 -24.00309,-17.00074 -7.70875,-16.31563 -1.24475,-36.24872 20.656,-63.6971 5.20129,-6.51882 6.59975,-7.57737 9.16122,-6.93447 2.73501,0.68642 15.71807,16.93672 21.7567,27.23174 6.88418,11.73665 9.63779,20.15238 9.65419,29.50574 0.0153,9.32262 -2.72836,16.44328 -8.60225,22.31718 -6.64934,6.64931 -18.34955,10.15563 -28.62277,8.57765 z m 9.09811,-22.98888 c 1.90984,-3.58676 7.20067,-8.59374 10.97361,-10.38504 1.67301,-0.79429 3.03758,-1.58435 3.03237,-1.7557 -0.005,-0.17131 -1.34262,-0.96572 -2.97204,-1.76536 -1.62944,-0.7996 -4.21751,-2.52646 -5.7512,-3.83742 -3.03812,-2.59692 -7.31858,-9.2707 -8.48945,-13.23614 -0.73758,-2.49807 -0.73758,-2.49807 -1.51429,0.0944 -2.04619,6.82961 -7.46369,13.38649 -13.89051,16.81196 -3.76852,2.0086 -3.76852,2.0086 -0.13335,3.82512 6.30673,3.15148 11.68431,9.44269 13.79505,16.13873 1.01301,3.21363 1.01301,3.21363 2.26196,0.0123 0.68692,-1.76052 1.89645,-4.41694 2.68783,-5.90312 z"/><path fill="#1a2735" d="M 140.45499,269.46764 C 126.39094,267.82602 112.96308,261.27256 102.65393,251.01878 91.628734,240.0528 86.86117,228.34638 90.81498,221.949 c 2.390285,-3.86756 10.35281,-6.28197 15.31574,-4.64408 2.61587,0.86334 4.34686,2.74647 7.97774,8.67902 8.43887,13.78838 22.77383,20.86376 38.11263,18.81146 13.01947,-1.74199 22.24538,-7.92339 29.62347,-19.84789 4.11421,-6.64942 5.47747,-7.73236 10.16017,-8.07106 6.89037,-0.4984 12.69387,2.875 13.64217,7.92973 0.551,2.93718 -0.46786,6.99066 -3.04189,12.102 -5.66521,11.24964 -15.36721,20.51956 -27.78756,26.55015 -7.0529,3.42446 -12.96856,5.14882 -20.63088,6.01366 -6.05296,0.68317 -7.84625,0.6826 -13.73158,-0.005 z"/></g></g></svg>`;
+
 export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   const versionHandler: Handler<ObservabilityHonoEnv> = (c) => {
     return c.json({
-      service: "lares-web",
+      service: "vesta-web",
       version: c.env.APP_VERSION ?? "0.0.0",
     });
   };
@@ -14,15 +16,15 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
   app.get("/manifest.webmanifest", wideEventFields({ routeName: "manifest" }), (c) => {
     return c.json({
-      name: "Lares",
-      short_name: "Lares",
+      name: "Vesta",
+      short_name: "Vesta",
       description: "A private daily operating loop for personal context and follow-through.",
       start_url: "/",
       scope: "/",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
-      background_color: "#111111",
-      theme_color: "#111111",
+      background_color: "#1a2735",
+      theme_color: "#1a2735",
       categories: ["productivity", "lifestyle"],
       icons: [
         {
@@ -62,20 +64,22 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111111" />
+    <meta name="theme-color" content="#1a2735" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Lares" />
-    <title>Lares Offline</title>
+    <meta name="apple-mobile-web-app-title" content="Vesta" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <title>Vesta Offline</title>
   </head>
-  <body><main><p>Lares</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Lares.</p></main></body>
+  <body><main><p>Vesta</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Vesta.</p></main></body>
 </html>`);
   });
 
   app.get("/icons/icon.svg", wideEventFields({ routeName: "pwa.icon" }), (c) => {
     c.header("content-type", "image/svg+xml; charset=utf-8");
-    return c.body(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111111"/><path d="M256 96c70.7 0 128 57.3 128 128 0 96-128 192-128 192S128 320 128 224c0-70.7 57.3-128 128-128Z" fill="#f4f1eb"/><circle cx="256" cy="224" r="56" fill="#111111"/></svg>`,
-    );
+    return c.body(vestaAppIconSvg);
   });
 
   app.get("/", wideEventFields({ routeName: "today" }), (c) => {
@@ -84,15 +88,16 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111111" />
+    <meta name="theme-color" content="#1a2735" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Lares" />
+    <meta name="apple-mobile-web-app-title" content="Vesta" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>Lares Daily Operating Loop</title>
+    <title>Vesta Daily Operating Loop</title>
     <style>
       :root {
         color-scheme: dark;
@@ -105,8 +110,8 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at top left, rgba(196, 167, 111, 0.24), transparent 30rem),
-          linear-gradient(180deg, #15120f 0%, #0d1117 52%, #080a0f 100%);
+          radial-gradient(circle at top left, rgba(236, 92, 41, 0.24), transparent 30rem),
+          linear-gradient(180deg, #1a2735 0%, #0d1117 52%, #080a0f 100%);
       }
       main {
         width: min(100%, 44rem);
@@ -118,7 +123,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
       }
       .eyebrow {
         margin: 0 0 0.5rem;
-        color: #c4a76f;
+        color: #ec5c29;
         font-size: 0.8rem;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -170,8 +175,8 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
         border: 0;
         border-radius: 999px;
         padding: 0 1rem;
-        background: #c4a76f;
-        color: #15120f;
+        background: #ec5c29;
+        color: #1a2735;
         font: inherit;
         font-weight: 800;
         text-decoration: none;
@@ -210,7 +215,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
         background: rgba(255, 255, 255, 0.04);
       }
       .event-type {
-        color: #c4a76f;
+        color: #ec5c29;
         font-size: 0.78rem;
         font-weight: 800;
         letter-spacing: 0.08em;
@@ -243,21 +248,21 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   <body>
     <main>
       <header>
-        <p class="eyebrow">Lares</p>
+        <p class="eyebrow">Vesta</p>
         <h1>Daily Operating Loop</h1>
-        <p class="summary">Your private operating layer for what changed, what matters now, and what Lares should remember before it helps you act.</p>
+        <p class="summary">Your private operating layer for what changed, what matters now, and what Vesta should remember before it helps you act.</p>
       </header>
 
       <section class="card" aria-labelledby="today-title">
         <p class="eyebrow">Today</p>
         <h2 id="today-title">Start with the current state</h2>
-        <p class="summary">Capture priorities, constraints, energy, and follow-ups. Lares stores this as user-owned context for the Daily Operating Loop.</p>
+        <p class="summary">Capture priorities, constraints, energy, and follow-ups. Vesta stores this as user-owned context for the Daily Operating Loop.</p>
       </section>
 
       <section class="card" aria-labelledby="check-in-title">
         <h2 id="check-in-title">Morning check-in</h2>
         <form id="check-in-form">
-          <label for="note">What should Lares know this morning?</label>
+          <label for="note">What should Vesta know this morning?</label>
           <textarea id="note" name="note" autocomplete="off" placeholder="Priorities, energy, constraints, people to follow up with..."></textarea>
           <div class="actions">
             <button type="submit">Save check-in</button>
@@ -398,7 +403,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
     return c.json({
       ok: true,
-      service: "lares-web",
+      service: "vesta-web",
       environment: env.ENVIRONMENT ?? "unknown",
       version: env.APP_VERSION ?? "0.0.0",
       bindings: {

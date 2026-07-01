@@ -18,7 +18,7 @@
       },
       {
         "groupName": "workspace",
-        "elementNamePattern": ["@lares/**"]
+        "elementNamePattern": ["@vesta/**"]
       }
     ],
     "groups": [

@@ -20,16 +20,16 @@ import {
   deriveJourneyDayGroups,
   HomeDashboard,
   JourneyTimeline,
-  LaresAppShell,
-  LaresChat,
+  VestaAppShell,
+  VestaChat,
   LoginCard,
   plainTextToRichTextDocument,
-  type LaresChatAttachment,
-  type LaresChatMessage,
+  type VestaChatAttachment,
+  type VestaChatMessage,
   type RichTextDocument,
   Surface,
   WritingDrawer,
-} from "@lares/ui";
+} from "@vesta/ui";
 import { apiClient, streamConversationMessage } from "./api-client";
 import { loginAuthMethodsForView } from "./login-preview";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
@@ -155,7 +155,7 @@ function AppShell() {
   });
 
   if (!session.data) {
-    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Lares" />;
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
   }
 
   const loginAuthMethods = loginAuthMethodsForView(session.data, window.location.search);
@@ -236,8 +236,8 @@ const chatMessageId = () => crypto.randomUUID();
 
 function ChatScreen() {
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<ReadonlyArray<LaresChatAttachment>>([]);
-  const [messages, setMessages] = useState<ReadonlyArray<LaresChatMessage>>([]);
+  const [attachments, setAttachments] = useState<ReadonlyArray<VestaChatAttachment>>([]);
+  const [messages, setMessages] = useState<ReadonlyArray<VestaChatMessage>>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -276,7 +276,7 @@ function ChatScreen() {
         queryClient.invalidateQueries({ queryKey: ["summaries"] }),
       ]);
     } catch {
-      setError("Could not reach Lares. Try again.");
+      setError("Could not reach Vesta. Try again.");
       setMessages((current) => current.filter((item) => item.id !== assistantId));
     } finally {
       setSending(false);
@@ -284,7 +284,7 @@ function ChatScreen() {
   };
 
   return (
-    <LaresChat
+    <VestaChat
       attachments={attachments}
       error={error}
       input={input}
@@ -432,7 +432,7 @@ function ActionsScreen() {
   });
 
   return (
-    <LaresAppShell>
+    <VestaAppShell>
       <Surface eyebrow="AI" title="Actions" primary>
         <div className="mt-4 grid gap-3">
           {latestRun ? (
@@ -514,7 +514,7 @@ function ActionsScreen() {
           ))}
         </div>
       </Surface>
-    </LaresAppShell>
+    </VestaAppShell>
   );
 }
 
@@ -529,7 +529,7 @@ function SettingsScreen() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `lares-export-${new Date().toISOString()}.json`;
+      link.download = `vesta-export-${new Date().toISOString()}.json`;
       link.click();
       URL.revokeObjectURL(url);
     },
@@ -542,12 +542,12 @@ function SettingsScreen() {
   });
   const addPasskey = useMutation({
     mutationFn: async () => {
-      const result = await authClient.passkey.addPasskey({ name: "Lares passkey" });
+      const result = await authClient.passkey.addPasskey({ name: "Vesta passkey" });
       if (result.error) throw new Error("Could not add passkey");
     },
   });
   return (
-    <LaresAppShell>
+    <VestaAppShell>
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
       </Surface>
@@ -590,7 +590,7 @@ function SettingsScreen() {
           </button>
         </div>
       </Surface>
-    </LaresAppShell>
+    </VestaAppShell>
   );
 }
 
@@ -629,7 +629,7 @@ function TodayScreen() {
   });
 
   return (
-    <LaresAppShell>
+    <VestaAppShell>
       <HomeDashboard
         eventCount={events.data?.events.length ?? 0}
         hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
@@ -658,7 +658,7 @@ function TodayScreen() {
           )}
         </div>
       </Surface>
-    </LaresAppShell>
+    </VestaAppShell>
   );
 }
 
@@ -667,11 +667,11 @@ function JourneyScreen() {
   const groups = events.data ? deriveJourneyDayGroups(events.data.events) : undefined;
 
   return (
-    <LaresAppShell>
+    <VestaAppShell>
       <Surface id="events-title" eyebrow="Loop history" title="Journey timeline">
         <JourneyTimeline groups={groups} loading={events.isLoading} error={events.isError} />
       </Surface>
-    </LaresAppShell>
+    </VestaAppShell>
   );
 }
 
@@ -679,7 +679,7 @@ function InsightsScreen() {
   const summaries = useSummaries();
 
   return (
-    <LaresAppShell>
+    <VestaAppShell>
       <Surface id="insights-title" eyebrow="Archive" title="Summaries">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).map((summary) => (
@@ -693,7 +693,7 @@ function InsightsScreen() {
           ))}
         </div>
       </Surface>
-    </LaresAppShell>
+    </VestaAppShell>
   );
 }
 

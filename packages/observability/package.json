@@ -1,5 +1,5 @@
 {
-  "name": "@lares/observability",
+  "name": "@vesta/observability",
   "private": true,
   "type": "module",
   "exports": {
