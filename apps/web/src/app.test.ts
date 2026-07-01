@@ -153,6 +153,14 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
   });
 
+  test("protected API routes fail closed in production when Better Auth is not configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/api/signals", {}, { ...env, ENVIRONMENT: "production" });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
+  });
+
   test("POST /api/auth/sign-out clears Better Auth cookies", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(

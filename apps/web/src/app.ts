@@ -1041,6 +1041,17 @@ async function resolveCurrentUser(input: {
     };
   }
 
+  if (
+    input.env.ENVIRONMENT !== "local" &&
+    input.env.ENVIRONMENT !== "test" &&
+    input.env.ALLOW_DEV_AUTH !== "true"
+  ) {
+    return {
+      authMode: "unauthenticated" as const,
+      user: null,
+    };
+  }
+
   return {
     authMode: "dev" as const,
     user: await Effect.runPromise(Effect.provide(currentUser, AuthService.layerDev)),

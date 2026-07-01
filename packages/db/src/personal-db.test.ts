@@ -2,6 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Db } from "./index";
 
+const resolveD1Db = (database: D1Database) =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        return yield* Db;
+      }),
+      Db.layerD1(database),
+    ),
+  );
+
 describe("Db", () => {
   test("appends and lists recent events scoped to a user", async () => {
     const program = Effect.gen(function* () {
@@ -196,6 +206,61 @@ describe("Db", () => {
     expect(result.pendingAfterReview).toEqual([]);
   });
 
+  test("reviewing a proposal can create its commitment in the same database operation", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const frame = yield* db.upsertCurrentFrame({
+        userId: "user-a",
+        key: "current_state",
+        title: "What matters now?",
+        prompt: "Synthesize recent signals into current context.",
+      });
+      const synthesis = yield* db.appendSynthesis({
+        userId: "user-a",
+        frameId: frame.id,
+        summary: "User has one open question.",
+        themes: ["current-context"],
+        openQuestions: ["What needs attention next?"],
+        sourceSignalIds: [],
+      });
+      const proposal = yield* db.appendProposal({
+        userId: "user-a",
+        synthesisId: synthesis.id,
+        kind: "clarify",
+        title: "Clarify next attention point",
+        body: "Answer: What needs attention next?",
+        rationale: "Created from an open question in the synthesis.",
+      });
+
+      const review = yield* db.reviewProposal({
+        userId: "user-a",
+        proposalId: proposal.id,
+        decision: "accepted",
+        commitment: {
+          title: proposal.title,
+          body: proposal.body,
+        },
+      });
+      const commitments = yield* db.listCommitments({ userId: "user-a", limit: 10 });
+
+      return { commitments, proposal, review };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.review.decision).toBe("accepted");
+    expect(result.commitments).toEqual([
+      expect.objectContaining({
+        proposalId: result.proposal.id,
+        reviewId: result.review.id,
+        status: "active",
+        title: "Clarify next attention point",
+      }),
+    ]);
+  });
+
   test("stores memory documents with chunks and pending index jobs", async () => {
     const program = Effect.gen(function* () {
       const db = yield* Db;
@@ -334,5 +399,98 @@ describe("Db", () => {
     expect(result.exportData.summaryDocuments).toHaveLength(1);
     expect(result.exportData.agentRuns).toHaveLength(1);
     expect(result.exportData.agentRunOutputs).toHaveLength(2);
+  });
+
+  test("D1 extracted item status updates do not return another user's item when the scoped update misses", async () => {
+    const privateItemRow = [
+      "item-1",
+      "user-b",
+      "revision-1",
+      "note-1",
+      "task",
+      "Private task",
+      "private",
+      "proposed",
+      null,
+      null,
+      null,
+      null,
+      1,
+      "task:private",
+      "{}",
+      "2026-06-18T10:00:00.000Z",
+      "2026-06-18T10:00:00.000Z",
+    ];
+    const database = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          all: async () => ({ results: [] }),
+          first: async () => null,
+          raw: async () =>
+            sql.startsWith("select") && values.length === 1 && values[0] === "item-1"
+              ? [privateItemRow]
+              : [],
+          run: async () => ({ success: true }),
+        }),
+      }),
+    } as D1Database;
+    const db = await resolveD1Db(database);
+
+    try {
+      await Effect.runPromise(
+        db.updateExtractedItemStatus({
+          itemId: "item-1",
+          status: "accepted",
+          userId: "user-a",
+        }),
+      );
+      throw new Error("Expected extracted item lookup to stay user-scoped");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("Extracted item not found");
+    }
+  });
+
+  test("D1 outcome recording does not return another user's outcome when the scoped write misses", async () => {
+    const privateOutcomeRow = [
+      "outcome-1",
+      "user-b",
+      "commitment-1",
+      "completed",
+      "done",
+      "2026-06-18T10:00:00.000Z",
+      "2026-06-18T10:00:00.000Z",
+    ];
+    const database = {
+      batch: async (statements: ReadonlyArray<unknown>) =>
+        statements.map(() => ({ success: true })),
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          all: async () => ({ results: [] }),
+          first: async () => null,
+          raw: async () =>
+            sql.startsWith("select") && values.length === 1 && values[0] === "commitment-1"
+              ? [privateOutcomeRow]
+              : [],
+          run: async () => ({ success: true }),
+        }),
+      }),
+    } as D1Database;
+    const db = await resolveD1Db(database);
+
+    try {
+      await Effect.runPromise(
+        db.recordOutcome({
+          commitmentId: "commitment-1",
+          note: "done",
+          result: "completed",
+          userId: "user-a",
+        }),
+      );
+      throw new Error("Expected outcome lookup to stay user-scoped");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("Commitment not found");
+    }
   });
 });
