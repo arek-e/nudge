@@ -98,10 +98,9 @@ describe("LaresChat", () => {
 
     expect(html).toContain('data-slot="chat-composer-surface"');
     expect(html).toContain('placeholder="Message Lares"');
-    expect(html).toContain("bg-[var(--ui-surface-composer)]");
-    expect(html).toContain("text-[var(--ui-text-primary)]");
+    expect(html).toContain("bg-[#1d1d1d]");
+    expect(html).toContain("text-white");
     expect(html).toContain('aria-label="Send message"');
-    expect(html).not.toContain("bg-[#1d1d1d]");
     expect(html).not.toContain("bg-[#f7f7f4]");
     expect(html).not.toContain("text-[#242424]");
     expect(html).not.toContain("Full access");

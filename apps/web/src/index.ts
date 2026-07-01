@@ -1,13 +1,12 @@
 import { Think } from "@cloudflare/think";
 export { ContainerProxy, Sandbox } from "@cloudflare/sandbox";
-import type { LanguageModel } from "ai";
 import { Agent } from "agents";
-import * as ai from "ai";
+import { generateObject, smoothStream, streamText, type LanguageModel } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db } from "@lares/db";
+import { Db, type AgentRunOutputRecord } from "@lares/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
@@ -16,13 +15,25 @@ import {
   workflowStepName,
   type WorkflowVersion,
 } from "@lares/effect-services";
-import { ensureBraintrustTracing, wrapBraintrustAISDK } from "@lares/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
+import {
+  ensureBraintrustTracing,
+  runBraintrustSpan,
+  wrapBraintrustAISDK,
+} from "./braintrust-tracing";
+import {
+  DailyNoteExtractionHttpError,
+  dailyNoteAnalysisErrorCode,
+  dailyNoteAnalysisExtractionStepConfig,
+  dailyNoteAnalysisHttpStatus,
+  dailyNoteAnalysisResponseError,
+} from "./daily-note-analysis";
 
 const app = createApp();
-const { generateObject, smoothStream, streamText } = wrapBraintrustAISDK(ai);
+const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText });
+const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
 
 export default app;
 
@@ -38,6 +49,12 @@ interface UserAgentSessionState {
   readonly updatedAt: string | null;
   readonly userId: string;
 }
+
+type RecentToolEvent = UserAgentSessionState["recentToolEvents"][number];
+
+const recentToolEvent = (event: RecentToolEvent) => event;
+
+const agentRunOutput = (output: Pick<AgentRunOutputRecord, "outputId" | "outputType">) => output;
 
 interface LaresUserRef {
   readonly displayName: string;
@@ -83,14 +100,30 @@ const thinkDailyNoteExtractionSchema = z.object({
   items: z.array(thinkExtractedItemSchema).default([]),
 });
 
+const replyRequestBodySchema = z.object({
+  message: z.string().optional(),
+});
+
+const journalInterpretRequestBodySchema = z.object({
+  changedText: z.string().optional(),
+  documentId: z.string().optional(),
+  localDate: z.string().optional(),
+  revisionId: z.string().optional(),
+});
+
+const extractionHttpErrorBodySchema = z.object({
+  error: z.string().optional(),
+  errorCode: z.string().optional(),
+});
+
 type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> & {
   readonly model: string;
   readonly provider: "cloudflare-think";
 };
 
 const reasoningHarness = {
-  name: "think" as const,
-  runtime: "cloudflare-agents" as const,
+  name: "think",
+  runtime: "cloudflare-agents",
 };
 
 const initialUserAgentSessionState = {
@@ -241,7 +274,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: signals.length, tool: "listRecentSignals" as const },
+        recentToolEvent({ at: timestamp, resultCount: signals.length, tool: "listRecentSignals" }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -301,7 +334,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt,
       recentToolEvents: [
-        { at: timestamp, resultCount: retrieved.results.length, tool: "retrieveMemory" as const },
+        recentToolEvent({
+          at: timestamp,
+          resultCount: retrieved.results.length,
+          tool: "retrieveMemory",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -321,7 +358,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
-    const body = (await request.json()) as { readonly message?: string };
+    const body = replyRequestBodySchema.parse(await request.json());
     const message = String(body.message ?? "").trim();
     const previous = this.state ?? initialUserAgentSessionState;
     const now = new Date();
@@ -338,8 +375,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" as const },
-        { at: timestamp, resultCount: memoryResults.length, tool: "retrieveMemory" as const },
+        recentToolEvent({ at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" }),
+        recentToolEvent({
+          at: timestamp,
+          resultCount: memoryResults.length,
+          tool: "retrieveMemory",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -395,22 +436,53 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     if (!(await this.verifyInternalRequest(request, user, "journal"))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
-    const body = (await request.json()) as {
-      readonly changedText?: string;
-      readonly documentId?: string;
-      readonly localDate?: string;
-      readonly revisionId?: string;
-    };
+    const body = journalInterpretRequestBodySchema.parse(await request.json());
     const changedText = String(body.changedText ?? "").trim();
     const localDate = String(body.localDate ?? "today");
     let extraction: ThinkDailyNoteExtraction = {
       items: [],
-      model: this.env.THINK_MODEL,
+      model: extractionModelName(this.env),
       provider: "cloudflare-think",
     };
     if (changedText.length > 0) {
       const intake = await this.subAgent(LoopIntakeThinkAgent, "journal-current-state");
-      extraction = await intake.extractDailyNote({ changedText, localDate });
+      ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
+      try {
+        extraction = await runBraintrustSpan(
+          {
+            attributes: {
+              "lares.ai.changed_text_chars": changedText.length,
+              "lares.ai.local_date": localDate,
+              "lares.ai.revision_id": String(body.revisionId ?? ""),
+              "lares.ai.system": "cloudflare-think",
+            },
+            name: "journal.interpret.extract_daily_note",
+            type: "task",
+          },
+          () => intake.extractDailyNote({ changedText, localDate }),
+        );
+      } catch (error) {
+        const errorCode = dailyNoteAnalysisErrorCode(error);
+        const safeError =
+          error instanceof Error ? error : new Error("Daily note extraction failed");
+        console.warn(
+          JSON.stringify({
+            event: "daily_note_ai_extract_request_failed",
+            errorCode,
+            errorType: safeError.name,
+            logKind: "wide_event",
+            model: extractionModelName(this.env),
+            provider: "cloudflare-think",
+          }),
+        );
+        return Response.json(
+          {
+            error: dailyNoteAnalysisResponseError(errorCode),
+            errorCode,
+          },
+          { status: dailyNoteAnalysisHttpStatus(errorCode) },
+        );
+      }
     }
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -419,7 +491,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: changedText.length > 0 ? 1 : 0, tool: "reply" as const },
+        recentToolEvent({
+          at: timestamp,
+          resultCount: changedText.length > 0 ? 1 : 0,
+          tool: "reply",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -468,6 +544,11 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return createWorkersAI({ binding: this.env.AI })(this.env.THINK_MODEL);
   }
 
+  getExtractionModel(): LanguageModel {
+    ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
+    return createWorkersAI({ binding: this.env.AI })(extractionModelName(this.env));
+  }
+
   getSystemPrompt(): string {
     return loopIntakeSystemPrompt;
   }
@@ -490,9 +571,9 @@ export class LoopIntakeThinkAgent extends Think<Env> {
           `Draft rationale: ${input.draft.rationale}`,
         ].join("\n")
       : "No review draft was created.";
-    const result = streamText({
+    const result = tracedAI.streamText({
       abortSignal: AbortSignal.timeout(30_000),
-      experimental_transform: smoothStream({
+      experimental_transform: tracedAI.smoothStream({
         chunking: "word",
         delayInMs: 20,
       }),
@@ -522,9 +603,9 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     readonly changedText: string;
     readonly localDate: string;
   }): Promise<ThinkDailyNoteExtraction> {
-    const { object } = await generateObject({
+    const { object } = await tracedAI.generateObject({
       abortSignal: AbortSignal.timeout(10_000),
-      model: this.getModel(),
+      model: this.getExtractionModel(),
       prompt: dailyNoteExtractionPrompt(input),
       schema: thinkDailyNoteExtractionSchema,
     });
@@ -532,7 +613,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return {
       ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
       items: object.items,
-      model: this.env.THINK_MODEL,
+      model: extractionModelName(this.env),
       provider: "cloudflare-think",
     };
   }
@@ -583,7 +664,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
               createdAt: proposal.createdAt,
               updatedAt: proposal.updatedAt,
             },
-            requiresReview: true as const,
+            requiresReview: true,
             signal: {
               id: signal.id,
               userId: signal.userId,
@@ -671,10 +752,29 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
     workflowVersion: WorkflowVersion,
     step: WorkflowStep,
   ) {
+    await step.do(
+      workflowStepName(workflowVersion, "daily-note-analysis-mark-running"),
+      durableWorkflowStepConfig,
+      async () => {
+        await Effect.runPromise(
+          Effect.provide(
+            Effect.gen(function* () {
+              const database = yield* Db;
+              yield* database.markAgentRunRunning({
+                runId: input.runId,
+                userId: input.userId,
+              });
+            }),
+            Db.layerD1(this.env.DB),
+          ),
+        );
+      },
+    );
+
     try {
       const extraction = await step.do(
         workflowStepName(workflowVersion, "daily-note-analysis-extract-with-think"),
-        durableWorkflowStepConfig,
+        dailyNoteAnalysisExtractionStepConfig,
         async () => {
           const agentId = this.env.USER_AGENT_SESSION.idFromName(`${input.userId}:journal`);
           const agent = this.env.USER_AGENT_SESSION.get(agentId);
@@ -700,7 +800,16 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               method: "POST",
             }),
           );
-          if (!response.ok) throw new Error(`Think extraction failed with ${response.status}`);
+          if (!response.ok) {
+            let responseError: string | null = null;
+            try {
+              const body = extractionHttpErrorBodySchema.parse(await response.json());
+              responseError = body.errorCode ?? body.error ?? null;
+            } catch {
+              responseError = null;
+            }
+            throw new DailyNoteExtractionHttpError(response.status, responseError);
+          }
           return thinkDailyNoteExtractionSchema
             .extend({ model: z.string(), provider: z.literal("cloudflare-think") })
             .parse(await response.json());
@@ -806,12 +915,11 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
                 const database = yield* Db;
                 yield* database.completeAgentRun({
                   outputs: [
-                    ...extractedItems.map((item) => ({
-                      outputId: item.id,
-                      outputType: "extracted_item" as const,
-                    })),
-                    { outputId: dailySummary.id, outputType: "summary" as const },
-                    { outputId: weeklySummary.id, outputType: "summary" as const },
+                    ...extractedItems.map((item) =>
+                      agentRunOutput({ outputId: item.id, outputType: "extracted_item" }),
+                    ),
+                    agentRunOutput({ outputId: dailySummary.id, outputType: "summary" }),
+                    agentRunOutput({ outputId: weeklySummary.id, outputType: "summary" }),
                   ],
                   runId: input.runId,
                   status: "completed",
@@ -835,6 +943,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
       );
     } catch (error) {
       const safeError = error instanceof Error ? error : new Error("Daily note analysis failed");
+      const errorCode = dailyNoteAnalysisErrorCode(safeError);
       await step.do(
         workflowStepName(workflowVersion, "daily-note-analysis-mark-failed"),
         durableWorkflowStepConfig,
@@ -844,7 +953,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               Effect.gen(function* () {
                 const database = yield* Db;
                 yield* database.completeAgentRun({
-                  errorCode: safeError.name,
+                  errorCode,
                   runId: input.runId,
                   status: "failed",
                   userId: input.userId,
@@ -856,9 +965,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
           console.warn(
             JSON.stringify({
               event: "daily_note_ai_extract_failed",
+              errorCode,
               errorType: safeError.name,
               logKind: "wide_event",
-              model: this.env.THINK_MODEL,
+              model: extractionModelName(this.env),
               provider: "cloudflare-think",
             }),
           );

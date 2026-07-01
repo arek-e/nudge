@@ -158,10 +158,10 @@ Then open:
 +--------------------+       +----------------------+
 ```
 
-- **`apps/engine`**: Lares Engine, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, and Cloudflare Agent entrypoints.
+- **`apps/web`**: unified Lares app layer, Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, and PWA surface.
 - **`apps/web`**: React App Surface served by the Engine.
 - **`apps/ios`**: Native SwiftUI App Surface for iOS and Siri.
-- **`packages/engine-contract`**: shared TypeScript contract for the Engine API.
+- **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
 - **`packages/observability`**: shared tracing, Braintrust wrappers, trace-cache read models, request telemetry, and safe error fields.

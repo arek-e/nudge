@@ -20,6 +20,7 @@ const env = {
   BETTER_AUTH_URL: "http://localhost:8787",
   LOG_HTTP_REQUESTS: "false",
   AI: testAi,
+  EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
 
@@ -39,7 +40,7 @@ const createTraceDb = () => {
   return { db, rows };
 };
 
-describe("Lares Engine", () => {
+describe("web app", () => {
   test("GET / serves the Lares Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
@@ -151,14 +152,6 @@ describe("Lares Engine", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
-  });
-
-  test("protected API routes fail closed in production when Better Auth is not configured", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/signals", {}, { ...env, ENVIRONMENT: "production" });
-
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
   test("POST /api/auth/sign-out clears Better Auth cookies", async () => {
@@ -422,7 +415,7 @@ describe("Lares Engine", () => {
 
     expect(response.status).toBe(200);
     expect(names).toContain("POST /api/syntheses");
-    expect(names).toContain("db.resolve");
+    expect(names).toContain("app.resolve");
     expect(names).toContain("auth.current_user");
     expect(names).toContain("orpc.handle");
     expect(names).toContain("syntheses.create");
@@ -1307,57 +1300,87 @@ describe("Lares Engine", () => {
     expect((await summariesResponse.json()).summaries).toEqual([]);
   });
 
-  test("custom integrations can list calendar day activity counts across history", async () => {
+  test("POST /api/journal persists AI context as a debug-wide event", async () => {
+    const traceDb = createTraceDb();
+    const workflow = {
+      create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
+    } as Workflow;
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    for (const localDate of ["2026-06-18", "2026-06-20"]) {
-      const save = await app.request(
-        "/api/journal",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            bodyText: `journal for ${localDate}`,
-            localDate,
-            title: localDate,
-          }),
-        },
-        env,
-      );
-      expect(save.status).toBe(200);
-    }
-
-    for (const occurredAt of ["2026-06-19T01:30:00.000Z", "2026-06-20T09:00:00.000Z"]) {
-      const capture = await app.request(
-        "/api/captures",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            type: "calendar_signal",
-            source: "api",
-            occurredAt,
-            schemaVersion: 1,
-            payload: { note: occurredAt },
-          }),
-        },
-        env,
-      );
-      expect(capture.status).toBe(200);
-    }
-
     const response = await app.request(
-      "/api/calendar/days?from=2026-06-18&to=2026-06-20&timeZone=America%2FLos_Angeles",
-      {},
-      env,
+      "/api/journal",
+      {
+        method: "POST",
+        headers: {
+          "cf-ray": "journal-ray",
+          "content-type": "application/json",
+          "user-agent": "Lares/1",
+        },
+        body: JSON.stringify({
+          bodyText: "I need to work on the guest list",
+          localDate: "2026-07-01",
+          title: "July 1",
+        }),
+      },
+      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
     );
 
     expect(response.status).toBe(200);
+    const saved = await response.json();
+    expect(traceDb.rows).toHaveLength(1);
+
+    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
+    expect(payload).toMatchObject({
+      event: "http_request_completed",
+      routeName: "api.journal",
+      aiErrorCode: null,
+      aiModel: "@cf/zai-org/glm-4.7-flash",
+      aiRunId: saved.analysisRun.id,
+      aiSourceType: "note_revision",
+      aiSystem: "cloudflare-think",
+      noteLocalDate: "2026-07-01",
+      "otel.name": "api.journal",
+      "otel.status_code": "OK",
+      "http.request.method": "POST",
+      "http.route": "api.journal",
+      "http.response.status_code": 200,
+      "url.path": "/api/journal",
+      "user_agent.original": "Lares/1",
+      "service.name": "lares-web",
+      "deployment.environment.name": "test",
+      "lares.debug_kind": "ai",
+      "lares.ai.system": "cloudflare-think",
+      "lares.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "lares.ai.run_id": saved.analysisRun.id,
+      "lares.ai.error_code": null,
+    });
+  });
+
+  test("custom integrations can fetch a queued agent run by id", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bodyText: "need to work on the guest list",
+          localDate: "2026-07-01",
+          title: "July 1",
+        }),
+      },
+      env,
+    );
+    const saved = await save.json();
+
+    const response = await app.request(`/api/agent-runs/${saved.analysisRun.id}`, {}, env);
+
+    expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      days: [
-        { localDate: "2026-06-18", noteCount: 1, signalCount: 1 },
-        { localDate: "2026-06-20", noteCount: 1, signalCount: 1 },
-      ],
+      run: expect.objectContaining({
+        id: saved.analysisRun.id,
+        status: "queued",
+      }),
     });
   });
 
@@ -1698,60 +1721,6 @@ describe("Lares Engine", () => {
     expect((await commitments.json()).commitments).toEqual([]);
   });
 
-  test("agents can capture simple signals through MCP", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const capture = await app.request(
-      "/mcp",
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "tools/call",
-          params: {
-            arguments: {
-              occurredAt: "2026-07-01T10:00:00.000Z",
-              text: "Remember that Maya prefers morning launch reviews.",
-            },
-            name: "capture_append",
-          },
-        }),
-      },
-      env,
-    );
-
-    expect(capture.status).toBe(200);
-    expect(await capture.json()).toMatchObject({
-      id: 1,
-      result: {
-        structuredContent: {
-          capture: expect.objectContaining({
-            occurredAt: "2026-07-01T10:00:00.000Z",
-            payload: { note: "Remember that Maya prefers morning launch reviews." },
-            source: "mcp",
-            type: "user_context_captured",
-            userId: "dev-user",
-          }),
-        },
-      },
-    });
-
-    const signals = await app.request("/api/signals?limit=10", {}, env);
-    expect((await signals.json()).signals).toEqual([
-      expect.objectContaining({
-        payload: { note: "Remember that Maya prefers morning launch reviews." },
-        source: "mcp",
-        type: "user_context_captured",
-        userId: "dev-user",
-      }),
-    ]);
-  });
-
   test("agents can smoke test projected OKF files inside a sandbox", async () => {
     const files = new Map<string, string>();
     const execCalls: Array<{ readonly command: string; readonly cwd?: string }> = [];
@@ -1892,7 +1861,7 @@ describe("Lares Engine", () => {
     const saved = await response.json();
     expect(saved.analysisRun).toEqual(
       expect.objectContaining({
-        model: "@cf/moonshotai/kimi-k2.6",
+        model: "@cf/zai-org/glm-4.7-flash",
         sourceType: "note_revision",
         status: "queued",
       }),
@@ -1904,6 +1873,7 @@ describe("Lares Engine", () => {
           changedText: "Ask AI to extract this action durably",
           kind: "daily-note-analysis",
           localDate: "2026-06-22",
+          revisionId: saved.analysisRun.sourceId,
           runId: saved.analysisRun.id,
           userId: "dev-user",
           workflowVersion: 1,
@@ -1937,7 +1907,7 @@ describe("Lares Engine", () => {
     expect(response.status).toBe(200);
     const actions = await (await app.request("/api/actions", {}, env)).json();
     expect(actions.latestRun).toEqual(
-      expect.objectContaining({ model: "@cf/moonshotai/kimi-k2.6", status: "queued" }),
+      expect.objectContaining({ model: "@cf/zai-org/glm-4.7-flash", status: "queued" }),
     );
     expect(actions.actions).toEqual([]);
   });

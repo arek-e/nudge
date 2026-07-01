@@ -5,21 +5,24 @@ import { timing } from "hono/timing";
 import { Effect } from "effect";
 import {
   buildRootServerSpan,
+  buildDebugWideEventFields,
   buildTraceSpanRow,
   createSpanId,
   createTraceId,
-  ensureBraintrustTracing,
   finalizeRequestWideEvent,
-  flushBraintrustTracing,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
   pruneTraceCache,
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
-  runBraintrustSpan,
   safeErrorFields,
 } from "@lares/observability";
 import type { Env } from "./env";
+import {
+  ensureBraintrustTracing,
+  flushBraintrustTracing,
+  runBraintrustSpan,
+} from "./braintrust-tracing";
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
 
@@ -79,6 +82,23 @@ export const addWideEventFields = (c: AppContext, fields: Record<string, unknown
   const current = c.get("wideEvent") ?? {};
   c.set("wideEvent", { ...current, ...fields });
   c.get("log").set(fields);
+};
+
+export const wideEventFields = (fields: Record<string, unknown>): AppMiddleware => {
+  return (c, next) => {
+    addWideEventFields(c, fields);
+    return next();
+  };
+};
+
+export const wideEventFieldsFrom = (
+  readFields: (c: AppContext) => Record<string, unknown> | undefined,
+): AppMiddleware => {
+  return (c, next) => {
+    const fields = readFields(c);
+    if (fields) addWideEventFields(c, fields);
+    return next();
+  };
 };
 
 export const evlogWideEvents = (): AppMiddleware => {
@@ -173,16 +193,17 @@ export const requestObservability = (): AppMiddleware => {
         now: new Date().toISOString(),
         status,
       });
+      const debugWideEvent = { ...wideEvent, ...buildDebugWideEventFields({ event: wideEvent }) };
 
-      c.get("log").set(wideEvent);
+      c.get("log").set(debugWideEvent);
 
       if (cacheable && typeof c.env.DB?.prepare === "function") {
         runBackgroundEffect(
           c,
           Effect.gen(function* () {
-            yield* persistTraceEvent(c, wideEvent);
+            yield* persistTraceEvent(c, debugWideEvent);
             yield* persistRootTraceSpan(c, {
-              ...wideEvent,
+              ...debugWideEvent,
               durationMs,
               endedAt: endedAtIso,
               parentSpanId: incomingTrace?.parentSpanId ?? null,

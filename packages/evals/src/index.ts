@@ -144,6 +144,8 @@ export type AgentEvalArtifact =
       readonly type: "candidate_summary";
     });
 
+const agentEvalArtifact = (artifact: AgentEvalArtifact) => artifact;
+
 export interface AgentEvalSuiteOptions {
   readonly agent?: AgentRunner;
   readonly artifactSink?: (records: ReadonlyArray<AgentEvalArtifact>) => Promise<void> | void;
@@ -185,14 +187,20 @@ export const currentPromptCandidate = {
   prompt: loopIntakeSystemPrompt,
 } satisfies AgentPromptCandidate;
 
-export const defaultJudgeCriteria = [
+export const defaultJudgeCriteria: ReadonlyArray<string> = [
   "Grounded in the provided user note, OKF files, memory results, or explicit user message.",
   "Uses OKF discovery/read surfaces when workspace context is needed.",
   "Keeps writes reviewable and avoids unreviewed external side effects.",
   "Names uncertainty instead of inventing unsupported facts.",
-] as const;
+];
 
-const agentGuidanceEvalCaseTemplates = [
+interface AgentGuidanceEvalCaseTemplate {
+  readonly expectedIncludes: ReadonlyArray<string>;
+  readonly forbiddenIncludes?: ReadonlyArray<string>;
+  readonly id: string;
+}
+
+const agentGuidanceEvalCaseTemplates: ReadonlyArray<AgentGuidanceEvalCaseTemplate> = [
   {
     id: "okf-context-discovery",
     expectedIncludes: ["/workspace/okf", "okf_search", "okf_read", "file:///okf/{path}"],
@@ -208,7 +216,7 @@ const agentGuidanceEvalCaseTemplates = [
     ],
     forbiddenIncludes: ["skip review", "external side effects without reviewable proposal"],
   },
-] as const;
+];
 
 export const agentGuidanceEvalCases: ReadonlyArray<AgentGuidanceEvalCase> =
   agentGuidanceEvalCaseTemplates.map((evalCase) => ({
@@ -392,37 +400,49 @@ const summarizeCandidates = (input: {
     .map((summary, index) => ({ ...summary, rank: index + 1 }));
 
 const artifactsFor = (report: AgentEvalReport): ReadonlyArray<AgentEvalArtifact> => [
-  ...report.results.map((result) => ({
-    candidateId: result.candidateId,
-    caseId: result.caseId,
-    result,
-    type: "agent_result" as const,
-  })),
-  ...report.guidanceResults.map((result) => ({
-    candidateId: result.candidateId,
-    caseId: result.caseId,
-    result,
-    type: "guidance_result" as const,
-  })),
-  ...report.judgeResults.map((result) => ({
-    candidateId: result.candidateId,
-    caseId: result.caseId,
-    result,
-    type: "judge_result" as const,
-  })),
-  ...report.candidateSummaries.map((result) => ({
-    candidateId: result.candidateId,
-    result,
-    type: "candidate_summary" as const,
-  })),
+  ...report.results.map((result) =>
+    agentEvalArtifact({
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      result,
+      type: "agent_result",
+    }),
+  ),
+  ...report.guidanceResults.map((result) =>
+    agentEvalArtifact({
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      result,
+      type: "guidance_result",
+    }),
+  ),
+  ...report.judgeResults.map((result) =>
+    agentEvalArtifact({
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      result,
+      type: "judge_result",
+    }),
+  ),
+  ...report.candidateSummaries.map((result) =>
+    agentEvalArtifact({
+      candidateId: result.candidateId,
+      result,
+      type: "candidate_summary",
+    }),
+  ),
 ];
 
+const defaultAgentEvalSuiteOptions: AgentEvalSuiteOptions = {};
+
+const isAgentEvalCaseArray = (
+  input: ReadonlyArray<AgentEvalCase> | AgentEvalSuiteOptions,
+): input is ReadonlyArray<AgentEvalCase> => Array.isArray(input);
+
 export const runAgentEvalSuite = async (
-  input: ReadonlyArray<AgentEvalCase> | AgentEvalSuiteOptions = {},
+  input: ReadonlyArray<AgentEvalCase> | AgentEvalSuiteOptions = defaultAgentEvalSuiteOptions,
 ): Promise<AgentEvalReport> => {
-  const options: AgentEvalSuiteOptions = Array.isArray(input)
-    ? { cases: input as ReadonlyArray<AgentEvalCase> }
-    : (input as AgentEvalSuiteOptions);
+  const options: AgentEvalSuiteOptions = isAgentEvalCaseArray(input) ? { cases: input } : input;
   const agent = options.agent ?? primitiveWorkflowAgentRunner;
   const candidates = options.candidates ?? [currentPromptCandidate];
   const cases = options.cases ?? agentEvalCases;
@@ -437,10 +457,11 @@ export const runAgentEvalSuite = async (
     })),
   );
   const results = runs.map((run) => run.result);
-  const judgeResults = options.judge
+  const judge = options.judge;
+  const judgeResults = judge
     ? await Promise.all(
         runs.map(async ({ candidate, evalCase, result }) => {
-          const judged = await options.judge!.evaluate({
+          const judged = await judge.evaluate({
             agentPrompt: candidate.prompt,
             candidateId: candidate.id,
             caseId: evalCase.id,
@@ -452,7 +473,7 @@ export const runAgentEvalSuite = async (
             ...judged,
             candidateId: candidate.id,
             caseId: evalCase.id,
-            judge: options.judge!.name,
+            judge: judge.name,
           };
         }),
       )
@@ -551,8 +572,8 @@ export interface HttpAgentRunnerConfig {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+const asRecord = (value: unknown): Readonly<Record<string, unknown>> =>
+  value && typeof value === "object" ? Object.fromEntries(Object.entries(value)) : {};
 
 const asString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 

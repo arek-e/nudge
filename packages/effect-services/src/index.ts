@@ -10,6 +10,16 @@ import {
 export * from "./okf";
 export * from "./agent-prompts";
 
+export interface DurableWorkflowStepConfig<Timeout extends number | string = number | string> {
+  readonly retries?: {
+    readonly limit: number;
+    readonly delay: number | string;
+    readonly backoff?: "constant" | "linear" | "exponential";
+  };
+  readonly timeout?: Timeout;
+  readonly sensitive?: "output";
+}
+
 export const durableWorkflowStepConfig = {
   retries: {
     limit: 5,
@@ -17,7 +27,7 @@ export const durableWorkflowStepConfig = {
     backoff: "exponential",
   },
   timeout: "10 minutes",
-} as const;
+} satisfies DurableWorkflowStepConfig<"10 minutes">;
 
 export const currentWorkflowVersion = 1;
 
@@ -73,11 +83,7 @@ const memoryNamespaceForUser = (userId: string) =>
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
 
-const turbopufferFetchJson = <A>(
-  config: TurbopufferMemoryIndexConfig,
-  url: string,
-  body: unknown,
-) =>
+const turbopufferFetchJson = (config: TurbopufferMemoryIndexConfig, url: string, body: unknown) =>
   Effect.tryPromise({
     try: async () => {
       const response = await (config.fetch ?? globalThis.fetch)(url, {
@@ -89,10 +95,72 @@ const turbopufferFetchJson = <A>(
         method: "POST",
       });
       if (!response.ok) throw new Error(`Turbopuffer request failed with ${response.status}`);
-      return (await response.json()) as A;
+      return await response.json();
     },
     catch: (error) => (error instanceof Error ? error : new Error("Turbopuffer request failed")),
   });
+
+function readObjectProperty(value: unknown, key: string) {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
+function readStringProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "string" ? property : undefined;
+}
+
+function readNumberProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "number" ? property : undefined;
+}
+
+function turbopufferSourceTypeFrom(value: string): MemoryChunkRecord["sourceType"] {
+  switch (value) {
+    case "daily_note":
+      return "daily_note";
+    case "note_revision":
+      return "note_revision";
+    case "extracted_item":
+      return "extracted_item";
+    case "summary":
+      return "summary";
+    case "journal_document":
+      return "journal_document";
+    case "journal_revision":
+      return "journal_revision";
+    case "signal":
+      return "signal";
+    case "proposal":
+      return "proposal";
+    case "commitment":
+      return "commitment";
+    default:
+      throw new Error(`Invalid Turbopuffer source type: ${value}`);
+  }
+}
+
+function turbopufferQueryRowFrom(value: unknown): ReadonlyArray<TurbopufferQueryRow> {
+  const id = readStringProperty(value, "id");
+  if (!id) return [];
+  const distance = readNumberProperty(value, "$dist");
+  const sourceId = readStringProperty(value, "source_id");
+  const sourceType = readStringProperty(value, "source_type");
+  const text = readStringProperty(value, "text");
+  return [
+    {
+      id,
+      ...(distance !== undefined ? { $dist: distance } : {}),
+      ...(sourceId ? { source_id: sourceId } : {}),
+      ...(sourceType ? { source_type: turbopufferSourceTypeFrom(sourceType) } : {}),
+      ...(text ? { text } : {}),
+    },
+  ];
+}
+
+function turbopufferQueryRowsFrom(value: unknown) {
+  const rows = readObjectProperty(value, "rows");
+  return Array.isArray(rows) ? rows.flatMap(turbopufferQueryRowFrom) : [];
+}
 
 const turbopufferDelete = (config: TurbopufferMemoryIndexConfig, url: string) =>
   Effect.tryPromise({
@@ -245,14 +313,16 @@ export class MemoryIndex extends Context.Service<
           const db = yield* Db;
           yield* db.ensureUser(input.user);
           const namespace = yield* memoryNamespaceForUser(input.user.id);
-          const response = yield* turbopufferFetchJson<{
-            readonly rows?: ReadonlyArray<TurbopufferQueryRow>;
-          }>(config, turbopufferUrl(config, namespace, "/query"), {
-            include_attributes: ["text", "source_type", "source_id"],
-            limit: input.limit,
-            rank_by: ["text", "BM25", input.query],
-          });
-          const results = (response.rows ?? []).flatMap((row) => {
+          const response = yield* turbopufferFetchJson(
+            config,
+            turbopufferUrl(config, namespace, "/query"),
+            {
+              include_attributes: ["text", "source_type", "source_id"],
+              limit: input.limit,
+              rank_by: ["text", "BM25", input.query],
+            },
+          );
+          const results = turbopufferQueryRowsFrom(response).flatMap((row) => {
             if (!row.text || !row.source_id || !row.source_type) return [];
             return [
               {
@@ -396,27 +466,48 @@ export const PrimitiveWorkflows = {
       });
       if (!proposal) return yield* Effect.fail(new Error("Proposal not found"));
 
-      return yield* db.reviewProposal({
+      if (proposal.status !== "pending") {
+        const existingReview = yield* db.getReviewForProposal({
+          proposalId: input.proposalId,
+          userId: input.user.id,
+        });
+        if (
+          existingReview?.decision === input.decision &&
+          existingReview.editedTitle === input.editedTitle &&
+          existingReview.editedBody === input.editedBody &&
+          JSON.stringify(existingReview.editedBodyDocument) ===
+            JSON.stringify(input.editedBodyDocument)
+        ) {
+          return existingReview;
+        }
+        return yield* Effect.fail(new Error("Proposal already reviewed"));
+      }
+
+      const review = yield* db.reviewProposal({
         decision: input.decision,
         ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
         ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
         ...(input.editedBodyDocument !== undefined
           ? { editedBodyDocument: input.editedBodyDocument }
           : {}),
-        ...(input.decision !== "rejected"
-          ? {
-              commitment: {
-                body: input.editedBody ?? proposal.body,
-                ...(input.editedBodyDocument !== undefined
-                  ? { bodyDocument: input.editedBodyDocument }
-                  : {}),
-                title: input.editedTitle ?? proposal.title,
-              },
-            }
-          : {}),
         proposalId: input.proposalId,
         userId: input.user.id,
       });
+
+      if (input.decision !== "rejected") {
+        yield* db.appendCommitment({
+          body: input.editedBody ?? proposal.body,
+          ...(input.editedBodyDocument !== undefined
+            ? { bodyDocument: input.editedBodyDocument }
+            : {}),
+          proposalId: proposal.id,
+          reviewId: review.id,
+          title: input.editedTitle ?? proposal.title,
+          userId: input.user.id,
+        });
+      }
+
+      return review;
     }),
 
   listCommitments: (input: { readonly user: DbUser; readonly limit: number }) =>

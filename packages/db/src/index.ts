@@ -29,7 +29,7 @@ import {
 
 export type DatabaseProvider = "memory" | "d1" | "planetscale" | "turso" | "postgres";
 
-export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database);
+export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database, { schema });
 
 export interface DbUser {
   readonly id: string;
@@ -139,20 +139,9 @@ export interface ReviewProposalInput {
   readonly editedTitle?: string;
   readonly editedBody?: string;
   readonly editedBodyDocument?: unknown;
-  readonly commitment?: {
-    readonly title: string;
-    readonly body: string;
-    readonly bodyDocument?: unknown;
-  };
 }
 
-export interface ReviewRecord {
-  readonly userId: string;
-  readonly proposalId: string;
-  readonly decision: ReviewDecision;
-  readonly editedTitle?: string;
-  readonly editedBody?: string;
-  readonly editedBodyDocument?: unknown;
+export interface ReviewRecord extends ReviewProposalInput {
   readonly id: string;
   readonly createdAt: string;
 }
@@ -536,6 +525,14 @@ export interface DbService {
     readonly limit: number;
     readonly sourceType?: string;
   }) => Effect.Effect<ReadonlyArray<AgentRunRecord>>;
+  readonly getAgentRun: (input: {
+    readonly userId: string;
+    readonly runId: string;
+  }) => Effect.Effect<AgentRunRecord | null>;
+  readonly markAgentRunRunning: (input: {
+    readonly userId: string;
+    readonly runId: string;
+  }) => Effect.Effect<AgentRunRecord>;
   readonly startAgentRun: (input: StartAgentRunInput) => Effect.Effect<AgentRunRecord>;
   readonly completeAgentRun: (input: {
     readonly userId: string;
@@ -614,8 +611,8 @@ const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
   synthesisId: row.synthesisId,
-  kind: row.kind as ProposalKind,
-  status: row.status as ProposalStatus,
+  kind: proposalKindFrom(row.kind),
+  status: proposalStatusFrom(row.status),
   title: row.title,
   body: row.body,
   rationale: row.rationale,
@@ -623,13 +620,13 @@ const toProposalRecord = (row: typeof proposals.$inferSelect) => ({
   updatedAt: row.updatedAt,
 });
 
-const toFrameRecord = (row: typeof frames.$inferSelect) => ({
+const toFrameRecord = (row: typeof frames.$inferSelect): FrameRecord => ({
   id: row.id,
   userId: row.userId,
   key: row.key,
   title: row.title,
   prompt: row.prompt,
-  status: "active" as const,
+  status: "active",
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -638,7 +635,7 @@ const toReviewRecord = (row: typeof reviews.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
   proposalId: row.proposalId,
-  decision: row.decision as ReviewDecision,
+  decision: reviewDecisionFrom(row.decision),
   ...(row.editedTitle !== null ? { editedTitle: row.editedTitle } : {}),
   ...(row.editedBody !== null ? { editedBody: row.editedBody } : {}),
   ...(row.editedBodyDocument !== null ? { editedBodyDocument: row.editedBodyDocument } : {}),
@@ -665,7 +662,7 @@ const toCommitmentRecord = (row: typeof commitments.$inferSelect) => ({
   title: row.title,
   body: row.body,
   ...(row.bodyDocument !== null ? { bodyDocument: row.bodyDocument } : {}),
-  status: row.status as CommitmentStatus,
+  status: commitmentStatusFrom(row.status),
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -674,7 +671,7 @@ const toOutcomeRecord = (row: typeof outcomes.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
   commitmentId: row.commitmentId,
-  result: row.result as OutcomeResult,
+  result: outcomeResultFrom(row.result),
   ...(row.note !== null ? { note: row.note } : {}),
   recordedAt: row.recordedAt,
   createdAt: row.createdAt,
@@ -715,6 +712,251 @@ const memoryChunksFrom = (input: UpsertMemoryDocumentInput) => {
   if (trimmed.length === 0) return [];
   return [trimmed];
 };
+
+function invalidStoredValue(field: string, value: string): never {
+  throw new Error(`Invalid stored ${field}: ${value}`);
+}
+
+function proposalKindFrom(value: string): ProposalKind {
+  switch (value) {
+    case "clarify":
+      return "clarify";
+    case "follow_up":
+      return "follow_up";
+    case "commit":
+      return "commit";
+    case "ignore":
+      return "ignore";
+    default:
+      return invalidStoredValue("proposal kind", value);
+  }
+}
+
+function proposalStatusFrom(value: string): ProposalStatus {
+  switch (value) {
+    case "pending":
+      return "pending";
+    case "accepted":
+      return "accepted";
+    case "edited":
+      return "edited";
+    case "rejected":
+      return "rejected";
+    default:
+      return invalidStoredValue("proposal status", value);
+  }
+}
+
+function reviewDecisionFrom(value: string): ReviewDecision {
+  switch (value) {
+    case "accepted":
+      return "accepted";
+    case "edited":
+      return "edited";
+    case "rejected":
+      return "rejected";
+    default:
+      return invalidStoredValue("review decision", value);
+  }
+}
+
+function commitmentStatusFrom(value: string): CommitmentStatus {
+  switch (value) {
+    case "active":
+      return "active";
+    case "completed":
+      return "completed";
+    case "abandoned":
+      return "abandoned";
+    default:
+      return invalidStoredValue("commitment status", value);
+  }
+}
+
+function outcomeResultFrom(value: string): OutcomeResult {
+  switch (value) {
+    case "completed":
+      return "completed";
+    case "abandoned":
+      return "abandoned";
+    default:
+      return invalidStoredValue("outcome result", value);
+  }
+}
+
+function extractedItemKindFrom(value: string): ExtractedItemKind {
+  switch (value) {
+    case "task":
+      return "task";
+    case "reminder":
+      return "reminder";
+    case "follow_up":
+      return "follow_up";
+    case "event":
+      return "event";
+    case "memory":
+      return "memory";
+    case "question":
+      return "question";
+    case "idea":
+      return "idea";
+    default:
+      return invalidStoredValue("extracted item kind", value);
+  }
+}
+
+function extractedItemStatusFrom(value: string): ExtractedItemStatus {
+  switch (value) {
+    case "proposed":
+      return "proposed";
+    case "accepted":
+      return "accepted";
+    case "dismissed":
+      return "dismissed";
+    case "completed":
+      return "completed";
+    case "archived":
+      return "archived";
+    default:
+      return invalidStoredValue("extracted item status", value);
+  }
+}
+
+function itemEventTypeFrom(value: string): ItemEventType {
+  switch (value) {
+    case "created":
+      return "created";
+    case "accepted":
+      return "accepted";
+    case "edited":
+      return "edited";
+    case "dismissed":
+      return "dismissed";
+    case "completed":
+      return "completed";
+    case "snoozed":
+      return "snoozed";
+    case "archived":
+      return "archived";
+    default:
+      return invalidStoredValue("item event type", value);
+  }
+}
+
+function summaryPeriodTypeFrom(value: string): SummaryPeriodType {
+  switch (value) {
+    case "day":
+      return "day";
+    case "week":
+      return "week";
+    case "month":
+      return "month";
+    case "quarter":
+      return "quarter";
+    case "year":
+      return "year";
+    case "custom":
+      return "custom";
+    default:
+      return invalidStoredValue("summary period type", value);
+  }
+}
+
+function summaryStatusFrom(value: string): SummaryStatus {
+  switch (value) {
+    case "draft":
+      return "draft";
+    case "ready":
+      return "ready";
+    case "superseded":
+      return "superseded";
+    default:
+      return invalidStoredValue("summary status", value);
+  }
+}
+
+function agentRunTriggerTypeFrom(value: string): StartAgentRunInput["triggerType"] {
+  switch (value) {
+    case "note_inactivity":
+      return "note_inactivity";
+    case "manual":
+      return "manual";
+    case "end_of_day":
+      return "end_of_day";
+    case "end_of_week":
+      return "end_of_week";
+    case "backfill":
+      return "backfill";
+    default:
+      return invalidStoredValue("agent run trigger type", value);
+  }
+}
+
+function agentRunStatusFrom(value: string): AgentRunStatus {
+  switch (value) {
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    default:
+      return invalidStoredValue("agent run status", value);
+  }
+}
+
+function agentRunOutputTypeFrom(value: string): AgentRunOutputRecord["outputType"] {
+  switch (value) {
+    case "extracted_item":
+      return "extracted_item";
+    case "summary":
+      return "summary";
+    case "memory_document":
+      return "memory_document";
+    default:
+      return invalidStoredValue("agent run output type", value);
+  }
+}
+
+function memorySourceTypeFrom(value: string): MemorySourceType {
+  switch (value) {
+    case "daily_note":
+      return "daily_note";
+    case "note_revision":
+      return "note_revision";
+    case "extracted_item":
+      return "extracted_item";
+    case "summary":
+      return "summary";
+    case "journal_document":
+      return "journal_document";
+    case "journal_revision":
+      return "journal_revision";
+    case "signal":
+      return "signal";
+    case "proposal":
+      return "proposal";
+    case "commitment":
+      return "commitment";
+    default:
+      return invalidStoredValue("memory source type", value);
+  }
+}
+
+function memoryIndexJobStatusFrom(value: string): MemoryIndexJobStatus {
+  switch (value) {
+    case "pending":
+      return "pending";
+    case "indexed":
+      return "indexed";
+    case "failed":
+      return "failed";
+    default:
+      return invalidStoredValue("memory index job status", value);
+  }
+}
 
 const toJournalDocumentRecord = (row: typeof journalDocuments.$inferSelect) => ({
   id: row.id,
@@ -765,10 +1007,10 @@ const toExtractedItemRecord = (row: typeof extractedItems.$inferSelect) => ({
   userId: row.userId,
   sourceRevisionId: row.sourceRevisionId,
   sourceNoteId: row.sourceNoteId,
-  kind: row.kind as ExtractedItemKind,
+  kind: extractedItemKindFrom(row.kind),
   title: row.title,
   body: row.body,
-  status: row.status as ExtractedItemStatus,
+  status: extractedItemStatusFrom(row.status),
   ...(row.dueAt !== null ? { dueAt: row.dueAt } : {}),
   ...(row.remindAt !== null ? { remindAt: row.remindAt } : {}),
   ...(row.eventStartsAt !== null ? { eventStartsAt: row.eventStartsAt } : {}),
@@ -784,7 +1026,7 @@ const toItemEventRecord = (row: typeof itemEvents.$inferSelect) => ({
   id: row.id,
   itemId: row.itemId,
   userId: row.userId,
-  eventType: row.eventType as ItemEventType,
+  eventType: itemEventTypeFrom(row.eventType),
   payload: row.payload,
   createdAt: row.createdAt,
 });
@@ -792,12 +1034,12 @@ const toItemEventRecord = (row: typeof itemEvents.$inferSelect) => ({
 const toSummaryDocumentRecord = (row: typeof summaryDocuments.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
-  periodType: row.periodType as SummaryPeriodType,
+  periodType: summaryPeriodTypeFrom(row.periodType),
   periodStart: row.periodStart,
   periodEnd: row.periodEnd,
   title: row.title,
   body: row.body,
-  status: row.status as SummaryStatus,
+  status: summaryStatusFrom(row.status),
   generatedAt: row.generatedAt,
   sourceNoteIds: row.sourceNoteIds,
   sourceItemIds: row.sourceItemIds,
@@ -809,10 +1051,10 @@ const toSummaryDocumentRecord = (row: typeof summaryDocuments.$inferSelect) => (
 const toAgentRunRecord = (row: typeof agentRuns.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
-  triggerType: row.triggerType as StartAgentRunInput["triggerType"],
+  triggerType: agentRunTriggerTypeFrom(row.triggerType),
   sourceType: row.sourceType,
   sourceId: row.sourceId,
-  status: row.status as AgentRunStatus,
+  status: agentRunStatusFrom(row.status),
   ...(row.model !== null ? { model: row.model } : {}),
   startedAt: row.startedAt,
   ...(row.completedAt !== null ? { completedAt: row.completedAt } : {}),
@@ -823,7 +1065,7 @@ const toAgentRunRecord = (row: typeof agentRuns.$inferSelect) => ({
 const toAgentRunOutputRecord = (row: typeof agentRunOutputs.$inferSelect) => ({
   id: row.id,
   runId: row.runId,
-  outputType: row.outputType as AgentRunOutputRecord["outputType"],
+  outputType: agentRunOutputTypeFrom(row.outputType),
   outputId: row.outputId,
   createdAt: row.createdAt,
 });
@@ -831,7 +1073,7 @@ const toAgentRunOutputRecord = (row: typeof agentRunOutputs.$inferSelect) => ({
 const toMemoryDocumentRecord = (row: typeof memoryDocuments.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
-  sourceType: row.sourceType as MemorySourceType,
+  sourceType: memorySourceTypeFrom(row.sourceType),
   sourceId: row.sourceId,
   title: row.title,
   bodyText: row.bodyText,
@@ -844,7 +1086,7 @@ const toMemoryChunkRecord = (row: typeof memoryChunks.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
   memoryDocumentId: row.memoryDocumentId,
-  sourceType: row.sourceType as MemorySourceType,
+  sourceType: memorySourceTypeFrom(row.sourceType),
   sourceId: row.sourceId,
   chunkText: row.chunkText,
   chunkHash: row.chunkHash,
@@ -857,9 +1099,9 @@ const toMemoryIndexJobRecord = (row: typeof memoryIndexJobs.$inferSelect) => ({
   id: row.id,
   userId: row.userId,
   memoryChunkId: row.memoryChunkId,
-  sourceType: row.sourceType as MemorySourceType,
+  sourceType: memorySourceTypeFrom(row.sourceType),
   sourceId: row.sourceId,
-  status: row.status as MemoryIndexJobStatus,
+  status: memoryIndexJobStatusFrom(row.status),
   ...(row.errorMessage !== null ? { errorMessage: row.errorMessage } : {}),
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -1066,6 +1308,20 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
               .slice(0, input.limit),
           ),
+        getAgentRun: (input) =>
+          Effect.sync(() => {
+            const run = agentRunStore.get(input.runId);
+            return run?.userId === input.userId ? run : null;
+          }),
+        markAgentRunRunning: (input) =>
+          Effect.sync(() => {
+            const existing = agentRunStore.get(input.runId);
+            if (!existing || existing.userId !== input.userId)
+              throw new Error("Agent run not found");
+            const updated = { ...existing, status: "running" } satisfies AgentRunRecord;
+            agentRunStore.set(updated.id, updated);
+            return updated;
+          }),
         startAgentRun: (input) =>
           Effect.sync(() => {
             const record = {
@@ -1392,32 +1648,6 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
           }),
         reviewProposal: (input) =>
           Effect.sync(() => {
-            const proposal = proposalStore.get(input.proposalId);
-            const ensureCommitment = (review: ReviewRecord, timestamp: string) => {
-              if (!input.commitment) return;
-              if (!proposal || proposal.userId !== input.userId) {
-                throw new Error("Proposal not found");
-              }
-              const existingCommitment = [...commitmentStore.values()].find(
-                (commitment) => commitment.proposalId === input.proposalId,
-              );
-              if (existingCommitment) return;
-              const commitment = {
-                userId: input.userId,
-                proposalId: proposal.id,
-                reviewId: review.id,
-                title: input.commitment.title,
-                body: input.commitment.body,
-                ...(input.commitment.bodyDocument !== undefined
-                  ? { bodyDocument: input.commitment.bodyDocument }
-                  : {}),
-                id: eventId(),
-                status: "active",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-              } satisfies CommitmentRecord;
-              commitmentStore.set(commitment.id, commitment);
-            };
             const existing = [...reviewStore.values()].find(
               (review) => review.proposalId === input.proposalId && review.userId === input.userId,
             );
@@ -1429,12 +1659,12 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 JSON.stringify(existing.editedBodyDocument) ===
                   JSON.stringify(input.editedBodyDocument)
               ) {
-                ensureCommitment(existing, nowIso());
                 return existing;
               }
               throw new Error("Proposal already reviewed");
             }
 
+            const proposal = proposalStore.get(input.proposalId);
             if (!proposal || proposal.userId !== input.userId || proposal.status !== "pending") {
               throw new Error("Proposal not found");
             }
@@ -1448,19 +1678,11 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               ...(input.editedBody !== undefined ? { body: input.editedBody } : {}),
             });
             const review = {
-              userId: input.userId,
-              proposalId: input.proposalId,
-              decision: input.decision,
-              ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
-              ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
-              ...(input.editedBodyDocument !== undefined
-                ? { editedBodyDocument: input.editedBodyDocument }
-                : {}),
+              ...input,
               id: eventId(),
               createdAt: timestamp,
             } satisfies ReviewRecord;
             reviewStore.set(review.id, review);
-            ensureCommitment(review, timestamp);
             return review;
           }),
         recordMemoryRetrieval: (input) =>
@@ -1561,7 +1783,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 memoryChunkId: chunk.id,
                 sourceType: input.sourceType,
                 sourceId: input.sourceId,
-                status: "pending" as const,
+                status: "pending",
                 createdAt: timestamp,
                 updatedAt: timestamp,
               } satisfies MemoryIndexJobRecord;
@@ -1579,7 +1801,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
     Layer.effect(
       Db,
       Effect.sync(() => {
-        const db = drizzle(database);
+        const db = drizzle(database, { schema });
 
         return Db.of({
           provider: "d1",
@@ -1917,6 +2139,29 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 .limit(input.limit);
               return rows.map(toAgentRunRecord);
             }),
+          getAgentRun: (input) =>
+            Effect.promise(async () => {
+              const row = await db
+                .select()
+                .from(agentRuns)
+                .where(and(eq(agentRuns.id, input.runId), eq(agentRuns.userId, input.userId)))
+                .get();
+              return row ? toAgentRunRecord(row) : null;
+            }),
+          markAgentRunRunning: (input) =>
+            Effect.promise(async () => {
+              await db
+                .update(agentRuns)
+                .set({ status: "running" })
+                .where(and(eq(agentRuns.id, input.runId), eq(agentRuns.userId, input.userId)));
+              const row = await db
+                .select()
+                .from(agentRuns)
+                .where(and(eq(agentRuns.id, input.runId), eq(agentRuns.userId, input.userId)))
+                .get();
+              if (!row) throw new Error("Agent run not found");
+              return toAgentRunRecord(row);
+            }),
           startAgentRun: (input) =>
             Effect.promise(async () => {
               const record = {
@@ -2049,7 +2294,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 id: previous?.id ?? eventId(),
                 status:
                   input.status ??
-                  (previous?.status as ExtractedItemStatus | undefined) ??
+                  (previous ? extractedItemStatusFrom(previous.status) : undefined) ??
                   "proposed",
                 createdAt: previous?.createdAt ?? timestamp,
                 updatedAt: timestamp,
@@ -2102,9 +2347,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const row = await db
                 .select()
                 .from(extractedItems)
-                .where(
-                  and(eq(extractedItems.id, input.itemId), eq(extractedItems.userId, input.userId)),
-                )
+                .where(eq(extractedItems.id, input.itemId))
                 .get();
               if (!row) throw new Error("Extracted item not found");
               return toExtractedItemRecord(row);
@@ -2328,7 +2571,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     key: row.key,
                     title: row.title,
                     prompt: row.prompt,
-                    status: "active" as const,
+                    status: "active",
                     createdAt: row.createdAt,
                     updatedAt: row.updatedAt,
                   }
@@ -2419,7 +2662,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     id: row.id,
                     userId: row.userId,
                     proposalId: row.proposalId,
-                    decision: row.decision as ReviewDecision,
+                    decision: reviewDecisionFrom(row.decision),
                     ...(row.editedTitle !== null ? { editedTitle: row.editedTitle } : {}),
                     ...(row.editedBody !== null ? { editedBody: row.editedBody } : {}),
                     ...(row.editedBodyDocument !== null
@@ -2546,12 +2789,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const existingOutcome = await db
                 .select()
                 .from(outcomes)
-                .where(
-                  and(
-                    eq(outcomes.commitmentId, input.commitmentId),
-                    eq(outcomes.userId, input.userId),
-                  ),
-                )
+                .where(eq(outcomes.commitmentId, input.commitmentId))
                 .get();
               if (existingOutcome) {
                 const outcome = toOutcomeRecord(existingOutcome);
@@ -2606,12 +2844,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
               const recorded = await db
                 .select()
                 .from(outcomes)
-                .where(
-                  and(
-                    eq(outcomes.commitmentId, input.commitmentId),
-                    eq(outcomes.userId, input.userId),
-                  ),
-                )
+                .where(eq(outcomes.commitmentId, input.commitmentId))
                 .get();
               if (!recorded) throw new Error("Commitment not found");
 
@@ -2621,40 +2854,6 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
             }),
           reviewProposal: (input) =>
             Effect.promise(async () => {
-              const commitmentInsert = (reviewId: string, timestamp: string) =>
-                input.commitment
-                  ? database
-                      .prepare(
-                        `INSERT OR IGNORE INTO commitments (
-                          id,
-                          user_id,
-                          proposal_id,
-                          review_id,
-                          title,
-                          body,
-                          body_document,
-                          status,
-                          created_at,
-                          updated_at
-                        )
-                        SELECT ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?
-                        FROM reviews
-                        WHERE id = ? AND user_id = ?`,
-                      )
-                      .bind(
-                        eventId(),
-                        input.userId,
-                        input.proposalId,
-                        reviewId,
-                        input.commitment.title,
-                        input.commitment.body,
-                        optionalJsonText(input.commitment.bodyDocument),
-                        timestamp,
-                        timestamp,
-                        reviewId,
-                        input.userId,
-                      )
-                  : null;
               const existingReview = await db
                 .select()
                 .from(reviews)
@@ -2667,7 +2866,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   id: existingReview.id,
                   userId: existingReview.userId,
                   proposalId: existingReview.proposalId,
-                  decision: existingReview.decision as ReviewDecision,
+                  decision: reviewDecisionFrom(existingReview.decision),
                   ...(existingReview.editedTitle !== null
                     ? { editedTitle: existingReview.editedTitle }
                     : {}),
@@ -2685,8 +2884,6 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   existing.editedBody === input.editedBody &&
                   sameJson(existing.editedBodyDocument, input.editedBodyDocument)
                 ) {
-                  const insertCommitment = commitmentInsert(existing.id, nowIso());
-                  if (insertCommitment) await insertCommitment.run();
                   return existing;
                 }
                 throw new Error("Proposal already reviewed");
@@ -2694,18 +2891,10 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
 
               const timestamp = nowIso();
               const review = {
-                userId: input.userId,
-                proposalId: input.proposalId,
-                decision: input.decision,
-                ...(input.editedTitle !== undefined ? { editedTitle: input.editedTitle } : {}),
-                ...(input.editedBody !== undefined ? { editedBody: input.editedBody } : {}),
-                ...(input.editedBodyDocument !== undefined
-                  ? { editedBodyDocument: input.editedBodyDocument }
-                  : {}),
+                ...input,
                 id: eventId(),
                 createdAt: timestamp,
               } satisfies ReviewRecord;
-              const insertCommitment = commitmentInsert(review.id, timestamp);
               await database.batch([
                 database
                   .prepare(
@@ -2773,7 +2962,6 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                     optionalJsonText(input.editedBodyDocument),
                     optionalJsonText(input.editedBodyDocument),
                   ),
-                ...(insertCommitment ? [insertCommitment] : []),
               ]);
 
               const stored = await db
@@ -2789,7 +2977,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                 id: stored.id,
                 userId: stored.userId,
                 proposalId: stored.proposalId,
-                decision: stored.decision as ReviewDecision,
+                decision: reviewDecisionFrom(stored.decision),
                 ...(stored.editedTitle !== null ? { editedTitle: stored.editedTitle } : {}),
                 ...(stored.editedBody !== null ? { editedBody: stored.editedBody } : {}),
                 ...(stored.editedBodyDocument !== null
@@ -3022,7 +3210,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
                   memoryChunkId: chunk.id,
                   sourceType: input.sourceType,
                   sourceId: input.sourceId,
-                  status: "pending" as const,
+                  status: "pending",
                   createdAt: timestamp,
                   updatedAt: timestamp,
                 } satisfies MemoryIndexJobRecord;

@@ -20,7 +20,7 @@ const STEP_COUNT = 24;
 const BASE_OPACITY = 0.08;
 const RING_BASE_OPACITY = 0.2;
 const CORE_OPACITY = 0.16;
-const COMET_TAIL = [1, 0.78, 0.56, 0.36, 0.22] as const;
+const COMET_TAIL: readonly number[] = [1, 0.78, 0.56, 0.36, 0.22];
 const SECONDARY_COMET_SCALE = 0.72;
 
 const CIRCULAR_RING_PATH: readonly number[] = [

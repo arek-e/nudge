@@ -3,10 +3,10 @@ pre-commit:
   commands:
     format:
       glob: "*.{ts,tsx,js,jsx,json,jsonc,md,mdx,css,html}"
-      run: oxfmt --write {staged_files} && git add {staged_files}
+      run: bun run oxfmt --write {staged_files} && git add {staged_files}
     lint:
       run: bun run lint
     typecheck:
       run: bun run typecheck
     test:
-      run: bun test
+      run: bun run test

@@ -30,10 +30,9 @@ export default defineConfig({
     ? {
         command: [
           "bun run build",
-          `wrangler d1 migrations apply DB --local --cwd ../engine --persist-to ${shellQuote(persistTo)}`,
+          `wrangler d1 migrations apply DB --local --persist-to ${shellQuote(persistTo)}`,
           [
             "wrangler dev",
-            "--cwd ../engine",
             `--port ${devPort}`,
             `--inspector-port ${inspectorPort}`,
             `--persist-to ${shellQuote(persistTo)}`,

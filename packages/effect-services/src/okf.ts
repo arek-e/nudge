@@ -209,11 +209,15 @@ const memoryFile = (
       ["tags", ["memory", document.sourceType]],
       ["source_type", document.sourceType],
       ["source_id", document.sourceId],
-      ...(document.localDate ? ([["local_date", document.localDate]] as const) : []),
+      ...optionalLocalDateFrontmatter(document.localDate),
     ],
     `${document.bodyText}${sourceNote ? `\n\n# Source\n\n[${sourceNote.title}](../../daily/${sourceNote.localDate}.md)` : ""}`,
   );
 };
+
+const optionalLocalDateFrontmatter = (
+  localDate: string | undefined,
+): ReadonlyArray<FrontmatterEntry> => (localDate ? [["local_date", localDate]] : []);
 
 const summaryFile = (summary: SummaryDocumentRecord) =>
   concept(

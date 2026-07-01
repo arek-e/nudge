@@ -1,7 +1,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { Effect, Layer } from "effect";
+import { type Effect } from "effect";
 import { Db, type DbService } from "@lares/db";
 import {
   buildOkfProjection,
@@ -10,12 +10,27 @@ import {
   readOkfFile,
   searchOkfFiles,
 } from "@lares/effect-services";
-import { eventRecordSchema } from "@lares/engine-contract";
+
+type LaresMcpContent =
+  | { readonly text: string; readonly type: "text" }
+  | {
+      readonly description: string;
+      readonly mimeType: string;
+      readonly name: string;
+      readonly type: "resource_link";
+      readonly uri: string;
+    };
+
+const textContent = (content: Extract<LaresMcpContent, { readonly type: "text" }>) => content;
+const resourceLinkContent = (
+  content: Extract<LaresMcpContent, { readonly type: "resource_link" }>,
+) => content;
 
 export async function handleLaresMcpRequest(
   request: Request,
   input: {
     readonly db: DbService;
+    readonly runEffect: <A, E>(effect: Effect.Effect<A, E, Db>) => Promise<A>;
     readonly user: { readonly displayName: string; readonly id: string };
     readonly version: string;
   },
@@ -35,6 +50,7 @@ export async function handleLaresMcpRequest(
 
 function createLaresMcpServer(input: {
   readonly db: DbService;
+  readonly runEffect: <A, E>(effect: Effect.Effect<A, E, Db>) => Promise<A>;
   readonly user: { readonly displayName: string; readonly id: string };
   readonly version: string;
 }) {
@@ -44,7 +60,8 @@ function createLaresMcpServer(input: {
     "okf_files",
     new ResourceTemplate("file:///okf/{+path}", {
       list: async () => {
-        const projection = await readOkfProjection(input);
+        const exported = await input.runEffect(input.db.exportUserData(input.user));
+        const projection = buildOkfProjection(exported);
         return {
           resources: [...projection.files.keys()].map((path) => ({
             mimeType: "text/markdown",
@@ -59,7 +76,8 @@ function createLaresMcpServer(input: {
       mimeType: "text/markdown",
     },
     async (uri) => {
-      const projection = await readOkfProjection(input);
+      const exported = await input.runEffect(input.db.exportUserData(input.user));
+      const projection = buildOkfProjection(exported);
       return {
         contents: [
           {
@@ -79,7 +97,8 @@ function createLaresMcpServer(input: {
       inputSchema: { path: z.string().min(1).default("/") },
     },
     async ({ path }) => {
-      const projection = await readOkfProjection(input);
+      const exported = await input.runEffect(input.db.exportUserData(input.user));
+      const projection = buildOkfProjection(exported);
       return {
         content: [{ text: JSON.stringify(listOkfDirectory(projection, path)), type: "text" }],
       };
@@ -93,7 +112,8 @@ function createLaresMcpServer(input: {
       inputSchema: { path: z.string().min(1) },
     },
     async ({ path }) => {
-      const projection = await readOkfProjection(input);
+      const exported = await input.runEffect(input.db.exportUserData(input.user));
+      const projection = buildOkfProjection(exported);
       return { content: [{ text: readOkfFile(projection, path), type: "text" }] };
     },
   );
@@ -111,7 +131,8 @@ function createLaresMcpServer(input: {
       },
     },
     async ({ limit, query }) => {
-      const projection = await readOkfProjection(input);
+      const exported = await input.runEffect(input.db.exportUserData(input.user));
+      const projection = buildOkfProjection(exported);
       const results = searchOkfFiles(projection, query, limit);
       const enrichedResults = results.map((result) => ({
         ...result,
@@ -120,14 +141,19 @@ function createLaresMcpServer(input: {
       }));
       return {
         content: [
-          { text: JSON.stringify({ limit, query, results: enrichedResults }), type: "text" },
-          ...enrichedResults.map((result) => ({
-            description: result.snippet,
-            mimeType: result.mimeType,
-            name: result.path.split("/").at(-1) ?? result.path,
-            type: "resource_link" as const,
-            uri: result.uri,
-          })),
+          textContent({
+            text: JSON.stringify({ limit, query, results: enrichedResults }),
+            type: "text",
+          }),
+          ...enrichedResults.map((result) =>
+            resourceLinkContent({
+              description: result.snippet,
+              mimeType: result.mimeType,
+              name: result.path.split("/").at(-1) ?? result.path,
+              type: "resource_link",
+              uri: result.uri,
+            }),
+          ),
         ],
         structuredContent: { limit, query, results: enrichedResults },
       };
@@ -151,13 +177,10 @@ function createLaresMcpServer(input: {
       },
     },
     async ({ body, frameKey, kind, rationale, title }) => {
-      const { synthesis } = await Effect.runPromise(
-        Effect.provide(
-          PrimitiveWorkflows.latestSynthesis({ frameKey, user: input.user }),
-          Layer.succeed(Db, input.db),
-        ),
+      const { synthesis } = await input.runEffect(
+        PrimitiveWorkflows.latestSynthesis({ frameKey, user: input.user }),
       );
-      const proposal = await Effect.runPromise(
+      const proposal = await input.runEffect(
         input.db.appendProposal({
           body,
           kind,
@@ -167,44 +190,13 @@ function createLaresMcpServer(input: {
           userId: input.user.id,
         }),
       );
-      const structuredContent = { proposal, requiresReview: true as const };
-      return {
-        content: [{ text: JSON.stringify(structuredContent), type: "text" }],
-        structuredContent,
+      const structuredContent: {
+        readonly proposal: typeof proposal;
+        readonly requiresReview: true;
+      } = {
+        proposal,
+        requiresReview: true,
       };
-    },
-  );
-
-  server.registerTool(
-    "capture_append",
-    {
-      description: "Capture a simple note as a user-owned Signal.",
-      inputSchema: {
-        idempotencyKey: z.string().min(1).max(256).optional(),
-        occurredAt: z.string().datetime().optional(),
-        source: z.string().min(1).default("mcp"),
-        text: z.string().min(1).max(5_000),
-      },
-      outputSchema: {
-        capture: eventRecordSchema,
-      },
-    },
-    async ({ idempotencyKey, occurredAt, source, text }) => {
-      const capture = await Effect.runPromise(
-        Effect.provide(
-          PrimitiveWorkflows.appendSignal({
-            ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-            occurredAt: occurredAt ?? new Date().toISOString(),
-            payload: { note: text },
-            schemaVersion: 1,
-            source,
-            type: "user_context_captured",
-            user: input.user,
-          }),
-          Layer.succeed(Db, input.db),
-        ),
-      );
-      const structuredContent = { capture };
       return {
         content: [{ text: JSON.stringify(structuredContent), type: "text" }],
         structuredContent,
@@ -229,13 +221,6 @@ const proposalOutputSchema = z.object({
 });
 
 const okfFileUri = (path: string) => `file:///okf${path.startsWith("/") ? path : `/${path}`}`;
-
-async function readOkfProjection(input: {
-  readonly db: DbService;
-  readonly user: { readonly displayName: string; readonly id: string };
-}) {
-  return buildOkfProjection(await Effect.runPromise(input.db.exportUserData(input.user)));
-}
 
 const okfPathFromUri = (uri: URL) => {
   if (uri.protocol !== "file:" || !uri.pathname.startsWith("/okf/")) {

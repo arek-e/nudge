@@ -39,6 +39,11 @@ if (judgeMode === "llm" && !judgeApiKey) {
   throw new Error("EVAL_JUDGE_API_KEY is required for --judge=llm");
 }
 
+const requireJudgeApiKey = () => {
+  if (!judgeApiKey) throw new Error("EVAL_JUDGE_API_KEY is required for --judge=llm");
+  return judgeApiKey;
+};
+
 if (judgeMode && !["codex", "llm"].includes(judgeMode)) {
   throw new Error("--judge must be codex or llm");
 }
@@ -47,7 +52,7 @@ const judge =
   judgeMode === "llm"
     ? createOpenAiCompatibleJudge({
         ...(process.env.EVAL_JUDGE_ENDPOINT ? { endpoint: process.env.EVAL_JUDGE_ENDPOINT } : {}),
-        apiKey: judgeApiKey!,
+        apiKey: requireJudgeApiKey(),
         model: process.env.EVAL_JUDGE_MODEL ?? "gpt-4.1-mini",
       })
     : judgeMode === "codex"

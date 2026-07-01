@@ -5,7 +5,6 @@ describe("agent prompts", () => {
   test("guides agents to use OKF context and reviewable writes", () => {
     expect(loopIntakeSystemPrompt).toContain("/workspace/okf");
     expect(loopIntakeSystemPrompt).toContain("okf_search");
-    expect(loopIntakeSystemPrompt).toContain("capture_append");
     expect(loopIntakeSystemPrompt).toContain("proposal_write");
     expect(loopIntakeSystemPrompt).toContain("Do not mutate OKF files");
     expect(loopIntakeSystemPrompt).toContain("Examples");

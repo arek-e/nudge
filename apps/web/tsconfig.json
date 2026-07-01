@@ -8,5 +8,13 @@
     "tsBuildInfoFile": "../../.tsbuild/apps/web.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "references": [{ "path": "../../packages/engine-contract" }, { "path": "../../packages/ui" }]
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/effect-services" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/evals" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/ui" }
+  ]
 }

@@ -7,7 +7,7 @@
   "workers_dev": true,
   "preview_urls": true,
   "assets": {
-    "directory": "../web/dist/client",
+    "directory": "./dist/client",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/agents/*", "/mcp", "/health", "/__test/*", "/__internal/*"],
   },
@@ -34,6 +34,7 @@
     "APP_VERSION": "0.0.0",
     "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
     "LOG_HTTP_REQUESTS": "true",
+    "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
