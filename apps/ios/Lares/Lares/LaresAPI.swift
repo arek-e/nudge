@@ -1,0 +1,365 @@
+import Foundation
+
+struct VoiceLogResponse: Decodable {
+    let route: String
+    let spokenResponse: String
+}
+
+struct SignalsResponse: Decodable {
+    let signals: [EventRecord]
+}
+
+struct ActionsResponse: Decodable {
+    let actions: [ActionItem]
+    let latestRun: AgentRun?
+}
+
+struct SummariesResponse: Decodable {
+    let summaries: [SummaryDocument]
+}
+
+struct JournalResponse: Decodable {
+    let document: JournalDocument?
+}
+
+struct JournalSaveResponse: Decodable {
+    let analysisRun: AgentRun?
+    let document: JournalDocument
+}
+
+struct SavedCapture {
+    let analysisRun: AgentRun?
+    let journal: JournalDocument
+    let capture: EventRecord?
+}
+
+struct ConversationMessageResponse: Decodable {
+    let reply: String
+}
+
+struct ActionStatusResponse: Decodable {
+    let action: ActionItem
+}
+
+struct EventRecord: Decodable, Identifiable {
+    let id: String
+    let userId: String
+    let type: String
+    let source: String
+    let occurredAt: String
+    let schemaVersion: Int
+    let idempotencyKey: String?
+    let payload: JSONValue
+    let createdAt: String
+
+    var noteText: String {
+        switch payload {
+        case .object(let values):
+            for key in ["note", "text", "changedText"] {
+                if case .string(let value) = values[key] {
+                    return value
+                }
+            }
+            return payload.displayText
+        case .string(let value):
+            return value
+        default:
+            return payload.displayText
+        }
+    }
+}
+
+struct ActionItem: Decodable, Identifiable {
+    let id: String
+    let kind: String
+    let title: String
+    let body: String
+    let status: String
+    let confidence: Double
+    let createdAt: String
+    let updatedAt: String
+}
+
+struct AgentRun: Decodable {
+    let status: String
+    let model: String?
+    let metadata: JSONValue
+
+    var isProcessing: Bool {
+        ["pending", "queued", "running", "processing", "in_progress"].contains(status.lowercased())
+    }
+
+    var itemCount: Int? {
+        guard case .object(let values) = metadata else { return nil }
+        if case .number(let value) = values["itemCount"] {
+            return Int(value)
+        }
+        return nil
+    }
+
+    var provider: String {
+        guard case .object(let values) = metadata, case .string(let value) = values["provider"] else {
+            return "cloudflare-think"
+        }
+        return value
+    }
+}
+
+struct SummaryDocument: Decodable, Identifiable {
+    let id: String
+    let periodType: String
+    let periodStart: String
+    let title: String
+    let body: String
+    let status: String
+    let generatedAt: String
+}
+
+struct JournalDocument: Decodable {
+    let id: String
+    let localDate: String
+    let title: String
+    let bodyText: String
+    let updatedAt: String
+}
+
+enum JSONValue: Decodable {
+    case array([JSONValue])
+    case bool(Bool)
+    case null
+    case number(Double)
+    case object([String: JSONValue])
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else {
+            self = .array(try container.decode([JSONValue].self))
+        }
+    }
+
+    var displayText: String {
+        switch self {
+        case .array(let values):
+            return values.map(\.displayText).joined(separator: ", ")
+        case .bool(let value):
+            return value ? "true" : "false"
+        case .null:
+            return ""
+        case .number(let value):
+            return value.rounded() == value ? String(Int(value)) : String(value)
+        case .object(let values):
+            return values
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \($0.value.displayText)" }
+                .joined(separator: ", ")
+        case .string(let value):
+            return value
+        }
+    }
+}
+
+enum LaresAPI {
+    static let backendURLKey = "lares.backendURL"
+    static let defaultBackendURL = "http://192.168.76.133:8787"
+    static var configuredBackendURL: String {
+        UserDefaults.standard.string(forKey: backendURLKey) ?? defaultBackendURL
+    }
+
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
+    static func logVoice(spokenText: String) async throws -> VoiceLogResponse {
+        try await post(
+            "/api/voice/log",
+            body: VoiceLogRequest(idempotencyKey: UUID().uuidString, spokenText: spokenText)
+        )
+    }
+
+    static func listSignals(limit: Int = 50) async throws -> [EventRecord] {
+        let response: SignalsResponse = try await get(
+            "/api/signals",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return response.signals
+    }
+
+    static func listActions(limit: Int = 100) async throws -> ActionsResponse {
+        try await get(
+            "/api/actions",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+    }
+
+    static func listSummaries(limit: Int = 20) async throws -> [SummaryDocument] {
+        let response: SummariesResponse = try await get(
+            "/api/summaries",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return response.summaries
+    }
+
+    static func getJournal(localDate: String) async throws -> JournalDocument? {
+        let response: JournalResponse = try await get("/api/journal/\(localDate)")
+        return response.document
+    }
+
+    static func saveDailyNote(_ note: String, localDate: String) async throws -> SavedCapture {
+        let document = RichTextBlock(children: [RichTextText(text: note)])
+        let journalResponse: JournalSaveResponse = try await post(
+            "/api/journal",
+            body: JournalSaveRequest(
+                bodyDocument: [document],
+                bodyText: note,
+                localDate: localDate,
+                title: localDate
+            )
+        )
+        let capture: EventRecord? = try? await post(
+            "/api/captures",
+            body: CaptureAppendRequest(
+                idempotencyKey: UUID().uuidString,
+                occurredAt: ISO8601DateFormatter().string(from: Date()),
+                payload: CapturePayload(note: note),
+                schemaVersion: 1,
+                source: "ios_app",
+                type: "manual_check_in_submitted"
+            )
+        )
+        return SavedCapture(
+            analysisRun: journalResponse.analysisRun,
+            journal: journalResponse.document,
+            capture: capture
+        )
+    }
+
+    static func sendChatMessage(_ message: String) async throws -> String {
+        let response: ConversationMessageResponse = try await post(
+            "/api/conversations/default/messages",
+            body: ConversationMessageRequest(message: message)
+        )
+        return response.reply
+    }
+
+    static func updateActionStatus(itemId: String, status: String) async throws -> ActionItem {
+        let escaped = itemId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? itemId
+        let response: ActionStatusResponse = try await post(
+            "/api/actions/\(escaped)/status",
+            body: ActionStatusRequest(itemId: itemId, status: status)
+        )
+        return response.action
+    }
+
+    private static func get<Response: Decodable>(
+        _ path: String,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Response {
+        var request = URLRequest(url: try url(path, queryItems: queryItems))
+        request.httpMethod = "GET"
+        return try await send(request)
+    }
+
+    private static func post<Response: Decodable, Body: Encodable>(
+        _ path: String,
+        body: Body
+    ) async throws -> Response {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try encoder.encode(body)
+        return try await send(request)
+    }
+
+    private static func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw LaresAPIError.badResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw LaresAPIError.httpStatus(httpResponse.statusCode)
+        }
+        return try decoder.decode(Response.self, from: data)
+    }
+
+    private static func url(_ path: String, queryItems: [URLQueryItem] = []) throws -> URL {
+        guard let baseURL = URL(string: configuredBackendURL) else {
+            throw LaresAPIError.badURL
+        }
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw LaresAPIError.badURL
+        }
+        return url
+    }
+}
+
+private struct VoiceLogRequest: Encodable {
+    let idempotencyKey: String
+    let spokenText: String
+}
+
+private struct ConversationMessageRequest: Encodable {
+    let message: String
+}
+
+private struct ActionStatusRequest: Encodable {
+    let itemId: String
+    let status: String
+}
+
+private struct JournalSaveRequest: Encodable {
+    let bodyDocument: [RichTextBlock]
+    let bodyText: String
+    let localDate: String
+    let title: String
+}
+
+private struct RichTextBlock: Encodable {
+    let type = "p"
+    let children: [RichTextText]
+}
+
+private struct RichTextText: Encodable {
+    let text: String
+}
+
+private struct CaptureAppendRequest: Encodable {
+    let idempotencyKey: String
+    let occurredAt: String
+    let payload: CapturePayload
+    let schemaVersion: Int
+    let source: String
+    let type: String
+}
+
+private struct CapturePayload: Encodable {
+    let note: String
+}
+
+enum LaresAPIError: LocalizedError {
+    case badResponse
+    case badURL
+    case httpStatus(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .badResponse:
+            return "The server returned an unreadable response."
+        case .badURL:
+            return "The backend URL is invalid."
+        case .httpStatus(let status):
+            return "The server returned HTTP \(status)."
+        }
+    }
+}
