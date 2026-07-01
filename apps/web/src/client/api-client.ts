@@ -9,8 +9,8 @@ const link = new OpenAPILink(apiContract, {
   fetch: (request, init) => {
     const headers = new Headers(request.headers);
     const identityHeaders = anonymousIdentityHeaders();
-    headers.set("x-lares-anonymous-user-id", identityHeaders["x-lares-anonymous-user-id"]);
-    headers.set("x-lares-client", identityHeaders["x-lares-client"]);
+    headers.set("x-vesta-anonymous-user-id", identityHeaders["x-vesta-anonymous-user-id"]);
+    headers.set("x-vesta-client", identityHeaders["x-vesta-client"]);
     return fetch(new Request(request, { headers }), init);
   },
   url: () => `${window.location.origin}/api`,

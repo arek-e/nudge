@@ -1,4 +1,4 @@
-const anonymousUserStorageKey = "lares.anonymousUserID";
+const anonymousUserStorageKey = "vesta.anonymousUserID";
 
 export function generatedAnonymousUserId(randomUUID: () => string = crypto.randomUUID) {
   return `anon_${randomUUID().toLowerCase()}`;
@@ -16,7 +16,7 @@ export function anonymousUserId() {
 
 export function anonymousIdentityHeaders() {
   return {
-    "x-lares-anonymous-user-id": anonymousUserId(),
-    "x-lares-client": "web",
+    "x-vesta-anonymous-user-id": anonymousUserId(),
+    "x-vesta-client": "web",
   };
 }

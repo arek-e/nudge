@@ -5,7 +5,7 @@ const anonymousUserIdPattern =
   /^anon_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 function anonymousUserIdFrom(headers: Headers) {
-  const userId = headers.get("x-lares-anonymous-user-id")?.trim().toLowerCase();
+  const userId = headers.get("x-vesta-anonymous-user-id")?.trim().toLowerCase();
   return userId && anonymousUserIdPattern.test(userId) ? userId : null;
 }
 

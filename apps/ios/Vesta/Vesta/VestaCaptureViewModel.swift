@@ -163,7 +163,7 @@ final class VestaCaptureViewModel: ObservableObject {
     private var lastAutosavedBodyText: String?
     private var lastStreakDate: String
     private let networkMonitor = NWPathMonitor()
-    private let networkMonitorQueue = DispatchQueue(label: "app.lares.network-monitor")
+    private let networkMonitorQueue = DispatchQueue(label: "app.vesta.network-monitor")
     private var pendingInterruptedDraftText: String?
     private var pendingResultContext: PendingCaptureResultContext?
 

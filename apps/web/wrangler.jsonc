@@ -53,7 +53,7 @@
   "r2_buckets": [
     {
       "binding": "MEDIA_FILES",
-      "bucket_name": "lares-media",
+      "bucket_name": "vesta-media",
     },
     {
       "binding": "OKF_FILES",

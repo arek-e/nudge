@@ -200,13 +200,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private resolveUser(request: Request) {
-    const id = request.headers.get("x-vesta-user-id") ?? request.headers.get("x-lares-user-id");
+    const id = request.headers.get("x-vesta-user-id");
     if (!id) return null;
     return {
-      displayName:
-        request.headers.get("x-vesta-user-display-name") ??
-        request.headers.get("x-lares-user-display-name") ??
-        "Vesta User",
+      displayName: request.headers.get("x-vesta-user-display-name") ?? "Vesta User",
       id,
     };
   }

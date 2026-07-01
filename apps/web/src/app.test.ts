@@ -11,7 +11,7 @@ const testWorkflow = {
 } as Workflow;
 const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
 const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
-const anonymousHeaders = { "x-lares-anonymous-user-id": anonymousUserId };
+const anonymousHeaders = { "x-vesta-anonymous-user-id": anonymousUserId };
 const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
 const anonymousMcpHeaders = {
   ...anonymousJsonHeaders,
@@ -1175,7 +1175,7 @@ describe("web app", () => {
       "/api/session",
       {
         headers: {
-          "x-lares-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       { ...env, BETTER_AUTH_SECRET: "test" },
@@ -1242,7 +1242,7 @@ describe("web app", () => {
       "/api/signals?limit=10",
       {
         headers: {
-          "x-lares-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       {

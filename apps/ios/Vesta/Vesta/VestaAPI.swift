@@ -243,30 +243,18 @@ enum JSONValue: Decodable {
 enum VestaAPI {
     static let engineURLKey = "vesta.engineURL"
     private static let legacyEngineURLKey = "vesta.backendURL"
-    private static let legacyLaresEngineURLKey = "lares.engineURL"
-    private static let legacyLaresBackendURLKey = "lares.backendURL"
     private static let staleLocalEngineURLs = Set([
         "http://127.0.0.1:8787",
         "http://192.168.76.133:8787",
         "http://localhost:8787"
     ])
-    static let defaultEngineURL = "https://lares-web.teampitch.workers.dev"
+    static let defaultEngineURL = "https://vesta-web.teampitch.workers.dev"
     static var configuredEngineURL: String {
         let defaults = UserDefaults.standard
         if let engineURL = defaults.string(forKey: engineURLKey) {
             return normalizedEngineURL(engineURL, defaults: defaults)
         }
         if let legacyURL = defaults.string(forKey: legacyEngineURLKey) {
-            let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
-            defaults.set(engineURL, forKey: engineURLKey)
-            return engineURL
-        }
-        if let legacyURL = defaults.string(forKey: legacyLaresEngineURLKey) {
-            let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
-            defaults.set(engineURL, forKey: engineURLKey)
-            return engineURL
-        }
-        if let legacyURL = defaults.string(forKey: legacyLaresBackendURLKey) {
             let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
             defaults.set(engineURL, forKey: engineURLKey)
             return engineURL
@@ -489,8 +477,8 @@ enum VestaAPI {
     }
 
     private static func applyClientIdentity(to request: inout URLRequest) {
-        request.setValue(VestaInstallIdentity.currentUserID(), forHTTPHeaderField: "x-lares-anonymous-user-id")
-        request.setValue("ios", forHTTPHeaderField: "x-lares-client")
+        request.setValue(VestaInstallIdentity.currentUserID(), forHTTPHeaderField: "x-vesta-anonymous-user-id")
+        request.setValue("ios", forHTTPHeaderField: "x-vesta-client")
     }
 
     private static func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -518,7 +506,7 @@ enum VestaAPI {
 }
 
 enum VestaInstallIdentity {
-    static let userIDKey = "lares.anonymousUserID"
+    static let userIDKey = "vesta.anonymousUserID"
 
     static func currentUserID(defaults: UserDefaults = .standard) -> String {
         if let existing = defaults.string(forKey: userIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
