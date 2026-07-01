@@ -9,6 +9,14 @@ const testAi = (() => ({ provider: "test" })) as Ai;
 const testWorkflow = {
   create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "test-workflow-id" }),
 } as Workflow;
+const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
+const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
+const anonymousHeaders = { "x-vesta-anonymous-user-id": anonymousUserId };
+const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
+const anonymousMcpHeaders = {
+  ...anonymousJsonHeaders,
+  accept: "application/json, text/event-stream",
+};
 
 const env = {
   DB: {} as D1Database,
@@ -143,7 +151,7 @@ describe("web app", () => {
       "/api/auth/sign-in/magic-link",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ email: "lana@example.com" }),
       },
       env,
@@ -159,7 +167,7 @@ describe("web app", () => {
       "/api/auth/email-otp/send-verification-otp",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ email: "lana@example.com", type: "sign-in" }),
       },
       env,
@@ -175,7 +183,7 @@ describe("web app", () => {
       "/api/auth/sign-out",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({}),
       },
       { ...env, BETTER_AUTH_SECRET: "test-secret" },
@@ -203,7 +211,7 @@ describe("web app", () => {
       "/api/auth/sign-up/email",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           email: "test@example.com",
           name: "Test User",
@@ -226,7 +234,7 @@ describe("web app", () => {
       "/__internal/auth/test-account",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           email: "alek@teampitch.app",
           name: "Alek",
@@ -417,7 +425,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json", "cf-ray": "synthesis-ray" },
+        headers: { ...anonymousJsonHeaders, "cf-ray": "synthesis-ray" },
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       { ...env, DB: traceDb },
@@ -454,7 +462,11 @@ describe("web app", () => {
     } as D1Database;
     const app = createApp();
 
-    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+    const response = await app.request(
+      "/api/traces/recent",
+      { headers: anonymousHeaders },
+      { ...env, DB: traceDb },
+    );
 
     expect(response.status).toBe(200);
     expect(spanRows).toHaveLength(0);
@@ -575,7 +587,7 @@ describe("web app", () => {
       "/api/voice/log",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           idempotencyKey: "siri-log-1",
           spokenText: "Log that I need to follow up with Maya tomorrow",
@@ -584,7 +596,7 @@ describe("web app", () => {
       env,
     );
     const body = await response.json();
-    const signalsResponse = await app.request("/api/signals", {}, env);
+    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
     const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
@@ -595,7 +607,7 @@ describe("web app", () => {
       payload: { route: "capture_only", text: "Log that I need to follow up with Maya tomorrow" },
       source: "ios_siri",
       type: "capture.voice_log",
-      userId: "dev-user",
+      userId: anonymousUserId,
     });
     expect(signalsBody.signals).toHaveLength(1);
     expect(signalsBody.signals[0]).toMatchObject({
@@ -636,7 +648,11 @@ describe("web app", () => {
     } as D1Database;
     const app = createApp();
 
-    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+    const response = await app.request(
+      "/api/traces/recent",
+      { headers: anonymousHeaders },
+      { ...env, DB: traceDb },
+    );
 
     expect(response.status).toBe(200);
     expect(capturedSelectSql).toContain("span_id AS id");
@@ -678,7 +694,7 @@ describe("web app", () => {
             signals: [
               {
                 id: "signal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 type: "capture.note",
                 source: "test",
                 occurredAt: "2026-06-12T10:00:00.000Z",
@@ -699,7 +715,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/list-recent-signals?limit=5",
-        {},
+        { headers: anonymousHeaders },
         { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
       );
       loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
@@ -709,7 +725,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
     expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
@@ -723,7 +739,7 @@ describe("web app", () => {
       signals: [
         {
           id: "signal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "capture.note",
           source: "test",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -770,7 +786,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/retrieve-memory?query=michael%20launch&limit=3",
-        {},
+        { headers: anonymousHeaders },
         {
           ...env,
           AGENT_INTERNAL_SECRET: "test-agent-secret",
@@ -785,11 +801,11 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
     expect(forwardedRequests[0]!.headers.get("x-vesta-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
@@ -825,7 +841,7 @@ describe("web app", () => {
           forwardedRequests.push(request);
           return Response.json({
             conversationId: "focus",
-            userId: "dev-user",
+            userId: anonymousUserId,
             createdAt: null,
             updatedAt: null,
             recentToolEvents: [],
@@ -842,18 +858,18 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/conversations/focus",
-      {},
+      { headers: anonymousHeaders },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
     expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
-      userId: "dev-user",
+      userId: anonymousUserId,
       createdAt: null,
       updatedAt: null,
       recentToolEvents: [],
@@ -883,7 +899,7 @@ describe("web app", () => {
               confidence: 0.82,
               signal: {
                 id: "signal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 type: "manual_check_in_submitted",
                 source: "vesta_agent_intake",
                 occurredAt: "2026-06-12T10:00:00.000Z",
@@ -893,7 +909,7 @@ describe("web app", () => {
               },
               proposal: {
                 id: "proposal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 synthesisId: "synthesis-1",
                 kind: "commit",
                 status: "pending",
@@ -931,26 +947,26 @@ describe("web app", () => {
       "/api/conversations/focus/messages",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ message: "What should I do next?" }),
       },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
     expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-display-name")).toBe("Dev User");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-display-name")).toBe("Anonymous User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
         confidence: 0.82,
         signal: {
           id: "signal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "manual_check_in_submitted",
           source: "vesta_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -960,7 +976,7 @@ describe("web app", () => {
         },
         proposal: {
           id: "proposal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           synthesisId: "synthesis-1",
           kind: "commit",
           status: "pending",
@@ -1015,18 +1031,18 @@ describe("web app", () => {
       "/api/conversations/focus/messages/stream",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ message: "Stream this" }),
       },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
     expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
   });
@@ -1038,7 +1054,7 @@ describe("web app", () => {
       "/api/events",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "manual_check_in_submitted",
           source: "api",
@@ -1050,14 +1066,14 @@ describe("web app", () => {
       env,
     );
 
-    const listResponse = await app.request("/api/events", {}, env);
+    const listResponse = await app.request("/api/events", { headers: anonymousHeaders }, env);
 
     expect(appendResponse.status).toBe(200);
     expect(listResponse.status).toBe(200);
     expect(await listResponse.json()).toEqual({
       events: [
         expect.objectContaining({
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "manual_check_in_submitted",
           source: "api",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -1068,17 +1084,73 @@ describe("web app", () => {
     });
   });
 
-  test("custom integrations can inspect the current session workspace", async () => {
+  test("media uploads are stored in R2 and returned as attachment references", async () => {
+    const writes: Array<{
+      readonly key: string;
+      readonly options: R2PutOptions | undefined;
+      readonly value: Uint8Array;
+    }> = [];
+    const mediaBucket = {
+      get: async () => null,
+      put: async (key: string, value: Uint8Array, options?: R2PutOptions) => {
+        writes.push({ key, options, value });
+        return { key } as R2Object;
+      },
+    } as R2Bucket;
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request("/api/session", {}, env);
+    const response = await app.request(
+      "/api/media",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          dataBase64: btoa("image bytes"),
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          kind: "image",
+          label: "Camera photo",
+          mimeType: "image/jpeg",
+        }),
+      },
+      { ...env, MEDIA_FILES: mediaBucket },
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: false, google: false, passkey: false },
-      authMode: "dev",
-      user: { id: "dev-user", displayName: "Dev User" },
-      workspace: { id: "dev-user", label: "Dev User's workspace" },
+      byteLength: 11,
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      kind: "image",
+      label: "Camera photo",
+      mimeType: "image/jpeg",
+      url: "/api/media/550e8400-e29b-41d4-a716-446655440000",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.key).toBe(
+      `users/${anonymousUserId}/media/550e8400-e29b-41d4-a716-446655440000`,
+    );
+    expect(new TextDecoder().decode(writes[0]!.value)).toBe("image bytes");
+    expect(writes[0]!.options).toEqual({
+      customMetadata: {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        kind: "image",
+        label: "Camera photo",
+        userId: anonymousUserId,
+      },
+      httpMetadata: { contentType: "image/jpeg" },
+    });
+  });
+
+  test("custom integrations can inspect the current session workspace", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request("/api/session", { headers: anonymousHeaders }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMethods: { emailOtp: true, google: false, passkey: true },
+      authMode: "anonymous",
+      user: anonymousUser,
+      workspace: { id: anonymousUserId, label: "Anonymous User's workspace" },
     });
   });
 
@@ -1093,6 +1165,34 @@ describe("web app", () => {
       authMode: "unauthenticated",
       user: null,
       workspace: null,
+    });
+  });
+
+  test("custom integrations resolve an anonymous install session from a scoped client id", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/session",
+      {
+        headers: {
+          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+        },
+      },
+      { ...env, BETTER_AUTH_SECRET: "test" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMethods: { emailOtp: true, google: false, passkey: true },
+      authMode: "anonymous",
+      user: {
+        displayName: "Anonymous User",
+        id: "anon_550e8400-e29b-41d4-a716-446655440000",
+      },
+      workspace: {
+        id: "anon_550e8400-e29b-41d4-a716-446655440000",
+        label: "Anonymous User's workspace",
+      },
     });
   });
 
@@ -1135,6 +1235,26 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
+  test("custom integrations can use user data routes with an anonymous install session", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/signals?limit=10",
+      {
+        headers: {
+          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+        },
+      },
+      {
+        ...env,
+        BETTER_AUTH_SECRET: "test",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ signals: [] });
+  });
+
   test("custom integrations resolve workspace from a Better Auth session", async () => {
     const app = createApp({
       authSessionResolver: async () => ({
@@ -1165,7 +1285,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -1177,20 +1297,28 @@ describe("web app", () => {
       env,
     );
 
-    const exportResponse = await app.request("/api/export", {}, env);
+    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
     const exported = await exportResponse.json();
-    const deleteResponse = await app.request("/api/account/delete", { method: "POST" }, env);
-    const afterDeleteResponse = await app.request("/api/export", {}, env);
+    const deleteResponse = await app.request(
+      "/api/account/delete",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
+    const afterDeleteResponse = await app.request(
+      "/api/export",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(exportResponse.status).toBe(200);
     expect(exported).toMatchObject({
-      user: { id: "dev-user", displayName: "Dev User" },
+      user: { id: anonymousUserId, displayName: "Anonymous User" },
       events: [expect.objectContaining({ payload: { note: "export this" } })],
     });
     expect(deleteResponse.status).toBe(200);
     expect(await deleteResponse.json()).toEqual({ deleted: true });
     expect(await afterDeleteResponse.json()).toMatchObject({
-      user: { id: "dev-user", displayName: "Dev User" },
+      user: { id: anonymousUserId, displayName: "Anonymous User" },
       events: [],
       commitments: [],
       outcomes: [],
@@ -1210,7 +1338,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/account/delete",
-        { method: "POST" },
+        { method: "POST", headers: anonymousHeaders },
         {
           ...env,
           TURBOPUFFER_API_KEY: "test-key",
@@ -1228,7 +1356,7 @@ describe("web app", () => {
     expect(String(url)).toMatch(
       /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
     );
-    expect(String(url)).not.toContain("dev-user");
+    expect(String(url)).not.toContain(anonymousUserId);
     expect(init?.method).toBe("DELETE");
   });
 
@@ -1246,7 +1374,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "need to write to michael",
           localDate: "2026-06-18",
@@ -1266,11 +1394,15 @@ describe("web app", () => {
     );
     expect(workflowCreates).toHaveLength(1);
 
-    const documentResponse = await app.request("/api/journal/2026-06-18", {}, env);
+    const documentResponse = await app.request(
+      "/api/journal/2026-06-18",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(documentResponse.status).toBe(200);
     expect((await documentResponse.json()).document.bodyText).toBe("need to write to michael");
 
-    const exportResponse = await app.request("/api/export", {}, env);
+    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
     const exported = await exportResponse.json();
     expect(exported.journalDocuments).toHaveLength(1);
     expect(exported.journalRevisions).toHaveLength(1);
@@ -1307,11 +1439,15 @@ describe("web app", () => {
       ]),
     );
 
-    const actionsResponse = await app.request("/api/actions", {}, env);
+    const actionsResponse = await app.request("/api/actions", { headers: anonymousHeaders }, env);
     const actions = await actionsResponse.json();
     expect(actions.actions).toEqual([]);
     expect(actions.latestRun).toEqual(expect.objectContaining({ status: "queued" }));
-    const summariesResponse = await app.request("/api/summaries", {}, env);
+    const summariesResponse = await app.request(
+      "/api/summaries",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect((await summariesResponse.json()).summaries).toEqual([]);
   });
 
@@ -1322,7 +1458,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Met Kai and captured the follow-up.",
           localDate: "2026-06-18",
@@ -1335,7 +1471,7 @@ describe("web app", () => {
       "/api/events",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           occurredAt: "2026-06-18T10:00:00.000Z",
           payload: { note: "Follow up with Kai." },
@@ -1347,7 +1483,11 @@ describe("web app", () => {
       env,
     );
 
-    const response = await app.request("/api/calendar/days?timeZone=UTC", {}, env);
+    const response = await app.request(
+      "/api/calendar/days?timeZone=UTC",
+      { headers: anonymousHeaders },
+      env,
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -1372,6 +1512,7 @@ describe("web app", () => {
       {
         method: "POST",
         headers: {
+          ...anonymousJsonHeaders,
           "cf-ray": "journal-ray",
           "content-type": "application/json",
           "user-agent": "Vesta/1",
@@ -1422,7 +1563,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "need to work on the guest list",
           localDate: "2026-07-01",
@@ -1433,7 +1574,11 @@ describe("web app", () => {
     );
     const saved = await save.json();
 
-    const response = await app.request(`/api/agent-runs/${saved.analysisRun.id}`, {}, env);
+    const response = await app.request(
+      `/api/agent-runs/${saved.analysisRun.id}`,
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -1450,7 +1595,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "OKF should be mounted into the sandbox for grep and cat.",
           localDate: "2026-06-29",
@@ -1461,21 +1606,29 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const listed = await app.request("/api/okf?path=/daily", {}, env);
+    const listed = await app.request("/api/okf?path=/daily", { headers: anonymousHeaders }, env);
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual({
       entries: ["2026-06-29.md", "index.md"],
       path: "/daily",
     });
 
-    const read = await app.request("/api/okf/file?path=/daily/2026-06-29.md", {}, env);
+    const read = await app.request(
+      "/api/okf/file?path=/daily/2026-06-29.md",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(read.status).toBe(200);
     expect(await read.json()).toEqual({
       content: expect.stringContaining("OKF should be mounted into the sandbox"),
       path: "/daily/2026-06-29.md",
     });
 
-    const search = await app.request("/api/okf/search?query=grep&limit=1", {}, env);
+    const search = await app.request(
+      "/api/okf/search?query=grep&limit=1",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(search.status).toBe(200);
     expect(await search.json()).toEqual({
       results: [
@@ -1493,7 +1646,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "MCP should expose the same OKF workspace boundary.",
           localDate: "2026-07-02",
@@ -1508,10 +1661,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 0,
           jsonrpc: "2.0",
@@ -1537,10 +1687,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -1563,10 +1710,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 2,
           jsonrpc: "2.0",
@@ -1594,10 +1738,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 4,
           jsonrpc: "2.0",
@@ -1625,10 +1766,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 6,
           jsonrpc: "2.0",
@@ -1652,10 +1790,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 5,
           jsonrpc: "2.0",
@@ -1684,10 +1819,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 3,
           jsonrpc: "2.0",
@@ -1734,10 +1866,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -1772,12 +1901,12 @@ describe("web app", () => {
       },
     });
 
-    const proposals = await app.request("/api/proposals", {}, env);
+    const proposals = await app.request("/api/proposals", { headers: anonymousHeaders }, env);
     expect((await proposals.json()).proposals).toEqual([
       expect.objectContaining({ status: "pending", title: "Follow up on launch" }),
     ]);
 
-    const commitments = await app.request("/api/commitments", {}, env);
+    const commitments = await app.request("/api/commitments", { headers: anonymousHeaders }, env);
     expect((await commitments.json()).commitments).toEqual([]);
   });
 
@@ -1804,7 +1933,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox should expose OKF files to grep.",
           localDate: "2026-06-30",
@@ -1815,7 +1944,11 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+    const smoke = await app.request(
+      "/api/okf/sandbox/smoke",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
 
     expect(smoke.status).toBe(200);
     expect(await smoke.json()).toEqual({
@@ -1860,7 +1993,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox startup can fail locally while OKF projection remains valid.",
           localDate: "2026-07-01",
@@ -1871,7 +2004,11 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+    const smoke = await app.request(
+      "/api/okf/sandbox/smoke",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
 
     expect(smoke.status).toBe(200);
     expect(await smoke.json()).toEqual({
@@ -1907,7 +2044,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Ask AI to extract this action durably",
           localDate: "2026-06-22",
@@ -1935,13 +2072,15 @@ describe("web app", () => {
           localDate: "2026-06-22",
           revisionId: saved.analysisRun.sourceId,
           runId: saved.analysisRun.id,
-          userId: "dev-user",
+          userId: anonymousUserId,
           workflowVersion: 1,
         }),
       }),
     ]);
 
-    const exported = await (await app.request("/api/export", {}, env)).json();
+    const exported = await (
+      await app.request("/api/export", { headers: anonymousHeaders }, env)
+    ).json();
     expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "queued" })]);
     expect(exported.extractedItems).toEqual([]);
     expect(exported.summaryDocuments).toEqual([]);
@@ -1954,7 +2093,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "I have now written to michael",
           localDate: "2026-06-21",
@@ -1965,7 +2104,9 @@ describe("web app", () => {
     );
 
     expect(response.status).toBe(200);
-    const actions = await (await app.request("/api/actions", {}, env)).json();
+    const actions = await (
+      await app.request("/api/actions", { headers: anonymousHeaders }, env)
+    ).json();
     expect(actions.latestRun).toEqual(
       expect.objectContaining({ model: "@cf/zai-org/glm-4.7-flash", status: "queued" }),
     );
@@ -1979,7 +2120,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -1995,7 +2136,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2008,7 +2149,7 @@ describe("web app", () => {
       env,
     );
 
-    const signalsResponse = await app.request("/api/signals", {}, env);
+    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
     const body = await signalsResponse.json();
     const capture = await captureResponse.json();
     const retriedCapture = await retriedCaptureResponse.json();
@@ -2018,7 +2159,7 @@ describe("web app", () => {
     expect(signalsResponse.status).toBe(200);
     expect(body.signals).toEqual([
       expect.objectContaining({
-        userId: "dev-user",
+        userId: anonymousUserId,
         type: "user_context_captured",
         payload: { note: "primitive route" },
       }),
@@ -2033,7 +2174,7 @@ describe("web app", () => {
       "/api/voice/log",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           idempotencyKey: "siri-log-1",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -2051,7 +2192,9 @@ describe("web app", () => {
       },
     );
     const voiceLog = await response.json();
-    const signals = await (await app.request("/api/signals", {}, env)).json();
+    const signals = await (
+      await app.request("/api/signals", { headers: anonymousHeaders }, env)
+    ).json();
 
     expect(response.status).toBe(200);
     expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Vesta.");
@@ -2077,7 +2220,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2093,14 +2236,14 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
     const latestResponse = await app.request(
       "/api/syntheses/latest?frameKey=current_state",
-      {},
+      { headers: anonymousHeaders },
       env,
     );
     const synthesis = await response.json();
@@ -2127,7 +2270,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2142,7 +2285,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2152,7 +2295,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2161,12 +2304,16 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
-    const listBeforeReviewResponse = await app.request("/api/proposals", {}, env);
+    const listBeforeReviewResponse = await app.request(
+      "/api/proposals",
+      { headers: anonymousHeaders },
+      env,
+    );
     const listBeforeReview = await listBeforeReviewResponse.json();
     const retriedGenerate = await retriedGenerateResponse.json();
     const proposal = listBeforeReview.proposals[0];
@@ -2174,12 +2321,16 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposal.id, decision: "accepted" }),
       },
       env,
     );
-    const listAfterReviewResponse = await app.request("/api/proposals", {}, env);
+    const listAfterReviewResponse = await app.request(
+      "/api/proposals",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(generateResponse.status).toBe(200);
     expect(retriedGenerate.proposals.map((item: { id: string }) => item.id)).toEqual(
@@ -2207,7 +2358,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2216,7 +2367,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2227,7 +2378,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
@@ -2236,18 +2387,22 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
     );
-    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+    const commitmentsResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
     const { commitments } = await commitmentsResponse.json();
     const outcomeResponse = await app.request(
       "/api/outcomes",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2260,7 +2415,7 @@ describe("web app", () => {
       "/api/outcomes",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2269,8 +2424,12 @@ describe("web app", () => {
       },
       env,
     );
-    const outcomesResponse = await app.request("/api/outcomes", {}, env);
-    const activeAfterOutcomeResponse = await app.request("/api/commitments", {}, env);
+    const outcomesResponse = await app.request("/api/outcomes", { headers: anonymousHeaders }, env);
+    const activeAfterOutcomeResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(retriedReviewResponse.status).toBe(200);
     expect(commitmentsResponse.status).toBe(200);
@@ -2302,7 +2461,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2311,7 +2470,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2322,7 +2481,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           proposalId: proposals[0].id,
           decision: "edited",
@@ -2333,7 +2492,11 @@ describe("web app", () => {
       },
       env,
     );
-    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+    const commitmentsResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(await commitmentsResponse.json()).toEqual({
       commitments: [
@@ -2361,7 +2524,7 @@ describe("web app", () => {
           "/api/events",
           {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: anonymousJsonHeaders,
             body: JSON.stringify({
               type,
               source: "api",
@@ -2377,7 +2540,7 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/events?from=2026-06-07T00:00:00.000Z&to=2026-06-14T23:59:59.999Z",
-      {},
+      { headers: anonymousHeaders },
       env,
     );
     const body = await response.json();
@@ -2388,7 +2551,7 @@ describe("web app", () => {
 
   test("GET /api/openapi.json documents the public events API", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/openapi.json", {}, env);
+    const response = await app.request("/api/openapi.json", { headers: anonymousHeaders }, env);
     const spec = await response.json();
 
     expect(response.status).toBe(200);
@@ -2432,7 +2595,7 @@ describe("web app", () => {
 
   test("GET /api/docs serves human-readable API documentation", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/docs", {}, env);
+    const response = await app.request("/api/docs", { headers: anonymousHeaders }, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);

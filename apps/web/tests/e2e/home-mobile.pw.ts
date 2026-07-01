@@ -153,7 +153,7 @@ test("mobile app shell uses persistent bottom navigation", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Latest" })).toBeVisible();
 
   await page.goto("/settings");
-  await expect(page.getByText("Dev User's workspace")).toBeVisible();
+  await expect(page.getByText("Anonymous User's workspace")).toBeVisible();
   await expect(page.getByRole("button", { name: "Add passkey" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export data" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete local data" })).toBeVisible();

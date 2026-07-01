@@ -8,6 +8,8 @@ export default defineConfig({
   build: {
     outDir: "dist/client",
   },
+  envDir: fileURLToPath(new URL("../..", import.meta.url)),
+  envPrefix: ["VITE_", "CLERK_PUBLISHABLE_KEY"],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("../../packages/ui/src", import.meta.url)),

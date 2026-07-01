@@ -1,6 +1,7 @@
 import Foundation
 
 enum VestaDestination: Hashable {
+    case settings
     case todayCalendar
 }
 
@@ -8,6 +9,87 @@ enum VestaSheet: String, Identifiable {
     case streakCalendar
 
     var id: String { rawValue }
+}
+
+enum VestaAuthSessionState: Hashable {
+    case loading
+    case signedOut
+    case signedIn
+}
+
+enum VestaAuthSurface: Equatable {
+    case loading
+    case authForm
+    case content
+}
+
+enum VestaAuthPresentationPolicy {
+    static func evaluate(sessionState: VestaAuthSessionState) -> VestaAuthSurface {
+        switch sessionState {
+        case .loading:
+            .loading
+        case .signedOut:
+            .authForm
+        case .signedIn:
+            .content
+        }
+    }
+}
+
+struct AccountSettingsSnapshot: Equatable {
+    let displayName: String
+    let emailAddress: String
+    let emailVerification: String
+    let userId: String
+    let sessionId: String
+}
+
+enum AccountSettingsPolicy {
+    static func evaluate(
+        firstName: String?,
+        lastName: String?,
+        username: String?,
+        emailAddress: String?,
+        userId: String?,
+        sessionId: String?,
+        hasVerifiedEmailAddress: Bool
+    ) -> AccountSettingsSnapshot {
+        AccountSettingsSnapshot(
+            displayName: displayName(firstName: firstName, lastName: lastName, username: username, emailAddress: emailAddress),
+            emailAddress: normalized(emailAddress) ?? "No email on this account",
+            emailVerification: hasVerifiedEmailAddress ? "Verified" : "Not verified",
+            userId: normalized(userId) ?? "Unavailable",
+            sessionId: normalized(sessionId) ?? "Unavailable"
+        )
+    }
+
+    private static func displayName(
+        firstName: String?,
+        lastName: String?,
+        username: String?,
+        emailAddress: String?
+    ) -> String {
+        let nameParts = [normalized(firstName), normalized(lastName)].compactMap(\.self)
+        if !nameParts.isEmpty {
+            return nameParts.joined(separator: " ")
+        }
+
+        if let username = normalized(username) {
+            return username
+        }
+
+        if let emailAddress = normalized(emailAddress) {
+            return emailAddress
+        }
+
+        return "Signed in"
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
 
 enum CaptureAlert: String, Identifiable {
@@ -27,6 +109,7 @@ enum CaptureStage: Equatable {
     case idle
     case saving
     case refreshing
+    case queued
     case processing
     case saved
 
@@ -42,6 +125,8 @@ enum CaptureStage: Equatable {
             "Saving"
         case .refreshing:
             "Updating context"
+        case .queued:
+            "Queued"
         case .processing:
             "Processing"
         case .saved:
@@ -51,11 +136,63 @@ enum CaptureStage: Equatable {
 
     var isWorking: Bool {
         switch self {
-        case .saving, .refreshing, .processing:
+        case .saving, .refreshing, .queued, .processing:
             true
         case .analysisFailed, .analysisTimedOut, .idle, .saved:
             false
         }
+    }
+
+    var keepsSubmittedCaptureActive: Bool {
+        switch self {
+        case .analysisFailed, .analysisTimedOut, .queued, .processing:
+            true
+        case .idle, .refreshing, .saved, .saving:
+            false
+        }
+    }
+}
+
+enum ChromeSignalTone: Equatable {
+    case critical
+    case degraded
+}
+
+struct ChromeSignal: Equatable {
+    let accessibilityLabel: String
+    let systemImageName: String
+    let tone: ChromeSignalTone
+    let usesShimmer: Bool
+
+    init(
+        accessibilityLabel: String,
+        systemImageName: String,
+        tone: ChromeSignalTone,
+        usesShimmer: Bool = true
+    ) {
+        self.accessibilityLabel = accessibilityLabel
+        self.systemImageName = systemImageName
+        self.tone = tone
+        self.usesShimmer = usesShimmer
+    }
+}
+
+enum ChromeSignalPolicy {
+    static func evaluate(
+        stage: CaptureStage,
+        statusMessage: String,
+        hasLatestResult: Bool,
+        isOnline: Bool = true
+    ) -> ChromeSignal? {
+        if !isOnline {
+            return ChromeSignal(
+                accessibilityLabel: "Offline. Changes are saved on this device and will sync when online.",
+                systemImageName: "exclamationmark.triangle.fill",
+                tone: .degraded
+            )
+        }
+
+        return nil
     }
 }
 
@@ -81,7 +218,7 @@ enum CaptureDraftResetPolicy {
             )
         }
 
-        if hasPendingResult && (stage == .processing || stage == .analysisTimedOut || stage == .analysisFailed) {
+        if hasPendingResult && stage.keepsSubmittedCaptureActive {
             return CaptureDraftResetOutcome(
                 clearsLatestResult: false,
                 clearsPendingResult: false,
@@ -120,9 +257,122 @@ enum CaptureProcessingEditPolicy {
         CaptureProcessingEdit(
             requiresInterruptionConfirmation: isLeadingDraft
                 && hasPendingResult
-                && stage == .processing
+                && (stage == .queued || stage == .processing)
                 && currentText != nextText
         )
+    }
+}
+
+struct CaptureDraftAutosave: Equatable {
+    let bodyText: String
+}
+
+enum DailyNoteDraftHydrationPolicy {
+    static func evaluate(
+        currentDraft: String,
+        currentTrailingDraft: String,
+        bodyText: String?
+    ) -> String? {
+        guard let bodyText else { return nil }
+        let body = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return nil }
+        guard currentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              currentTrailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return body
+    }
+}
+
+enum DailyNoteParagraphRowsPolicy {
+    static func merge(
+        bodyText: String?,
+        retainedRows: [RetainedCaptureRow]
+    ) -> [RetainedCaptureRow] {
+        let bodyParagraphs = paragraphs(from: bodyText)
+        guard !bodyParagraphs.isEmpty else { return retainedRows }
+
+        var remainingRows = retainedRows
+        var projectedRows: [RetainedCaptureRow] = []
+        for paragraph in bodyParagraphs {
+            if let retainedIndex = retainedIndex(for: paragraph, in: remainingRows) {
+                projectedRows.append(remainingRows.remove(at: retainedIndex))
+            } else {
+                projectedRows.append(RetainedCaptureRow(noteText: paragraph, stage: .saved))
+            }
+        }
+
+        let activeRemainders = remainingRows.filter { row in
+            row.stage.keepsSubmittedCaptureActive
+        }
+        return projectedRows + activeRemainders
+    }
+
+    private static func retainedIndex(
+        for paragraph: String,
+        in rows: [RetainedCaptureRow]
+    ) -> Int? {
+        if let mutationRowIndex = rows.firstIndex(where: { row in
+            row.mutationId != nil && normalized(row.noteText) == paragraph
+        }) {
+            return mutationRowIndex
+        }
+
+        return rows.firstIndex { row in
+            normalized(row.noteText) == paragraph
+        }
+    }
+
+    private static func paragraphs(from bodyText: String?) -> [String] {
+        guard let bodyText else { return [] }
+        var paragraphs: [String] = []
+        var currentLines: [String] = []
+
+        func flushCurrentParagraph() {
+            let paragraph = currentLines
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !paragraph.isEmpty {
+                paragraphs.append(paragraph)
+            }
+            currentLines.removeAll()
+        }
+
+        for line in bodyText.components(separatedBy: .newlines) {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                flushCurrentParagraph()
+            } else {
+                currentLines.append(line.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        flushCurrentParagraph()
+        return paragraphs
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum CaptureDraftAutosavePolicy {
+    static func evaluate(
+        existingJournalText: String?,
+        leadingDraft: String,
+        trailingDraft: String,
+        treatsLeadingDraftAsFullBody: Bool = false
+    ) -> CaptureDraftAutosave? {
+        let leading = leadingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trailing = trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !leading.isEmpty || !trailing.isEmpty else { return nil }
+
+        let composition = JournalSaveCompositionPolicy.evaluate(
+            existingJournalText: existingJournalText,
+            leadingNote: leading,
+            trailingNote: trailing,
+            treatsLeadingNoteAsFullBody: treatsLeadingDraftAsFullBody
+        )
+        guard !composition.journalBodyText.isEmpty else { return nil }
+        return CaptureDraftAutosave(bodyText: composition.journalBodyText)
     }
 }
 
@@ -143,10 +393,10 @@ enum CaptureWritingLayoutPolicy {
         CaptureWritingLayout(
             showsLeadingDraft: !hasAttachments || hasDraftText,
             showsContinuationDraft: hasAttachments
-                || (hasPendingResult && (stage == .processing || stage == .analysisTimedOut || stage == .analysisFailed)),
+                || (hasPendingResult && stage.keepsSubmittedCaptureActive),
             leadingDraftUsesWorkingOverlay: stage.isWorking && !hasPendingResult,
             keepsStatusWithSubmittedCapture: hasPendingResult
-                && (stage == .processing || stage == .analysisTimedOut || stage == .analysisFailed)
+                && stage.keepsSubmittedCaptureActive
         )
     }
 }
@@ -263,6 +513,111 @@ enum CaptureSaveCompletionPolicy {
     }
 }
 
+enum CaptureOptimisticLocalRowPolicy {
+    static func evaluate() -> CaptureStage {
+        .queued
+    }
+}
+
+enum ConvexAgentStatusStagePolicy {
+    static func evaluate(status: String, errorCode: String?) -> CaptureStage? {
+        switch status.lowercased() {
+        case "queued":
+            .queued
+        case "running":
+            .processing
+        case "ready":
+            .saved
+        case "failed":
+            errorCode == "AI_EXTRACTION_TIMEOUT" ? .analysisTimedOut : .analysisFailed
+        default:
+            nil
+        }
+    }
+}
+
+struct ConvexAgentStatusSnapshot: Equatable {
+    let idempotencyKey: String
+    let status: String
+    let errorCode: String?
+}
+
+enum ConvexAgentStatusProjectionPolicy {
+    static func apply(
+        statuses: [ConvexAgentStatusSnapshot],
+        to rows: [RetainedCaptureRow]
+    ) -> [RetainedCaptureRow] {
+        var nextRows = rows
+        for status in statuses {
+            guard let stage = ConvexAgentStatusStagePolicy.evaluate(
+                status: status.status,
+                errorCode: status.errorCode
+            ) else {
+                continue
+            }
+            guard let index = nextRows.firstIndex(where: { row in
+                row.mutationId == status.idempotencyKey
+            }) else {
+                continue
+            }
+            let row = nextRows[index]
+            nextRows[index] = RetainedCaptureRow(
+                id: row.id,
+                analysisRunId: row.analysisRunId,
+                mutationId: row.mutationId,
+                noteText: row.noteText,
+                stage: stage
+            )
+        }
+        return nextRows
+    }
+}
+
+struct CaptureSubmissionFailure: Equatable {
+    let stage: CaptureStage
+    let statusMessage: String
+    let errorMessage: String
+}
+
+enum CaptureSubmissionFailurePolicy {
+    static func evaluate(
+        savedOnDevice: Bool,
+        isTimeout: Bool,
+        isAuthenticationRequired: Bool,
+        localizedError: String
+    ) -> CaptureSubmissionFailure {
+        if savedOnDevice {
+            return CaptureSubmissionFailure(
+                stage: .saved,
+                statusMessage: "Saved on this device",
+                errorMessage: ""
+            )
+        }
+
+        if isTimeout {
+            return CaptureSubmissionFailure(
+                stage: .processing,
+                statusMessage: "Processing in background",
+                errorMessage: ""
+            )
+        }
+
+        if isAuthenticationRequired {
+            return CaptureSubmissionFailure(
+                stage: .idle,
+                statusMessage: "Server sign-in required",
+                errorMessage: ""
+            )
+        }
+
+        return CaptureSubmissionFailure(
+            stage: .idle,
+            statusMessage: "Save failed",
+            errorMessage: localizedError
+        )
+    }
+}
+
 struct CaptureSubmissionDraft: Equatable {
     let noteText: String
     let leadingNote: String
@@ -276,7 +631,9 @@ enum CaptureSubmissionDraftPolicy {
         leadingText: String,
         trailingText: String,
         attachmentLabels: [String],
-        pendingNoteText: String?
+        pendingNoteText: String?,
+        existingJournalText: String? = nil,
+        treatsLeadingTextAsFullBody: Bool = false
     ) -> CaptureSubmissionDraft {
         let leading = leadingText.trimmingCharacters(in: .whitespacesAndNewlines)
         let trailing = trailingText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -284,13 +641,17 @@ enum CaptureSubmissionDraftPolicy {
         let leadingWasAlreadySubmitted = pending != nil && leading == pending
         let submittedLeading = leadingWasAlreadySubmitted ? "" : leading
         let includesAttachments = pending == nil
-        let typedText = [submittedLeading, trailing]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        let composition = JournalSaveCompositionPolicy.evaluate(
+            existingJournalText: existingJournalText,
+            leadingNote: submittedLeading,
+            trailingNote: trailing,
+            treatsLeadingNoteAsFullBody: treatsLeadingTextAsFullBody
+        )
+        let typedText = composition.captureNoteText
         let fallbackText = includesAttachments ? attachmentLabels.joined(separator: "\n") : ""
         let noteText = typedText.isEmpty ? fallbackText : typedText
-        let leadingNote = submittedLeading.isEmpty ? noteText : submittedLeading
-        let submittedTrailing = submittedLeading.isEmpty ? "" : trailing
+        let leadingNote = composition.leadingNote.isEmpty ? noteText : composition.leadingNote
+        let submittedTrailing = composition.leadingNote.isEmpty ? "" : composition.trailingNote
 
         return CaptureSubmissionDraft(
             noteText: noteText,
@@ -305,12 +666,20 @@ enum CaptureSubmissionDraftPolicy {
 struct RetainedCaptureRow: Identifiable, Equatable {
     let id: UUID
     let analysisRunId: String?
+    let mutationId: String?
     let noteText: String
     let stage: CaptureStage
 
-    init(id: UUID = UUID(), analysisRunId: String? = nil, noteText: String, stage: CaptureStage) {
+    init(
+        id: UUID = UUID(),
+        analysisRunId: String? = nil,
+        mutationId: String? = nil,
+        noteText: String,
+        stage: CaptureStage
+    ) {
         self.id = id
         self.analysisRunId = analysisRunId
+        self.mutationId = mutationId
         self.noteText = noteText
         self.stage = stage
     }
@@ -358,7 +727,7 @@ enum CaptureSubmissionTransitionPolicy {
         }
 
         switch stage {
-        case .analysisFailed, .analysisTimedOut, .processing:
+        case .analysisFailed, .analysisTimedOut, .queued, .processing:
             return RetainedCaptureRow(analysisRunId: analysisRunId, noteText: noteText, stage: stage)
         case .idle, .refreshing, .saved, .saving:
             return nil
@@ -367,24 +736,29 @@ enum CaptureSubmissionTransitionPolicy {
 }
 
 enum VestaChromeAction {
+    case settings
+    case statusSignal
     case todayCalendar
-    case streakCalendar
 
     var destination: VestaDestination? {
         switch self {
+        case .settings:
+            .settings
+        case .statusSignal:
+            nil
         case .todayCalendar:
             .todayCalendar
-        case .streakCalendar:
-            nil
         }
     }
 
     var sheet: VestaSheet? {
         switch self {
+        case .settings:
+            nil
+        case .statusSignal:
+            nil
         case .todayCalendar:
             nil
-        case .streakCalendar:
-            .streakCalendar
         }
     }
 }

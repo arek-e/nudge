@@ -3,6 +3,68 @@ import Foundation
 @main
 enum CaptureDraftResetSelftest {
     static func main() {
+        let defaults = UserDefaults.standard
+        let originalEngineURL = defaults.string(forKey: VestaAPI.engineURLKey)
+        let originalAnonymousUserID = defaults.string(forKey: VestaInstallIdentity.userIDKey)
+        defaults.set("http://127.0.0.1:53900", forKey: VestaAPI.engineURLKey)
+        assert(VestaAPI.configuredEngineURL == VestaAPI.defaultEngineURL)
+        assert(defaults.string(forKey: VestaAPI.engineURLKey) == VestaAPI.defaultEngineURL)
+        defaults.set("anon_550e8400-e29b-41d4-a716-446655440000", forKey: VestaInstallIdentity.userIDKey)
+        assert(VestaInstallIdentity.currentUserID(defaults: defaults) == "anon_550e8400-e29b-41d4-a716-446655440000")
+        assert(
+            VestaInstallIdentity.generatedUserID(uuidString: "550E8400-E29B-41D4-A716-446655440000")
+                == "anon_550e8400-e29b-41d4-a716-446655440000"
+        )
+        if let originalEngineURL {
+            defaults.set(originalEngineURL, forKey: VestaAPI.engineURLKey)
+        } else {
+            defaults.removeObject(forKey: VestaAPI.engineURLKey)
+        }
+        if let originalAnonymousUserID {
+            defaults.set(originalAnonymousUserID, forKey: VestaInstallIdentity.userIDKey)
+        } else {
+            defaults.removeObject(forKey: VestaInstallIdentity.userIDKey)
+        }
+        assert(VestaAPIError.httpStatus(401).errorDescription == "Server sign-in required.")
+        assert(VestaAuthPresentationPolicy.evaluate(sessionState: .loading) == .loading)
+        assert(VestaAuthPresentationPolicy.evaluate(sessionState: .signedOut) == .authForm)
+        assert(VestaAuthPresentationPolicy.evaluate(sessionState: .signedIn) == .content)
+        let namedAccount = AccountSettingsPolicy.evaluate(
+            firstName: "Alexander",
+            lastName: "Eklund",
+            username: nil,
+            emailAddress: "alex@example.com",
+            userId: "user_123",
+            sessionId: "sess_123",
+            hasVerifiedEmailAddress: true
+        )
+        assert(namedAccount.displayName == "Alexander Eklund")
+        assert(namedAccount.emailAddress == "alex@example.com")
+        assert(namedAccount.emailVerification == "Verified")
+        assert(namedAccount.userId == "user_123")
+        assert(namedAccount.sessionId == "sess_123")
+
+        let unnamedAccount = AccountSettingsPolicy.evaluate(
+            firstName: nil,
+            lastName: nil,
+            username: "arek-e",
+            emailAddress: nil,
+            userId: nil,
+            sessionId: nil,
+            hasVerifiedEmailAddress: false
+        )
+        assert(unnamedAccount.displayName == "arek-e")
+        assert(unnamedAccount.emailAddress == "No email on this account")
+        assert(unnamedAccount.emailVerification == "Not verified")
+        assert(unnamedAccount.userId == "Unavailable")
+        assert(unnamedAccount.sessionId == "Unavailable")
+        let mediaBytes = Data("image bytes".utf8)
+        let mediaBase64 = mediaBytes.base64EncodedString()
+        let uploadDraft = MediaUploadDraftPolicy.evaluate(dataURL: "data:image/jpeg;base64,\(mediaBase64)")
+        assert(uploadDraft == MediaUploadDraft(byteLength: 11, dataBase64: mediaBase64))
+        assert(MediaUploadDraftPolicy.evaluate(dataURL: "not-media") == nil)
+        assert(VestaAPIError.badMediaData.errorDescription == "The attachment could not be prepared for upload.")
+
         let editingAfterResult = CaptureDraftResetPolicy.evaluate(
             currentText: "previous note",
             nextText: "new note",
@@ -107,6 +169,61 @@ enum CaptureDraftResetSelftest {
         assert(!processingCompletion.showsResultRow)
         assert(processingCompletion.keepsResultPending)
         assert(!processingCompletion.autoPresentsDrawer)
+        let optimisticLocalRowStage = CaptureOptimisticLocalRowPolicy.evaluate()
+        assert(optimisticLocalRowStage == .queued)
+        assert(optimisticLocalRowStage.label == "Queued")
+        assert(optimisticLocalRowStage.isWorking)
+        assert(ConvexAgentStatusStagePolicy.evaluate(status: "queued", errorCode: nil) == .queued)
+        assert(ConvexAgentStatusStagePolicy.evaluate(status: "running", errorCode: nil) == .processing)
+        assert(ConvexAgentStatusStagePolicy.evaluate(status: "ready", errorCode: nil) == .saved)
+        assert(ConvexAgentStatusStagePolicy.evaluate(status: "failed", errorCode: nil) == .analysisFailed)
+        assert(
+            ConvexAgentStatusStagePolicy.evaluate(
+                status: "failed",
+                errorCode: "AI_EXTRACTION_TIMEOUT"
+            ) == .analysisTimedOut
+        )
+        assert(ConvexAgentStatusStagePolicy.evaluate(status: "unknown", errorCode: nil) == nil)
+        let paragraphStatusRows = [
+            RetainedCaptureRow(mutationId: "mutation-a", noteText: "First paragraph", stage: .queued),
+            RetainedCaptureRow(mutationId: "mutation-b", noteText: "Second paragraph", stage: .queued),
+        ]
+        let paragraphStatusProjection = ConvexAgentStatusProjectionPolicy.apply(
+            statuses: [
+                ConvexAgentStatusSnapshot(
+                    idempotencyKey: "mutation-a",
+                    status: "ready",
+                    errorCode: nil
+                )
+            ],
+            to: paragraphStatusRows
+        )
+        assert(paragraphStatusProjection[0].stage == .saved)
+        assert(paragraphStatusProjection[1].stage == .queued)
+
+        let projectedDailyNoteRows = DailyNoteParagraphRowsPolicy.merge(
+            bodyText: "Morning note\n\nAfternoon note",
+            retainedRows: []
+        )
+        assert(projectedDailyNoteRows.map(\.noteText) == ["Morning note", "Afternoon note"])
+        assert(projectedDailyNoteRows.allSatisfy { $0.stage == .saved })
+
+        let queuedParagraphRows = DailyNoteParagraphRowsPolicy.merge(
+            bodyText: "Morning note\n\nAfternoon note",
+            retainedRows: [
+                RetainedCaptureRow(
+                    mutationId: "mutation-afternoon",
+                    noteText: "Afternoon note",
+                    stage: .queued
+                )
+            ]
+        )
+        assert(queuedParagraphRows.count == 2)
+        assert(queuedParagraphRows[0].noteText == "Morning note")
+        assert(queuedParagraphRows[0].stage == .saved)
+        assert(queuedParagraphRows[1].noteText == "Afternoon note")
+        assert(queuedParagraphRows[1].mutationId == "mutation-afternoon")
+        assert(queuedParagraphRows[1].stage == .queued)
 
         let timedOutCompletion = CaptureSaveCompletionPolicy.evaluate(
             isProcessing: false,
@@ -124,6 +241,90 @@ enum CaptureDraftResetSelftest {
         assert(completedCompletion.showsResultRow)
         assert(!completedCompletion.keepsResultPending)
         assert(!completedCompletion.autoPresentsDrawer)
+
+        let unauthenticatedSubmissionFailure = CaptureSubmissionFailurePolicy.evaluate(
+            savedOnDevice: false,
+            isTimeout: false,
+            isAuthenticationRequired: true,
+            localizedError: "The server returned HTTP 401."
+        )
+        assert(unauthenticatedSubmissionFailure.stage == .idle)
+        assert(unauthenticatedSubmissionFailure.statusMessage == "Server sign-in required")
+        assert(unauthenticatedSubmissionFailure.errorMessage.isEmpty)
+
+        let localTimeoutSubmissionFailure = CaptureSubmissionFailurePolicy.evaluate(
+            savedOnDevice: true,
+            isTimeout: true,
+            isAuthenticationRequired: false,
+            localizedError: "The request timed out."
+        )
+        assert(localTimeoutSubmissionFailure.stage == .saved)
+        assert(localTimeoutSubmissionFailure.statusMessage == "Saved on this device")
+        assert(localTimeoutSubmissionFailure.errorMessage.isEmpty)
+
+        let unavailableSignal = ChromeSignalPolicy.evaluate(
+            stage: .idle,
+            statusMessage: "Engine unavailable",
+            hasLatestResult: false,
+            isOnline: true
+        )
+        assert(unavailableSignal == nil)
+
+        let authSignal = ChromeSignalPolicy.evaluate(
+            stage: .idle,
+            statusMessage: "Server sign-in required",
+            hasLatestResult: false,
+            isOnline: true
+        )
+        assert(authSignal == nil)
+
+        let localSyncUnavailableSignal = ChromeSignalPolicy.evaluate(
+            stage: .idle,
+            statusMessage: "Local sync unavailable",
+            hasLatestResult: false,
+            isOnline: true
+        )
+        assert(localSyncUnavailableSignal == nil)
+
+        let onlineLocalOnlySignal = ChromeSignalPolicy.evaluate(
+            stage: .processing,
+            statusMessage: "Saved on this device",
+            hasLatestResult: false,
+            isOnline: true
+        )
+        assert(onlineLocalOnlySignal == nil)
+
+        let offlineSignal = ChromeSignalPolicy.evaluate(
+            stage: .processing,
+            statusMessage: "Saved on this device",
+            hasLatestResult: false,
+            isOnline: false
+        )
+        assert(offlineSignal?.accessibilityLabel == "Offline. Changes are saved on this device and will sync when online.")
+        assert(offlineSignal?.systemImageName == "exclamationmark.triangle.fill")
+        assert(offlineSignal?.tone == .degraded)
+        assert(offlineSignal?.usesShimmer == true)
+
+        let latestResultSignal = ChromeSignalPolicy.evaluate(
+            stage: .saved,
+            statusMessage: "Saved to Vesta",
+            hasLatestResult: true
+        )
+        assert(latestResultSignal == nil)
+
+        let processingSignal = ChromeSignalPolicy.evaluate(
+            stage: .processing,
+            statusMessage: "Processing in background",
+            hasLatestResult: false
+        )
+        assert(processingSignal == nil)
+
+        let savedSignal = ChromeSignalPolicy.evaluate(
+            stage: .saved,
+            statusMessage: "Saved to Vesta",
+            hasLatestResult: false
+        )
+        assert(savedSignal == nil)
 
         let processingWritingLayout = CaptureWritingLayoutPolicy.evaluate(
             hasAttachments: false,
@@ -201,6 +402,19 @@ enum CaptureDraftResetSelftest {
         assert(editedProcessingSubmission.noteText == "Already submitted, edited")
         assert(editedProcessingSubmission.leadingNote == "Already submitted, edited")
 
+        let hydratedDailyNoteSubmission = CaptureSubmissionDraftPolicy.evaluate(
+            leadingText: "Morning note\n\nAfternoon note",
+            trailingText: "",
+            attachmentLabels: [],
+            pendingNoteText: nil,
+            existingJournalText: "Morning note",
+            treatsLeadingTextAsFullBody: true
+        )
+        assert(hydratedDailyNoteSubmission.hasContent)
+        assert(hydratedDailyNoteSubmission.noteText == "Afternoon note")
+        assert(hydratedDailyNoteSubmission.leadingNote == "Morning note\n\nAfternoon note")
+        assert(hydratedDailyNoteSubmission.trailingNote == "")
+
         let failedContinuationTransition = CaptureSubmissionTransitionPolicy.evaluate(
             analysisRunId: "run-failed",
             currentLeadingText: "Previous failed note",
@@ -244,5 +458,56 @@ enum CaptureDraftResetSelftest {
         )
         assert(appendedJournalSave.journalBodyText == "Previous failed note\n\nNew note")
         assert(appendedJournalSave.captureNoteText == "New note")
+
+        let hydratedJournalSave = JournalSaveCompositionPolicy.evaluate(
+            existingJournalText: "Morning note",
+            leadingNote: "Morning note\n\nAfternoon note",
+            trailingNote: ""
+        )
+        assert(hydratedJournalSave.journalBodyText == "Morning note\n\nAfternoon note")
+        assert(hydratedJournalSave.captureNoteText == "Afternoon note")
+        assert(hydratedJournalSave.leadingNote == "Afternoon note")
+
+        let hydratedEditor = DailyNoteDraftHydrationPolicy.evaluate(
+            currentDraft: "",
+            currentTrailingDraft: "",
+            bodyText: "Morning note"
+        )
+        assert(hydratedEditor == "Morning note")
+
+        let activeEditorHydration = DailyNoteDraftHydrationPolicy.evaluate(
+            currentDraft: "Unsaved thought",
+            currentTrailingDraft: "",
+            bodyText: "Morning note"
+        )
+        assert(activeEditorHydration == nil)
+
+        let emptyAutosave = CaptureDraftAutosavePolicy.evaluate(
+            existingJournalText: "Already saved",
+            leadingDraft: "   ",
+            trailingDraft: ""
+        )
+        assert(emptyAutosave == nil)
+
+        let firstAutosave = CaptureDraftAutosavePolicy.evaluate(
+            existingJournalText: nil,
+            leadingDraft: "First live line",
+            trailingDraft: ""
+        )
+        assert(firstAutosave?.bodyText == "First live line")
+
+        let continuationAutosave = CaptureDraftAutosavePolicy.evaluate(
+            existingJournalText: "Already saved",
+            leadingDraft: "",
+            trailingDraft: "Still writing"
+        )
+        assert(continuationAutosave?.bodyText == "Already saved\n\nStill writing")
+
+        let hydratedAutosave = CaptureDraftAutosavePolicy.evaluate(
+            existingJournalText: "Already saved",
+            leadingDraft: "Already saved\n\nStill writing",
+            trailingDraft: ""
+        )
+        assert(hydratedAutosave?.bodyText == "Already saved\n\nStill writing")
     }
 }

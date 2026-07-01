@@ -1,4 +1,5 @@
 import PencilKit
+import Network
 import SwiftUI
 import UIKit
 
@@ -131,6 +132,7 @@ private struct PendingCaptureResultContext {
 @MainActor
 final class VestaCaptureViewModel: ObservableObject {
     private static let dailyStreakKey = "vesta.dailyStreak"
+    private static let draftAutosaveDelayNanoseconds: UInt64 = 700_000_000
     private static let lastStreakDateKey = "vesta.lastStreakDate"
     private let defaults = UserDefaults.standard
 
@@ -144,6 +146,7 @@ final class VestaCaptureViewModel: ObservableObject {
     @Published var journal: JournalDocument?
     @Published var latestRun: AgentRun?
     @Published var latestResult: CaptureResult?
+    @Published private(set) var isOnline = true
     @Published var presentedResult: CaptureResult?
     @Published var previewedAttachment: CaptureAttachment?
     @Published var editingDrawing: CaptureAttachment?
@@ -153,19 +156,86 @@ final class VestaCaptureViewModel: ObservableObject {
     @Published var stage: CaptureStage = .idle
     @Published var statusMessage = "Connecting"
     @Published var trailingDraft = ""
+    private let noteSyncCoordinator: NoteSyncCoordinator?
+    private var draftAutosaveBaseBodyText: String?
+    private var draftAutosaveTask: Task<Void, Never>?
+    private var isDraftHydratedFromDailyNote = false
+    private var lastAutosavedBodyText: String?
     private var lastStreakDate: String
+    private let networkMonitor = NWPathMonitor()
+    private let networkMonitorQueue = DispatchQueue(label: "app.vesta.network-monitor")
     private var pendingInterruptedDraftText: String?
     private var pendingResultContext: PendingCaptureResultContext?
 
     init() {
         dailyStreak = defaults.integer(forKey: Self.dailyStreakKey)
         lastStreakDate = defaults.string(forKey: Self.lastStreakDateKey) ?? ""
+        do {
+            let store = try LocalNoteStore.live()
+            noteSyncCoordinator = NoteSyncCoordinator(
+                store: store,
+                client: ConvexNoteClient(client: vestaConvexClient)
+            )
+            Task { [weak self, noteSyncCoordinator] in
+                guard let self else { return }
+                let localDate = Self.localDate()
+                if let localNote = await noteSyncCoordinator?.localDailyNote(localDate: localDate) {
+                    journal = Self.journalDocument(from: localNote)
+                    applyDailyNoteBody(localNote.bodyText)
+                    if localNote.syncStatus == "pending_sync" {
+                        statusMessage = "Saved on this device"
+                    }
+                }
+                await noteSyncCoordinator?.startRemoteProjection(localDate: localDate) { [weak self] projection in
+                    self?.applyProjectedDailyNote(projection)
+                }
+                if let receipt = await noteSyncCoordinator?.syncPending() {
+                    apply(noteSyncReceipt: receipt)
+                }
+            }
+        } catch {
+            print("Vesta local note store failed: \(error.localizedDescription)")
+            statusMessage = "Local sync unavailable"
+            noteSyncCoordinator = nil
+        }
+        startNetworkMonitor()
+    }
+
+    deinit {
+        draftAutosaveTask?.cancel()
+        networkMonitor.cancel()
+    }
+
+    private func startNetworkMonitor() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let nextIsOnline = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let wasOnline = self.isOnline
+                self.isOnline = nextIsOnline
+                guard nextIsOnline, !wasOnline, let noteSyncCoordinator = self.noteSyncCoordinator else {
+                    return
+                }
+                let receipt = await noteSyncCoordinator.syncPending()
+                self.apply(noteSyncReceipt: receipt)
+            }
+        }
+        networkMonitor.start(queue: networkMonitorQueue)
     }
 
     var openLoopCount: Int {
         actions.filter { action in
             action.status == "proposed" || action.status == "accepted"
         }.count
+    }
+
+    var chromeSignal: ChromeSignal? {
+        ChromeSignalPolicy.evaluate(
+            stage: stage,
+            statusMessage: statusMessage,
+            hasLatestResult: latestResult != nil,
+            isOnline: isOnline
+        )
     }
 
     var hasDraft: Bool {
@@ -185,12 +255,12 @@ final class VestaCaptureViewModel: ObservableObject {
     }
 
     var shouldFocusContinuationDraft: Bool {
-        pendingResultContext != nil && stage == .processing
+        pendingResultContext != nil && (stage == .queued || stage == .processing)
     }
 
     var shouldPollProcessing: Bool {
-        (pendingResultContext != nil && stage == .processing)
-            || retainedRows.contains { $0.stage == .processing }
+        (pendingResultContext != nil && (stage == .queued || stage == .processing))
+            || retainedRows.contains { $0.stage == .queued || $0.stage == .processing }
     }
 
     var todayLocalDate: String {
@@ -219,7 +289,11 @@ final class VestaCaptureViewModel: ObservableObject {
             stage: stage
         )
         draft = text
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isDraftHydratedFromDailyNote = false
+        }
         apply(reset)
+        scheduleDraftAutosave()
     }
 
     func updateTrailingDraft(_ text: String) {
@@ -232,6 +306,7 @@ final class VestaCaptureViewModel: ObservableObject {
         )
         trailingDraft = text
         apply(reset)
+        scheduleDraftAutosave()
     }
 
     func confirmProcessingEditInterruption() {
@@ -250,6 +325,7 @@ final class VestaCaptureViewModel: ObservableObject {
         activeAlert = nil
         apply(reset)
         statusMessage = "Editing note"
+        scheduleDraftAutosave()
     }
 
     func cancelProcessingEditInterruption() {
@@ -278,6 +354,10 @@ final class VestaCaptureViewModel: ObservableObject {
             calendarDays = try await loadedCalendarDays
             actions = actionsResponse.actions
             journal = try await loadedJournal
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                applyDailyNoteBody(journal?.bodyText)
+            }
             latestRun = actionsResponse.latestRun
             let isProcessing = latestRun?.isProcessing == true
             let tracksPendingResult = pendingResultContext != nil
@@ -301,7 +381,7 @@ final class VestaCaptureViewModel: ObservableObject {
                 self.pendingResultContext = nil
                 stage = .saved
                 statusMessage = "Saved to Vesta"
-            } else if stage == .processing {
+            } else if stage == .queued || stage == .processing {
                 stage = .idle
                 statusMessage = "Connected"
             } else {
@@ -309,6 +389,13 @@ final class VestaCaptureViewModel: ObservableObject {
             }
             await refreshRetainedRows()
         } catch {
+            if await applyLocalJournalFallback(localDate: Self.localDate()) {
+                return
+            }
+            if Self.isAuthenticationRequired(error) {
+                statusMessage = "Server sign-in required"
+                return
+            }
             statusMessage = "Engine unavailable"
         }
     }
@@ -327,6 +414,7 @@ final class VestaCaptureViewModel: ObservableObject {
         } else {
             trailingDraft = Self.appending("Remember ", to: trailingDraft)
         }
+        scheduleDraftAutosave()
     }
 
     func addJournalingSuggestion() {
@@ -339,6 +427,7 @@ final class VestaCaptureViewModel: ObservableObject {
             latestResult = nil
             stage = .idle
         }
+        scheduleDraftAutosave()
     }
 
     func applyTextFormat(_ format: TextFormatAction) {
@@ -355,6 +444,7 @@ final class VestaCaptureViewModel: ObservableObject {
         } else {
             draft = formatted
         }
+        scheduleDraftAutosave()
     }
 
     private static func appending(_ line: String, to text: String) -> String {
@@ -456,12 +546,15 @@ final class VestaCaptureViewModel: ObservableObject {
         let trailingText = trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let pendingNoteText = pendingResultContext?.noteText
         let previousPendingStage = stage
-        let existingJournalText = journal?.bodyText
+        let existingJournalText = draftCompositionBaseBodyText()
+        let localDate = Self.localDate()
         let submission = CaptureSubmissionDraftPolicy.evaluate(
             leadingText: leadingText,
             trailingText: trailingText,
             attachmentLabels: attachments.map(\.label),
-            pendingNoteText: pendingNoteText
+            pendingNoteText: pendingNoteText,
+            existingJournalText: existingJournalText,
+            treatsLeadingTextAsFullBody: isDraftHydratedFromDailyNote
         )
         guard submission.hasContent else {
             if pendingNoteText == nil {
@@ -471,6 +564,7 @@ final class VestaCaptureViewModel: ObservableObject {
         }
         guard !saving else { return }
 
+        draftAutosaveTask?.cancel()
         let mediaAttachments = submission.includesAttachments ? attachments.map(\.journalAttachment) : []
 
         saving = true
@@ -479,13 +573,71 @@ final class VestaCaptureViewModel: ObservableObject {
         statusMessage = "Saving"
         stage = .saving
 
+        let localComposition = JournalSaveCompositionPolicy.evaluate(
+            existingJournalText: existingJournalText,
+            leadingNote: submission.leadingNote,
+            trailingNote: submission.trailingNote,
+            treatsLeadingNoteAsFullBody: isDraftHydratedFromDailyNote
+        )
+        var savedOnDevice = false
+        if let noteSyncCoordinator {
+            do {
+                let localNote = try await noteSyncCoordinator.saveLocalDraft(
+                    localDate: localDate,
+                    title: localDate,
+                    bodyText: localComposition.journalBodyText
+                )
+                journal = Self.journalDocument(from: localNote)
+                draftAutosaveBaseBodyText = localNote.bodyText
+                lastAutosavedBodyText = localNote.bodyText
+                updateDailyStreak(for: localNote.localDate)
+                savedOnDevice = true
+                if mediaAttachments.isEmpty {
+                    let optimisticRowId = completeOptimisticLocalSubmission(
+                        mutationId: localNote.pendingMutationId,
+                        noteText: submission.noteText,
+                        pendingNoteText: pendingNoteText,
+                        previousPendingStage: previousPendingStage
+                    )
+                    let existingJournalTextForRemoteSave = existingJournalText
+                    let leadingNoteForRemoteSave = submission.leadingNote
+                    let trailingNoteForRemoteSave = submission.trailingNote
+                    let submittedNoteText = submission.noteText
+                    let treatsRemoteNoteAsFullBody = isDraftHydratedFromDailyNote
+                    Task { [noteSyncCoordinator] in
+                        let receipt = await noteSyncCoordinator.syncPending()
+                        self.apply(noteSyncReceipt: receipt)
+                        await self.finishRemoteSubmission(
+                            noteText: submittedNoteText,
+                            leadingNote: leadingNoteForRemoteSave,
+                            trailingNote: trailingNoteForRemoteSave,
+                            attachments: [],
+                            existingJournalText: existingJournalTextForRemoteSave,
+                            localDate: localDate,
+                            optimisticRowId: optimisticRowId,
+                            treatsNoteAsFullBody: treatsRemoteNoteAsFullBody
+                        )
+                    }
+                    return
+                }
+                statusMessage = "Saved on this device"
+                Task { [noteSyncCoordinator] in
+                    let receipt = await noteSyncCoordinator.syncPending()
+                    self.apply(noteSyncReceipt: receipt)
+                }
+            } catch {
+                savedOnDevice = false
+            }
+        }
+
         do {
             let saved = try await VestaAPI.saveDailyNote(
                 submission.leadingNote,
                 attachments: mediaAttachments,
                 existingJournalText: existingJournalText,
                 trailingNote: submission.trailingNote,
-                localDate: Self.localDate()
+                localDate: localDate,
+                treatsNoteAsFullBody: isDraftHydratedFromDailyNote
             )
             latestRun = saved.analysisRun ?? latestRun
             updateDailyStreak(for: saved.journal.localDate)
@@ -525,18 +677,216 @@ final class VestaCaptureViewModel: ObservableObject {
             stage = completion.stage
             statusMessage = completion.statusMessage
         } catch {
-            if Self.isTimeout(error) {
-                stage = .processing
-                errorMessage = ""
-                statusMessage = "Processing in background"
-            } else {
-                stage = .idle
-                errorMessage = error.localizedDescription
-                statusMessage = "Save failed"
-            }
+            let failure = CaptureSubmissionFailurePolicy.evaluate(
+                savedOnDevice: savedOnDevice && mediaAttachments.isEmpty,
+                isTimeout: Self.isTimeout(error),
+                isAuthenticationRequired: Self.isAuthenticationRequired(error),
+                localizedError: error.localizedDescription
+            )
+            stage = failure.stage
+            errorMessage = failure.errorMessage
+            statusMessage = failure.statusMessage
         }
 
         saving = false
+    }
+
+    private func scheduleDraftAutosave() {
+        guard let noteSyncCoordinator else { return }
+        let baseBodyText = draftCompositionBaseBodyText()
+        if draftAutosaveBaseBodyText == nil {
+            draftAutosaveBaseBodyText = baseBodyText ?? ""
+        }
+        guard let autosave = CaptureDraftAutosavePolicy.evaluate(
+            existingJournalText: baseBodyText,
+            leadingDraft: draft,
+            trailingDraft: trailingDraft,
+            treatsLeadingDraftAsFullBody: isDraftHydratedFromDailyNote
+        ) else {
+            draftAutosaveTask?.cancel()
+            return
+        }
+        guard autosave.bodyText != lastAutosavedBodyText else { return }
+
+        let localDate = Self.localDate()
+        let title = localDate
+        draftAutosaveTask?.cancel()
+        draftAutosaveTask = Task { [weak self, noteSyncCoordinator, bodyText = autosave.bodyText] in
+            do {
+                try await Task.sleep(nanoseconds: Self.draftAutosaveDelayNanoseconds)
+            } catch {
+                return
+            }
+            if Task.isCancelled { return }
+            await self?.autosaveDraft(
+                bodyText: bodyText,
+                localDate: localDate,
+                noteSyncCoordinator: noteSyncCoordinator,
+                title: title
+            )
+        }
+    }
+
+    private func autosaveDraft(
+        bodyText: String,
+        localDate: String,
+        noteSyncCoordinator: NoteSyncCoordinator,
+        title: String
+    ) async {
+        do {
+            let localNote = try await noteSyncCoordinator.saveLocalDraft(
+                localDate: localDate,
+                title: title,
+                bodyText: bodyText
+            )
+            lastAutosavedBodyText = localNote.bodyText
+            journal = Self.journalDocument(from: localNote)
+            updateDailyStreak(for: localNote.localDate)
+            if stage == .idle {
+                statusMessage = "Saved on this device"
+            }
+            let receipt = await noteSyncCoordinator.syncPending()
+            apply(noteSyncReceipt: receipt)
+        } catch {
+            statusMessage = "Saved on this device"
+        }
+    }
+
+    private func apply(noteSyncReceipt receipt: NoteSyncReceipt) {
+        if receipt.hasFailures {
+            statusMessage = "Saved on this device"
+            if let lastErrorDescription = receipt.lastErrorDescription {
+                print("Vesta Convex sync failed: \(lastErrorDescription)")
+            }
+            return
+        }
+
+        if receipt.acceptedCount > 0, stage != .processing {
+            statusMessage = "Connected"
+        }
+    }
+
+    private func completeOptimisticLocalSubmission(
+        mutationId: String?,
+        noteText: String,
+        pendingNoteText: String?,
+        previousPendingStage: CaptureStage
+    ) -> UUID {
+        let transition = CaptureSubmissionTransitionPolicy.evaluate(
+            analysisRunId: pendingResultContext?.saved.analysisRun?.id,
+            currentLeadingText: draft.trimmingCharacters(in: .whitespacesAndNewlines),
+            submittedNoteText: noteText,
+            pendingNoteText: pendingNoteText,
+            stage: previousPendingStage
+        )
+        if let retainedRow = transition.retainedRow {
+            appendRetainedRow(retainedRow)
+        }
+
+        let optimisticRow = RetainedCaptureRow(
+            mutationId: mutationId,
+            noteText: noteText,
+            stage: CaptureOptimisticLocalRowPolicy.evaluate()
+        )
+        appendRetainedRow(optimisticRow)
+        attachments.removeAll()
+        draft = ""
+        isDraftHydratedFromDailyNote = false
+        trailingDraft = ""
+        latestResult = nil
+        pendingResultContext = nil
+        errorMessage = ""
+        stage = .saved
+        statusMessage = "Saved on this device"
+        saving = false
+        return optimisticRow.id
+    }
+
+    private func finishRemoteSubmission(
+        noteText: String,
+        leadingNote: String,
+        trailingNote: String,
+        attachments: [JournalMediaAttachment],
+        existingJournalText: String?,
+        localDate: String,
+        optimisticRowId: UUID,
+        treatsNoteAsFullBody: Bool
+    ) async {
+        do {
+            let saved = try await VestaAPI.saveDailyNote(
+                leadingNote,
+                attachments: attachments,
+                existingJournalText: existingJournalText,
+                trailingNote: trailingNote,
+                localDate: localDate,
+                treatsNoteAsFullBody: treatsNoteAsFullBody
+            )
+            latestRun = saved.analysisRun ?? latestRun
+            journal = saved.journal
+            draftAutosaveBaseBodyText = saved.journal.bodyText
+            lastAutosavedBodyText = saved.journal.bodyText
+            updateDailyStreak(for: saved.journal.localDate)
+            latestResult = makeResult(for: noteText, saved: saved)
+            updateRetainedRow(
+                id: optimisticRowId,
+                analysisRunId: saved.analysisRun?.id,
+                stage: saved.analysisRun.map(Self.stage(for:)) ?? .saved
+            )
+            statusMessage = "Saved to Vesta"
+        } catch {
+            if Self.isAuthenticationRequired(error) {
+                statusMessage = "Server sign-in required"
+            } else {
+                statusMessage = "Saved on this device"
+            }
+        }
+    }
+
+    private func applyLocalJournalFallback(localDate: String) async -> Bool {
+        guard let localNote = await noteSyncCoordinator?.localDailyNote(localDate: localDate) else {
+            return false
+        }
+
+        applyProjectedDailyNote(LocalDailyNoteProjection(note: localNote, agentStatuses: []))
+        return true
+    }
+
+    private func applyProjectedDailyNote(_ projection: LocalDailyNoteProjection) {
+        let localNote = projection.note
+        journal = Self.journalDocument(from: localNote)
+        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applyDailyNoteBody(localNote.bodyText)
+        }
+        applyProjectedAgentStatuses(projection.agentStatuses)
+        if stage != .processing {
+            statusMessage = localNote.syncStatus == "pending_sync" ? "Saved on this device" : "Connected"
+        }
+    }
+
+    private func applyProjectedAgentStatuses(_ statuses: [ConvexRemoteAgentStatus]) {
+        let snapshots = statuses.compactMap { status -> ConvexAgentStatusSnapshot? in
+            guard let idempotencyKey = status.idempotencyKey else { return nil }
+            return ConvexAgentStatusSnapshot(
+                idempotencyKey: idempotencyKey,
+                status: status.status,
+                errorCode: status.errorCode
+            )
+        }
+        retainedRows = ConvexAgentStatusProjectionPolicy.apply(
+            statuses: snapshots,
+            to: retainedRows
+        )
+    }
+
+    private static func journalDocument(from localNote: LocalDailyNote) -> JournalDocument {
+        JournalDocument(
+            id: "local-\(localNote.localDate)",
+            localDate: localNote.localDate,
+            title: localNote.title,
+            bodyText: localNote.bodyText,
+            updatedAt: localNote.updatedAt
+        )
     }
 
     private func appendImage(_ image: UIImage, kind: CaptureAttachmentKind) {
@@ -552,6 +902,9 @@ final class VestaCaptureViewModel: ObservableObject {
 
     private func appendRetainedRow(_ row: RetainedCaptureRow) {
         guard !retainedRows.contains(where: { retainedRow in
+            if let mutationId = row.mutationId {
+                return retainedRow.mutationId == mutationId
+            }
             if let analysisRunId = row.analysisRunId {
                 return retainedRow.analysisRunId == analysisRunId
             }
@@ -562,10 +915,22 @@ final class VestaCaptureViewModel: ObservableObject {
         retainedRows.append(row)
     }
 
+    private func updateRetainedRow(id: UUID, analysisRunId: String?, stage: CaptureStage) {
+        guard let index = retainedRows.firstIndex(where: { $0.id == id }) else { return }
+        let current = retainedRows[index]
+        retainedRows[index] = RetainedCaptureRow(
+            id: current.id,
+            analysisRunId: analysisRunId,
+            mutationId: current.mutationId,
+            noteText: current.noteText,
+            stage: stage
+        )
+    }
+
     private func refreshRetainedRows() async {
         var updatedRows: [RetainedCaptureRow] = []
         for row in retainedRows {
-            guard row.stage == .processing, let analysisRunId = row.analysisRunId else {
+            guard (row.stage == .queued || row.stage == .processing), let analysisRunId = row.analysisRunId else {
                 updatedRows.append(row)
                 continue
             }
@@ -577,6 +942,7 @@ final class VestaCaptureViewModel: ObservableObject {
                 RetainedCaptureRow(
                     id: row.id,
                     analysisRunId: row.analysisRunId,
+                    mutationId: row.mutationId,
                     noteText: row.noteText,
                     stage: Self.stage(for: run)
                 )
@@ -659,6 +1025,44 @@ final class VestaCaptureViewModel: ObservableObject {
         stage = reset.stage
     }
 
+    private func draftCompositionBaseBodyText() -> String? {
+        if let draftAutosaveBaseBodyText {
+            return draftAutosaveBaseBodyText.isEmpty ? nil : draftAutosaveBaseBodyText
+        }
+        return journal?.bodyText
+    }
+
+    private func applyDailyNoteBody(_ bodyText: String?) {
+        draftAutosaveBaseBodyText = bodyText
+        lastAutosavedBodyText = bodyText
+        let hasActiveDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !hasActiveDraft {
+            let projectedRows = DailyNoteParagraphRowsPolicy.merge(
+                bodyText: bodyText,
+                retainedRows: retainedRows
+            )
+            if !projectedRows.isEmpty {
+                retainedRows = projectedRows
+                isDraftHydratedFromDailyNote = false
+                return
+            }
+        }
+        guard pendingResultContext == nil, retainedRows.isEmpty else { return }
+        guard let hydratedDraft = DailyNoteDraftHydrationPolicy.evaluate(
+            currentDraft: draft,
+            currentTrailingDraft: trailingDraft,
+            bodyText: bodyText
+        ) else {
+            if bodyText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                isDraftHydratedFromDailyNote = false
+            }
+            return
+        }
+        draft = hydratedDraft
+        isDraftHydratedFromDailyNote = true
+    }
+
     private func updateDailyStreak(for localDate: String) {
         guard lastStreakDate != localDate else { return }
         if Self.previousLocalDate(from: localDate) == lastStreakDate {
@@ -693,10 +1097,24 @@ final class VestaCaptureViewModel: ObservableObject {
         (error as? URLError)?.code == .timedOut || (error as NSError).code == NSURLErrorTimedOut
     }
 
+    private static func isAuthenticationRequired(_ error: Error) -> Bool {
+        if case VestaAPIError.httpStatus(401) = error {
+            return true
+        }
+        return false
+    }
+
     private static func stage(for run: AgentRun) -> CaptureStage {
-        if run.isProcessing { return .processing }
         if run.isFailed {
             return run.errorCode == "AI_EXTRACTION_TIMEOUT" ? .analysisTimedOut : .analysisFailed
+        }
+        switch run.status.lowercased() {
+        case "pending", "queued":
+            return .queued
+        case "in_progress", "processing", "running":
+            return .processing
+        default:
+            break
         }
         return .saved
     }

@@ -8,11 +8,6 @@ export type ReviewQueueItemType =
   | "routine_change"
   | "consent_grant";
 
-export interface DevUser {
-  id: UserId;
-  displayName: string;
-}
-
 export type ProposalKind = "clarify" | "follow_up" | "commit" | "ignore";
 
 export interface SignalLike {

@@ -20,6 +20,14 @@
 		1A00000C2C00000000000001 /* CaptureDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00010D2C00000000000001 /* CaptureDetailSheet.swift */; };
 		1A00000D2C00000000000001 /* CalendarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00010E2C00000000000001 /* CalendarViews.swift */; };
 		1A00000E2C00000000000001 /* VestaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00010F2C00000000000001 /* VestaPresentation.swift */; };
+		1A00000F2C00000000000001 /* ConvexNoteSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001102C00000000000001 /* ConvexNoteSync.swift */; };
+		1A0000102C00000000000001 /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A042C00000000000001 /* ConvexMobile */; };
+		1A0000112C00000000000001 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A062C00000000000001 /* GRDB */; };
+		1A0000122C00000000000001 /* VestaAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001112C00000000000001 /* VestaAuth.swift */; };
+		1A0000132C00000000000001 /* ClerkConvex in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A082C00000000000001 /* ClerkConvex */; };
+		1A0000142C00000000000001 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0A2C00000000000001 /* ClerkKit */; };
+		1A0000152C00000000000001 /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0B2C00000000000001 /* ClerkKitUI */; };
+		1A0000162C00000000000001 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001122C00000000000001 /* SettingsScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +45,9 @@
 		1A00010D2C00000000000001 /* CaptureDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureDetailSheet.swift; sourceTree = "<group>"; };
 		1A00010E2C00000000000001 /* CalendarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarViews.swift; sourceTree = "<group>"; };
 		1A00010F2C00000000000001 /* VestaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VestaPresentation.swift; sourceTree = "<group>"; };
+		1A0001102C00000000000001 /* ConvexNoteSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvexNoteSync.swift; sourceTree = "<group>"; };
+		1A0001112C00000000000001 /* VestaAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VestaAuth.swift; sourceTree = "<group>"; };
+		1A0001122C00000000000001 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +56,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000062C00000000000001 /* HorizonCalendar in Frameworks */,
+				1A0000102C00000000000001 /* ConvexMobile in Frameworks */,
+				1A0000112C00000000000001 /* GRDB in Frameworks */,
+				1A0000132C00000000000001 /* ClerkConvex in Frameworks */,
+				1A0000142C00000000000001 /* ClerkKit in Frameworks */,
+				1A0000152C00000000000001 /* ClerkKitUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,11 +81,14 @@
 				1A0001012C00000000000001 /* VestaApp.swift */,
 				1A0001022C00000000000001 /* ContentView.swift */,
 				1A0001082C00000000000001 /* VestaCaptureViewModel.swift */,
+				1A0001102C00000000000001 /* ConvexNoteSync.swift */,
 				1A0001032C00000000000001 /* VestaAPI.swift */,
+				1A0001112C00000000000001 /* VestaAuth.swift */,
 				1A0001042C00000000000001 /* LogVoiceIntent.swift */,
 				1A0001072C00000000000001 /* CalendarStats.swift */,
 				1A00010F2C00000000000001 /* VestaPresentation.swift */,
 				1A00010E2C00000000000001 /* CalendarViews.swift */,
+				1A0001122C00000000000001 /* SettingsScreen.swift */,
 				1A00010D2C00000000000001 /* CaptureDetailSheet.swift */,
 				1A00010C2C00000000000001 /* CaptureInputViews.swift */,
 				1A00010B2C00000000000001 /* TopChrome.swift */,
@@ -105,6 +124,11 @@
 			name = Vesta;
 			packageProductDependencies = (
 				1A000A022C00000000000001 /* HorizonCalendar */,
+				1A000A042C00000000000001 /* ConvexMobile */,
+				1A000A062C00000000000001 /* GRDB */,
+				1A000A082C00000000000001 /* ClerkConvex */,
+				1A000A0A2C00000000000001 /* ClerkKit */,
+				1A000A0B2C00000000000001 /* ClerkKitUI */,
 			);
 			productName = Vesta;
 			productReference = 1A0001062C00000000000001 /* Vesta.app */;
@@ -136,6 +160,10 @@
 			mainGroup = 1A0003012C00000000000001;
 			packageReferences = (
 				1A000A012C00000000000001 /* XCRemoteSwiftPackageReference "HorizonCalendar" */,
+				1A000A032C00000000000001 /* XCRemoteSwiftPackageReference "convex-swift" */,
+				1A000A052C00000000000001 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				1A000A072C00000000000001 /* XCRemoteSwiftPackageReference "clerk-convex-swift" */,
+				1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 			);
 			productRefGroup = 1A0003032C00000000000001 /* Products */;
 			projectDirPath = "";
@@ -168,11 +196,14 @@
 				1A0000052C00000000000001 /* CalendarStats.swift in Sources */,
 				1A0000072C00000000000001 /* VestaCaptureViewModel.swift in Sources */,
 				1A0000082C00000000000001 /* VestaTheme.swift in Sources */,
+				1A00000F2C00000000000001 /* ConvexNoteSync.swift in Sources */,
+				1A0000122C00000000000001 /* VestaAuth.swift in Sources */,
 				1A0000092C00000000000001 /* TopChrome.swift in Sources */,
 				1A00000B2C00000000000001 /* CaptureInputViews.swift in Sources */,
 				1A00000C2C00000000000001 /* CaptureDetailSheet.swift in Sources */,
 				1A00000D2C00000000000001 /* CalendarViews.swift in Sources */,
 				1A00000E2C00000000000001 /* VestaPresentation.swift in Sources */,
+				1A0000162C00000000000001 /* SettingsScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,10 +319,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Vesta/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -313,10 +346,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Vesta/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -367,6 +402,38 @@
 				minimumVersion = 2.0.0;
 			};
 		};
+		1A000A032C00000000000001 /* XCRemoteSwiftPackageReference "convex-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/get-convex/convex-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.8.1;
+			};
+		};
+		1A000A052C00000000000001 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.5.0;
+			};
+		};
+		1A000A072C00000000000001 /* XCRemoteSwiftPackageReference "clerk-convex-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/clerk/clerk-convex-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
+		1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/clerk/clerk-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -374,6 +441,31 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1A000A012C00000000000001 /* XCRemoteSwiftPackageReference "HorizonCalendar" */;
 			productName = HorizonCalendar;
+		};
+		1A000A042C00000000000001 /* ConvexMobile */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A032C00000000000001 /* XCRemoteSwiftPackageReference "convex-swift" */;
+			productName = ConvexMobile;
+		};
+		1A000A062C00000000000001 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A052C00000000000001 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+		1A000A082C00000000000001 /* ClerkConvex */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A072C00000000000001 /* XCRemoteSwiftPackageReference "clerk-convex-swift" */;
+			productName = ClerkConvex;
+		};
+		1A000A0A2C00000000000001 /* ClerkKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = ClerkKit;
+		};
+		1A000A0B2C00000000000001 /* ClerkKitUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = ClerkKitUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

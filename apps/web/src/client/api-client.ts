@@ -3,8 +3,16 @@ import type { JsonifiedClient } from "@orpc/openapi-client";
 import { createORPCClient } from "@orpc/client";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import { apiContract } from "../api-contract";
+import { anonymousIdentityHeaders } from "./anonymous-identity";
 
 const link = new OpenAPILink(apiContract, {
+  fetch: (request, init) => {
+    const headers = new Headers(request.headers);
+    const identityHeaders = anonymousIdentityHeaders();
+    headers.set("x-vesta-anonymous-user-id", identityHeaders["x-vesta-anonymous-user-id"]);
+    headers.set("x-vesta-client", identityHeaders["x-vesta-client"]);
+    return fetch(new Request(request, { headers }), init);
+  },
   url: () => `${window.location.origin}/api`,
 });
 
@@ -19,7 +27,7 @@ export async function streamConversationMessage(input: {
     `/api/conversations/${encodeURIComponent(input.conversationId)}/messages/stream`,
     {
       body: JSON.stringify({ message: input.message }),
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...anonymousIdentityHeaders() },
       method: "POST",
     },
   );

@@ -35,6 +35,15 @@ struct AgentRunResponse: Decodable {
     let run: AgentRun?
 }
 
+struct MediaUploadResponse: Decodable {
+    let byteLength: Int
+    let id: String
+    let kind: String
+    let label: String
+    let mimeType: String
+    let url: String
+}
+
 struct SavedCapture {
     let analysisRun: AgentRun?
     let journal: JournalDocument
@@ -53,23 +62,39 @@ enum JournalSaveCompositionPolicy {
     static func evaluate(
         existingJournalText: String?,
         leadingNote: String,
-        trailingNote: String
+        trailingNote: String,
+        treatsLeadingNoteAsFullBody: Bool = false
     ) -> JournalSaveComposition {
         let existing = existingJournalText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let leading = leadingNote.trimmingCharacters(in: .whitespacesAndNewlines)
         let trailing = trailingNote.trimmingCharacters(in: .whitespacesAndNewlines)
-        let captureNoteText = [leading, trailing]
+        let leadingDelta = leadingDelta(existing: existing, bodyText: leading)
+        let leadingForCapture = leadingDelta ?? leading
+        let leadingForDocument = treatsLeadingNoteAsFullBody ? leading : leadingForCapture
+        let existingForDocument = treatsLeadingNoteAsFullBody ? "" : existing
+        let captureNoteText = [leadingForCapture, trailing]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
-        let paragraphs = [existing, leading, trailing].filter { !$0.isEmpty }
+        let paragraphs = [existingForDocument, leadingForDocument, trailing].filter { !$0.isEmpty }
 
         return JournalSaveComposition(
             captureNoteText: captureNoteText,
-            existingJournalText: existing,
+            existingJournalText: existingForDocument,
             journalBodyText: paragraphs.joined(separator: "\n\n"),
-            leadingNote: leading,
+            leadingNote: leadingForDocument,
             trailingNote: trailing
         )
+    }
+
+    private static func leadingDelta(existing: String, bodyText: String) -> String? {
+        guard !existing.isEmpty else { return nil }
+        guard bodyText != existing else { return "" }
+        guard bodyText.hasPrefix(existing) else { return nil }
+
+        let suffixStart = bodyText.index(bodyText.startIndex, offsetBy: existing.count)
+        let suffix = bodyText[suffixStart...]
+        guard suffix.first?.isWhitespace == true else { return nil }
+        return suffix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -218,21 +243,52 @@ enum JSONValue: Decodable {
 enum VestaAPI {
     static let engineURLKey = "vesta.engineURL"
     private static let legacyEngineURLKey = "vesta.backendURL"
-    static let defaultEngineURL = "http://192.168.76.133:8787"
+    private static let staleLocalEngineURLs = Set([
+        "http://127.0.0.1:8787",
+        "http://192.168.76.133:8787",
+        "http://localhost:8787"
+    ])
+    static let defaultEngineURL = "https://vesta-web.teampitch.workers.dev"
     static var configuredEngineURL: String {
         let defaults = UserDefaults.standard
         if let engineURL = defaults.string(forKey: engineURLKey) {
-            return engineURL
+            return normalizedEngineURL(engineURL, defaults: defaults)
         }
         if let legacyURL = defaults.string(forKey: legacyEngineURLKey) {
-            defaults.set(legacyURL, forKey: engineURLKey)
-            return legacyURL
+            let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
+            defaults.set(engineURL, forKey: engineURLKey)
+            return engineURL
         }
         return defaultEngineURL
     }
 
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
+
+    private static func normalizedEngineURL(_ engineURL: String, defaults: UserDefaults) -> String {
+        let trimmedURL = engineURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty else {
+            defaults.set(defaultEngineURL, forKey: engineURLKey)
+            return defaultEngineURL
+        }
+        guard !isStaleLocalEngineURL(trimmedURL) else {
+            defaults.set(defaultEngineURL, forKey: engineURLKey)
+            return defaultEngineURL
+        }
+        return trimmedURL
+    }
+
+    private static func isStaleLocalEngineURL(_ engineURL: String) -> Bool {
+        if staleLocalEngineURLs.contains(engineURL) {
+            return true
+        }
+
+        guard let host = URLComponents(string: engineURL)?.host?.lowercased() else {
+            return false
+        }
+
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
 
     static func logVoice(spokenText: String) async throws -> VoiceLogResponse {
         try await post(
@@ -296,12 +352,15 @@ enum VestaAPI {
         attachments: [JournalMediaAttachment] = [],
         existingJournalText: String? = nil,
         trailingNote: String = "",
-        localDate: String
+        localDate: String,
+        treatsNoteAsFullBody: Bool = false
     ) async throws -> SavedCapture {
+        let storedAttachments = try await uploadMediaAttachments(attachments)
         let composition = JournalSaveCompositionPolicy.evaluate(
             existingJournalText: existingJournalText,
             leadingNote: note,
-            trailingNote: trailingNote
+            trailingNote: trailingNote,
+            treatsLeadingNoteAsFullBody: treatsNoteAsFullBody
         )
         var bodyDocument = composition.existingJournalText.isEmpty
             ? []
@@ -309,7 +368,7 @@ enum VestaAPI {
         if !composition.leadingNote.isEmpty {
             bodyDocument.append(RichTextBlock.paragraph(composition.leadingNote))
         }
-        bodyDocument.append(contentsOf: attachments.map(RichTextBlock.media))
+        bodyDocument.append(contentsOf: storedAttachments.map(RichTextBlock.media))
         if !composition.trailingNote.isEmpty {
             bodyDocument.append(RichTextBlock.paragraph(composition.trailingNote))
         }
@@ -327,7 +386,7 @@ enum VestaAPI {
             body: CaptureAppendRequest(
                 idempotencyKey: UUID().uuidString,
                 occurredAt: ISO8601DateFormatter().string(from: Date()),
-                payload: CapturePayload(note: composition.captureNoteText, attachments: attachments),
+                payload: CapturePayload(note: composition.captureNoteText, attachments: storedAttachments),
                 schemaVersion: 1,
                 source: "ios_app",
                 type: "manual_check_in_submitted"
@@ -363,6 +422,7 @@ enum VestaAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path, queryItems: queryItems))
         request.httpMethod = "GET"
+        applyClientIdentity(to: &request)
         return try await send(request)
     }
 
@@ -372,9 +432,53 @@ enum VestaAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
+        applyClientIdentity(to: &request)
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try encoder.encode(body)
         return try await send(request)
+    }
+
+    private static func uploadMediaAttachments(
+        _ attachments: [JournalMediaAttachment]
+    ) async throws -> [StoredJournalMediaAttachment] {
+        var stored: [StoredJournalMediaAttachment] = []
+        for attachment in attachments {
+            stored.append(try await uploadMediaAttachment(attachment))
+        }
+        return stored
+    }
+
+    private static func uploadMediaAttachment(
+        _ attachment: JournalMediaAttachment
+    ) async throws -> StoredJournalMediaAttachment {
+        guard let uploadDraft = MediaUploadDraftPolicy.evaluate(dataURL: attachment.dataURL) else {
+            throw VestaAPIError.badMediaData
+        }
+
+        let response: MediaUploadResponse = try await post(
+            "/api/media",
+            body: MediaUploadRequest(
+                byteLength: uploadDraft.byteLength,
+                dataBase64: uploadDraft.dataBase64,
+                id: attachment.id,
+                kind: attachment.kind == "voice" ? "voice" : "image",
+                label: attachment.label,
+                mimeType: attachment.mimeType
+            )
+        )
+
+        return StoredJournalMediaAttachment(
+            id: response.id,
+            kind: response.kind,
+            label: response.label,
+            mimeType: response.mimeType,
+            url: response.url
+        )
+    }
+
+    private static func applyClientIdentity(to request: inout URLRequest) {
+        request.setValue(VestaInstallIdentity.currentUserID(), forHTTPHeaderField: "x-vesta-anonymous-user-id")
+        request.setValue("ios", forHTTPHeaderField: "x-vesta-client")
     }
 
     private static func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -401,12 +505,58 @@ enum VestaAPI {
     }
 }
 
+enum VestaInstallIdentity {
+    static let userIDKey = "vesta.anonymousUserID"
+
+    static func currentUserID(defaults: UserDefaults = .standard) -> String {
+        if let existing = defaults.string(forKey: userIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           existing.hasPrefix("anon_") {
+            return existing.lowercased()
+        }
+
+        let userID = generatedUserID(uuidString: UUID().uuidString)
+        defaults.set(userID, forKey: userIDKey)
+        return userID
+    }
+
+    static func generatedUserID(uuidString: String) -> String {
+        "anon_\(uuidString.lowercased())"
+    }
+}
+
 struct JournalMediaAttachment {
     let id: String
     let kind: String
     let label: String
     let mimeType: String
     let dataURL: String
+}
+
+struct MediaUploadDraft: Equatable {
+    let byteLength: Int
+    let dataBase64: String
+}
+
+enum MediaUploadDraftPolicy {
+    static func evaluate(dataURL: String) -> MediaUploadDraft? {
+        guard let separatorIndex = dataURL.firstIndex(of: ",") else {
+            return nil
+        }
+        let dataStart = dataURL.index(after: separatorIndex)
+        let dataBase64 = String(dataURL[dataStart...])
+        guard let data = Data(base64Encoded: dataBase64), !data.isEmpty else {
+            return nil
+        }
+        return MediaUploadDraft(byteLength: data.count, dataBase64: dataBase64)
+    }
+}
+
+private struct StoredJournalMediaAttachment {
+    let id: String
+    let kind: String
+    let label: String
+    let mimeType: String
+    let url: String
 }
 
 private struct VoiceLogRequest: Encodable {
@@ -421,6 +571,15 @@ private struct ConversationMessageRequest: Encodable {
 private struct ActionStatusRequest: Encodable {
     let itemId: String
     let status: String
+}
+
+private struct MediaUploadRequest: Encodable {
+    let byteLength: Int
+    let dataBase64: String
+    let id: String
+    let kind: String
+    let label: String
+    let mimeType: String
 }
 
 private struct JournalSaveRequest: Encodable {
@@ -439,7 +598,7 @@ private struct RichTextBlock: Encodable {
         RichTextBlock(type: "p", children: [RichTextText(text: text)], attrs: nil)
     }
 
-    static func media(_ attachment: JournalMediaAttachment) -> RichTextBlock {
+    static func media(_ attachment: StoredJournalMediaAttachment) -> RichTextBlock {
         RichTextBlock(
             type: attachment.kind == "voice" ? "audio" : "img",
             children: nil,
@@ -447,7 +606,7 @@ private struct RichTextBlock: Encodable {
                 alt: attachment.label,
                 id: attachment.id,
                 mimeType: attachment.mimeType,
-                src: attachment.dataURL
+                src: attachment.url
             )
         )
     }
@@ -477,25 +636,34 @@ private struct CapturePayload: Encodable {
     let note: String
     let attachments: [CaptureAttachmentPayload]?
 
-    init(note: String, attachments: [JournalMediaAttachment] = []) {
+    init(note: String, attachments: [StoredJournalMediaAttachment] = []) {
         self.note = note
         self.attachments = attachments.isEmpty
             ? nil
             : attachments.map {
-                CaptureAttachmentPayload(kind: $0.kind, label: $0.label, mimeType: $0.mimeType)
+                CaptureAttachmentPayload(
+                    id: $0.id,
+                    kind: $0.kind,
+                    label: $0.label,
+                    mimeType: $0.mimeType,
+                    url: $0.url
+                )
             }
     }
 }
 
 private struct CaptureAttachmentPayload: Encodable {
+    let id: String
     let kind: String
     let label: String
     let mimeType: String
+    let url: String
 }
 
 enum VestaAPIError: LocalizedError {
     case badResponse
     case badURL
+    case badMediaData
     case httpStatus(Int)
 
     var errorDescription: String? {
@@ -504,6 +672,10 @@ enum VestaAPIError: LocalizedError {
             return "The server returned an unreadable response."
         case .badURL:
             return "The Engine URL is invalid."
+        case .badMediaData:
+            return "The attachment could not be prepared for upload."
+        case .httpStatus(401):
+            return "Server sign-in required."
         case .httpStatus(let status):
             return "The server returned HTTP \(status)."
         }

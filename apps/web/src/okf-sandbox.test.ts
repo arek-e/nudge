@@ -4,8 +4,9 @@ import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 
 describe("OKF sandbox smoke", () => {
   test("mounts projected OKF files from an R2 prefix when bucket mounting is available", async () => {
+    const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
     const bucket = new Map<string, string>([
-      ["okf/dev-user/daily/stale.md", "old"],
+      [`okf/${anonymousUserId}/daily/stale.md`, "old"],
       ["other/keep.md", "keep"],
     ]);
     const calls: string[] = [];
@@ -41,11 +42,11 @@ describe("OKF sandbox smoke", () => {
       },
     } satisfies OkfSandbox;
     const projection = buildOkfProjection({
-      user: { id: "dev-user", displayName: "Alex" },
+      user: { id: anonymousUserId, displayName: "Anonymous User" },
       dailyNotes: [
         {
           id: "note-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           localDate: "2026-06-29",
           title: "June 29",
           bodyText: "Mounted through R2.",
@@ -60,11 +61,13 @@ describe("OKF sandbox smoke", () => {
 
     await smokeTestOkfProjection(sandbox, projection);
 
-    expect(bucket.has("okf/dev-user/daily/stale.md")).toBe(false);
-    expect(bucket.get("okf/dev-user/daily/2026-06-29.md")).toContain("Mounted through R2.");
+    expect(bucket.has(`okf/${anonymousUserId}/daily/stale.md`)).toBe(false);
+    expect(bucket.get(`okf/${anonymousUserId}/daily/2026-06-29.md`)).toContain(
+      "Mounted through R2.",
+    );
     expect(bucket.get("other/keep.md")).toBe("keep");
-    expect(calls).toContain("deletePrefix okf/dev-user/");
-    expect(calls).toContain("mountBucket OKF_FILES /workspace/okf /okf/dev-user/ true");
+    expect(calls).toContain(`deletePrefix okf/${anonymousUserId}/`);
+    expect(calls).toContain(`mountBucket OKF_FILES /workspace/okf /okf/${anonymousUserId}/ true`);
   });
 
   test("clears stale OKF files before materializing the current projection", async () => {

@@ -47,7 +47,6 @@ enum CaptureImagePickerSource: String, Identifiable {
 struct CaptureCanvas: View {
     @ObservedObject var model: VestaCaptureViewModel
     var focused: FocusState<CaptureFocusTarget?>.Binding
-    let openLatestResult: () -> Void
 
     var body: some View {
         let layout = CaptureWritingLayoutPolicy.evaluate(
@@ -82,10 +81,6 @@ struct CaptureCanvas: View {
                         )
                     }
 
-                    if layout.keepsStatusWithSubmittedCapture {
-                        statusRow
-                    }
-
                     if layout.showsContinuationDraft {
                         draftField(
                             "Keep writing...",
@@ -94,10 +89,6 @@ struct CaptureCanvas: View {
                             usesWorkingOverlay: false
                         )
                         .id(CaptureScrollID.continuationDraft)
-                    }
-
-                    if !layout.keepsStatusWithSubmittedCapture {
-                        statusRow
                     }
 
                     if !model.errorMessage.isEmpty {
@@ -128,18 +119,6 @@ struct CaptureCanvas: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var statusRow: some View {
-        HStack {
-            Spacer(minLength: 0)
-            StatusChip(
-                stage: model.stage,
-                result: model.latestResult,
-                openResult: openLatestResult
-            )
-        }
-        .frame(minHeight: 22)
     }
 
     private func scrollToActiveField(_ proxy: ScrollViewProxy, layout: CaptureWritingLayout) {
@@ -224,18 +203,18 @@ struct RetainedCaptureRowView: View {
     let row: RetainedCaptureRow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 12) {
             Text(row.noteText)
                 .font(.system(size: 25, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
-                Spacer(minLength: 0)
-                StatusChip(stage: row.stage, result: nil, openResult: {})
-            }
-            .frame(minHeight: 22)
+            StatusChip(stage: row.stage, result: nil, openResult: {})
+                .padding(.top, 4)
+                .layoutPriority(1)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

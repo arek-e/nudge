@@ -47,7 +47,7 @@ interface UserAgentSessionState {
     readonly tool: "listRecentSignals" | "retrieveMemory" | "reply";
   }>;
   readonly updatedAt: string | null;
-  readonly userId: string;
+  readonly userId: string | null;
 }
 
 type RecentToolEvent = UserAgentSessionState["recentToolEvents"][number];
@@ -132,7 +132,7 @@ const initialUserAgentSessionState = {
   recentMemoryRetrievalsAt: [],
   recentToolEvents: [],
   updatedAt: null,
-  userId: "dev-user",
+  userId: null,
 } satisfies UserAgentSessionState;
 
 const normalizeDedupe = (text: string) =>
@@ -200,9 +200,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private resolveUser(request: Request) {
+    const id = request.headers.get("x-vesta-user-id");
+    if (!id) return null;
     return {
       displayName: request.headers.get("x-vesta-user-display-name") ?? "Vesta User",
-      id: request.headers.get("x-vesta-user-id") ?? "dev-user",
+      id,
     };
   }
 
@@ -231,6 +233,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async metadata(request: Request) {
     const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -238,7 +241,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
     return Response.json({
       conversationId,
-      userId: state.userId,
+      userId: state.userId ?? user.id,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       recentToolEvents: state.recentToolEvents,
@@ -253,6 +256,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async listRecentSignals(request: Request, url: URL) {
     const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -300,6 +304,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async retrieveMemory(request: Request, url: URL) {
     const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -355,6 +360,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   private async prepareReply(request: Request) {
     const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -433,6 +439,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private async interpretJournal(request: Request) {
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, "journal"))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
