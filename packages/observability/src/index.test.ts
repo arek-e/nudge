@@ -10,6 +10,7 @@ import {
   isTransientBackpressureError,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
+  listRecentTraceSpans,
   pruneTraceCache,
   retryAfterSecondsFor,
   safeErrorFields,
@@ -280,6 +281,62 @@ describe("observability", () => {
       expect.stringContaining("DELETE FROM trace_spans"),
       expect.stringContaining("DELETE FROM trace_events"),
       expect.stringContaining("DELETE FROM trace_events"),
+    ]);
+  });
+
+  test("lists recent trace spans as a reusable route read model", async () => {
+    let capturedLimit: unknown;
+    let capturedSql = "";
+    const db = {
+      prepare: (sql: string) => {
+        capturedSql = sql;
+        return {
+          bind: (limit: unknown) => ({
+            all: async () => {
+              capturedLimit = limit;
+              return {
+                results: [
+                  {
+                    id: "span-1",
+                    trace_id: "trace-1",
+                    parent_span_id: null,
+                    name: "GET /health",
+                    kind: "server",
+                    status: "ok",
+                    started_at: "2026-06-12T10:00:00.000Z",
+                    ended_at: "2026-06-12T10:00:00.010Z",
+                    duration_ms: 10,
+                    route_name: "health",
+                    method: "GET",
+                    path: "/health",
+                  },
+                ],
+              };
+            },
+          }),
+        };
+      },
+    };
+
+    const spans = await Effect.runPromise(listRecentTraceSpans(db, 5));
+
+    expect(capturedLimit).toBe(5);
+    expect(capturedSql).toContain("route_name != 'api.traces'");
+    expect(spans).toEqual([
+      {
+        id: "span-1",
+        traceId: "trace-1",
+        parentSpanId: null,
+        name: "GET /health",
+        kind: "server",
+        status: "ok",
+        startedAt: "2026-06-12T10:00:00.000Z",
+        endedAt: "2026-06-12T10:00:00.010Z",
+        durationMs: 10,
+        routeName: "health",
+        method: "GET",
+        path: "/health",
+      },
     ]);
   });
 });

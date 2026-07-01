@@ -30,7 +30,7 @@ struct LogVoiceIntent: AppIntent {
         } catch {
             return .result(
                 dialog: IntentDialog(
-                    stringLiteral: "I heard it, but couldn't reach Lares at \(LaresAPI.configuredBackendURL)."
+                    stringLiteral: "I heard it, but couldn't reach the Lares Engine at \(LaresAPI.configuredEngineURL)."
                 )
             )
         }

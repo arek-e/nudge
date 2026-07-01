@@ -20,10 +20,40 @@ export type AuthSessionResolver = (input: {
   readonly headers: Headers;
 }) => Promise<AuthSession | null>;
 
+type BetterAuthResponseInput = {
+  readonly asResponse: true;
+  readonly body?: unknown;
+  readonly headers: Headers;
+  readonly query?: Record<string, unknown>;
+};
+
+// ponytail: better-auth plugin inference leaks passkey internals; this is the Engine API surface we use.
+type BetterAuthInstance = {
+  readonly api: {
+    readonly generatePasskeyAuthenticationOptions: (
+      input: Pick<BetterAuthResponseInput, "asResponse" | "headers">,
+    ) => Promise<Response>;
+    readonly generatePasskeyRegistrationOptions: (
+      input: Pick<BetterAuthResponseInput, "asResponse" | "headers" | "query">,
+    ) => Promise<Response>;
+    readonly getSession: (input: { readonly headers: Headers }) => Promise<AuthSession | null>;
+    readonly signUpEmail: (input: {
+      readonly body: { readonly email: string; readonly name: string; readonly password: string };
+    }) => Promise<unknown>;
+    readonly verifyPasskeyAuthentication: (
+      input: Pick<BetterAuthResponseInput, "asResponse" | "body" | "headers">,
+    ) => Promise<Response>;
+    readonly verifyPasskeyRegistration: (
+      input: Pick<BetterAuthResponseInput, "asResponse" | "body" | "headers">,
+    ) => Promise<Response>;
+  };
+  readonly handler: (request: Request) => Promise<Response>;
+};
+
 export function createBetterAuth(
   env: Env,
   options: { readonly allowSignUpForSeed?: boolean } = {},
-) {
+): BetterAuthInstance {
   if (!env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is required to enable Better Auth");
   }
@@ -74,7 +104,7 @@ export function createBetterAuth(
             },
           }
         : undefined,
-  });
+  }) as BetterAuthInstance;
 }
 
 export const isBetterAuthConfigured = (env: Env) => Boolean(env.BETTER_AUTH_SECRET);

@@ -1,4 +1,10 @@
 import { Effect, Metric } from "effect";
+export {
+  ensureBraintrustTracing,
+  flushBraintrustTracing,
+  runBraintrustSpan,
+  wrapBraintrustAISDK,
+} from "./braintrust";
 
 export interface WideEvent {
   readonly [key: string]: unknown;
@@ -72,6 +78,44 @@ export interface TraceCacheDb {
       readonly run: () => Promise<unknown>;
     };
   };
+}
+
+export interface TraceCacheQueryDb {
+  readonly prepare: (sql: string) => {
+    readonly bind: (...values: ReadonlyArray<unknown>) => {
+      readonly all: <T = unknown>() => Promise<{ readonly results?: ReadonlyArray<T> }>;
+    };
+  };
+}
+
+export interface TraceSpanSummary {
+  readonly id: string;
+  readonly traceId: string;
+  readonly parentSpanId: string | null;
+  readonly name: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly durationMs: number | null;
+  readonly routeName: string | null;
+  readonly method: string | null;
+  readonly path: string | null;
+}
+
+interface TraceSpanSummaryRow {
+  readonly id: string;
+  readonly trace_id: string;
+  readonly parent_span_id: string | null;
+  readonly name: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly duration_ms: number | null;
+  readonly route_name: string | null;
+  readonly method: string | null;
+  readonly path: string | null;
 }
 
 const randomHex = (bytes: number) => {
@@ -309,6 +353,55 @@ export const pruneTraceCache = (db: TraceCacheDb) =>
       "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
     );
   });
+
+export const listRecentTraceSpans = (traceDb: TraceCacheQueryDb | undefined, limit: number) => {
+  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
+
+  return Effect.tryPromise({
+    try: async () => {
+      const result = await traceDb
+        .prepare(
+          `SELECT
+            span_id AS id,
+            trace_id,
+            parent_span_id,
+            name,
+            kind,
+            status,
+            started_at,
+            ended_at,
+            duration_ms,
+            route_name,
+            method,
+            path
+          FROM trace_spans
+          WHERE route_name IS NULL OR route_name != 'api.traces'
+          ORDER BY started_at DESC
+          LIMIT ?`,
+        )
+        .bind(limit)
+        .all<TraceSpanSummaryRow>();
+
+      return (result.results ?? []).map(toTraceSpanSummary);
+    },
+    catch: (cause) => cause,
+  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
+};
+
+const toTraceSpanSummary = (row: TraceSpanSummaryRow): TraceSpanSummary => ({
+  id: row.id,
+  traceId: row.trace_id,
+  parentSpanId: row.parent_span_id,
+  name: row.name,
+  kind: row.kind,
+  status: row.status,
+  startedAt: row.started_at,
+  endedAt: row.ended_at,
+  durationMs: row.duration_ms,
+  routeName: row.route_name,
+  method: row.method,
+  path: row.path,
+});
 
 const runTraceCacheRow = (db: TraceCacheDb, row: SqlInsertRow) => {
   return Effect.tryPromise({

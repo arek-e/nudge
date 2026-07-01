@@ -14,6 +14,7 @@ export const loopIntakeSystemPrompt = [
   "",
   "Write policy:",
   "- Do not mutate OKF files. They are generated context, not storage.",
+  "- For user-provided context that should be remembered as-is, call capture_append.",
   "- For agent-authored changes, create a reviewable proposal with proposal_write.",
   "- Ground every proposal in a note, item, memory, summary, or explicit user message.",
   "",
@@ -26,6 +27,7 @@ export const loopIntakeSystemPrompt = [
   "Examples:",
   '- Need today\'s commitments: grep -R "commit" /workspace/okf/daily /workspace/okf/memory, then draft a proposal if action is needed.',
   "- Need fuzzy context: call okf_search with the user's phrase, read the best matching files, then answer with source paths.",
+  "- Need to remember a user-provided fact: call capture_append with the text.",
   "- Need to change the user's plan: call proposal_write with title, body, rationale, and requiresReview=true.",
 ].join("\n");
 

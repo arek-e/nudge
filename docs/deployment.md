@@ -18,7 +18,7 @@ git commit -m "short slice summary"
 bun run deploy
 ```
 
-`bun run deploy` refuses to deploy when the working tree has uncommitted changes. It runs the full check suite, mobile Playwright smoke test, web build, and `wrangler deploy`.
+`bun run deploy` refuses to deploy when the working tree has uncommitted changes. It runs the web build and `wrangler deploy` from the Engine app.
 
 ## Version Stamping
 
@@ -26,7 +26,7 @@ Deploys set `APP_VERSION` to the short Git SHA with Wrangler `--var`. Wide reque
 
 The deploy command also sets the Cloudflare Worker version tag and message to the same SHA.
 
-`scripts/deploy-web.ts --version=<tag>` overrides the version stamp. The production release workflow uses this so `/api/version`, Worker version metadata, the Git tag, and the GitHub Release all share the same release tag.
+`scripts/deploy-engine.ts --version=<tag>` overrides the version stamp. The production release workflow uses this so `/api/version`, Worker version metadata, the Git tag, and the GitHub Release all share the same release tag.
 
 ## Production Releases
 

@@ -29,7 +29,7 @@ import {
 
 export type DatabaseProvider = "memory" | "d1" | "planetscale" | "turso" | "postgres";
 
-export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database, { schema });
+export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database);
 
 export interface DbUser {
   readonly id: string;
@@ -1579,7 +1579,7 @@ export class Db extends Context.Service<Db, DbService>()("lares/db/Db") {
     Layer.effect(
       Db,
       Effect.sync(() => {
-        const db = drizzle(database, { schema });
+        const db = drizzle(database);
 
         return Db.of({
           provider: "d1",

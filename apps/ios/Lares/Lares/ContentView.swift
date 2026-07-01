@@ -58,7 +58,7 @@ struct ContentView: View {
                 .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $settingsOpen) {
-            BackendSettingsSheet(
+            EngineSettingsSheet(
                 status: model.statusMessage,
                 refresh: { Task { await model.refreshContext() } }
             )
@@ -120,7 +120,7 @@ final class LaresCaptureViewModel: ObservableObject {
             }
             statusMessage = "Connected"
         } catch {
-            statusMessage = "Backend unavailable"
+            statusMessage = "Engine unavailable"
         }
     }
 
@@ -181,7 +181,7 @@ final class LaresCaptureViewModel: ObservableObject {
             CaptureDetailItem(
                 title: "Journal",
                 value: saved.journal.localDate,
-                subtitle: "Updated on the backend.",
+                subtitle: "Updated in the Engine.",
                 color: .laresAmber,
                 icon: "doc.text.fill"
             ),
@@ -876,8 +876,8 @@ struct ReferenceRow: View {
     }
 }
 
-struct BackendSettingsSheet: View {
-    @AppStorage(LaresAPI.backendURLKey) private var backendURL = LaresAPI.defaultBackendURL
+struct EngineSettingsSheet: View {
+    @AppStorage(LaresAPI.engineURLKey) private var engineURL = LaresAPI.configuredEngineURL
     let status: String
     let refresh: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -885,7 +885,7 @@ struct BackendSettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Backend")
+                Text("Engine")
                     .font(.system(size: 24, weight: .heavy, design: .rounded))
                     .foregroundStyle(Color.laresInk)
                 Spacer()
@@ -905,7 +905,7 @@ struct BackendSettingsSheet: View {
                 Text("Development server")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.laresMuted)
-                TextField("URL", text: $backendURL)
+                TextField("URL", text: $engineURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)

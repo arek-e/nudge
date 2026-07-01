@@ -28,7 +28,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Lares connects to your development backend on this network.</string>
+	<string>Lares connects to your development Engine on this network.</string>
 	<key>INAlternativeAppNames</key>
 	<array>
 		<dict>
