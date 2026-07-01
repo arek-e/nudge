@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:net";
-import { findAvailablePort, preferredDevPort } from "./dev-ports";
+import {
+  findAvailablePort,
+  localDevUrl,
+  preferredDevPort,
+  preferredInspectorPort,
+  wranglerPersistTo,
+} from "./dev-ports";
 
 const servers: Server[] = [];
 
@@ -35,6 +41,21 @@ describe("dev ports", () => {
     expect(preferredDevPort({ LARES_DEV_PORT: "18990", PORT: "18887" })).toBe(18990);
     expect(preferredDevPort({ PORT: "18887" })).toBe(18887);
     expect(preferredDevPort({})).toBe(8787);
+  });
+
+  test("derives related local dev settings from the selected port and worktree", () => {
+    expect(preferredInspectorPort(45555, {})).toBe(45556);
+    expect(preferredInspectorPort(45555, { LARES_WRANGLER_INSPECTOR_PORT: "46666" })).toBe(46666);
+    expect(localDevUrl(45555, {})).toBe("http://localhost:45555");
+    expect(localDevUrl(45555, { LARES_DEV_URL: "http://127.0.0.1:45555" })).toBe(
+      "http://127.0.0.1:45555",
+    );
+    expect(wranglerPersistTo("/worktrees/lares", {})).toBe(
+      "/worktrees/lares/apps/engine/.wrangler/state",
+    );
+    expect(wranglerPersistTo("/worktrees/lares", { LARES_WRANGLER_PERSIST_TO: "/tmp/state" })).toBe(
+      "/tmp/state",
+    );
   });
 });
 

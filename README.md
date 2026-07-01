@@ -71,10 +71,27 @@ Model-backed extraction is narrow and draft-first. External writes and behavior-
 
 ## Quick Start
 
-Prerequisites:
+One-time machine setup:
 
-- [`mise`](https://mise.jdx.dev/) installed.
-- Cloudflare/Wrangler auth for commands that use remote Cloudflare resources.
+```bash
+brew install direnv
+grep -q 'direnv hook zsh' ~/.zshrc || echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
+mkdir -p ~/.config/direnv
+cat > ~/.config/direnv/direnv.toml <<'EOF'
+[whitelist]
+prefix = [
+  "/path/to/your/lares/worktree-parent",
+]
+EOF
+exec zsh
+```
+
+Also install [`mise`](https://mise.jdx.dev/) and authenticate Cloudflare/Wrangler
+for commands that use remote Cloudflare resources. The direnv whitelist lets every
+Lares worktree under the configured parent load its `.envrc` without a separate
+`direnv allow`.
+
+Per-worktree setup:
 
 ```bash
 mise trust
@@ -85,14 +102,20 @@ mise exec -- bun run dev
 
 If your shell already activates `mise`, the `mise exec --` prefix is optional.
 
-`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Lares Engine with `wrangler dev` on the first available local port.
+The checked-in `.envrc` loads a stable per-worktree development environment. By
+default each worktree gets a deterministic high-band `LARES_DEV_PORT`,
+`LARES_DEV_URL`, Wrangler inspector port, and local Wrangler state path so
+multiple dev stacks can run side by side. Use `.envrc.local` for untracked local
+overrides.
+
+`bun run dev` builds the web App Surface, applies local D1 migrations, and starts the Lares Engine with `wrangler dev` on the first available local port starting at `LARES_DEV_PORT`.
 
 Then open:
 
-- App: `http://localhost:8787/`
-- Health: `http://localhost:8787/health`
-- API docs: `http://localhost:8787/api/docs`
-- OpenAPI spec: `http://localhost:8787/api/openapi.json`
+- App: `$LARES_DEV_URL/`
+- Health: `$LARES_DEV_URL/health`
+- API docs: `$LARES_DEV_URL/api/docs`
+- OpenAPI spec: `$LARES_DEV_URL/api/openapi.json`
 
 ## Features
 
