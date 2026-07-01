@@ -1,7 +1,8 @@
 import { Think } from "@cloudflare/think";
 export { ContainerProxy, Sandbox } from "@cloudflare/sandbox";
+import type { LanguageModel } from "ai";
 import { Agent } from "agents";
-import { generateObject, smoothStream, streamText, type LanguageModel } from "ai";
+import * as ai from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
@@ -18,8 +19,10 @@ import {
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
+import { ensureBraintrustTracing, wrapBraintrustAISDK } from "./braintrust-tracing";
 
 const app = createApp();
+const { generateObject, smoothStream, streamText } = wrapBraintrustAISDK(ai);
 
 export default app;
 
@@ -461,6 +464,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   workspaceBash = false;
 
   getModel(): LanguageModel {
+    ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
     return createWorkersAI({ binding: this.env.AI })(this.env.THINK_MODEL);
   }
 

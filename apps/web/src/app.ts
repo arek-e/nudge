@@ -85,6 +85,25 @@ function readSandboxSmokeError(error: unknown) {
   return "OKF sandbox smoke failed";
 }
 
+const reasoningVoiceLogPrefixes = [
+  "what ",
+  "why ",
+  "how ",
+  "should ",
+  "can ",
+  "could ",
+  "help ",
+  "follow up",
+  "remind ",
+];
+
+function classifyVoiceLogRoute(spokenText: string) {
+  const text = spokenText.trim().toLowerCase();
+  return text.includes("?") || reasoningVoiceLogPrefixes.some((prefix) => text.startsWith(prefix))
+    ? "reasoning_candidate"
+    : "capture_only";
+}
+
 interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
@@ -719,6 +738,29 @@ export const apiRouter = api.router({
       return { spans: rows.map(toTraceSpanSummary) };
     }),
   },
+  voice: {
+    log: api.voice.log.handler(async ({ context, input }) => {
+      const route = classifyVoiceLogRoute(input.spokenText);
+      const spokenResponse =
+        route === "reasoning_candidate"
+          ? "Understood. I'm processing it in Lares."
+          : "Understood. I logged it to Lares.";
+      const capture = await runWorkflow(
+        context.db,
+        PrimitiveWorkflows.appendSignal({
+          occurredAt: input.occurredAt ?? new Date().toISOString(),
+          payload: { route, text: input.spokenText },
+          schemaVersion: 1,
+          source: "ios_siri",
+          type: "capture.voice_log",
+          user: context.user,
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+        }),
+      );
+
+      return { capture, route, spokenResponse };
+    }),
+  },
 });
 
 async function proxyConversationRequest<Schema extends z.ZodType>(
@@ -1265,6 +1307,8 @@ export function createApp(options: CreateAppOptions = {}) {
       addWideEventFields(c, { routeName: "api.outcomes" });
     } else if (c.req.path.startsWith("/api/traces")) {
       addWideEventFields(c, { routeName: "api.traces" });
+    } else if (c.req.path.startsWith("/api/voice")) {
+      addWideEventFields(c, { routeName: "api.voice" });
     } else if (c.req.path.startsWith("/api/events")) {
       addWideEventFields(c, { routeName: "api.events" });
     } else if (c.req.path.startsWith("/api/session")) {

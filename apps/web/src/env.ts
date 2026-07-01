@@ -8,6 +8,7 @@ export interface Env {
   ENVIRONMENT?: string;
   APP_VERSION?: string;
   LOG_HTTP_REQUESTS?: string;
+  BRAINTRUST_API_KEY?: string;
   BETTER_AUTH_SECRET?: string;
   AGENT_INTERNAL_SECRET?: string;
   BETTER_AUTH_URL?: string;

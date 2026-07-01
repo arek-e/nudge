@@ -504,6 +504,17 @@ const conversationMemoryInputSchema = conversationInputSchema.extend({
 const conversationMessageRouteInputSchema = conversationInputSchema.extend(
   conversationMessageInputSchema.shape,
 );
+const voiceLogInputSchema = z.object({
+  idempotencyKey: z.string().min(1).max(256).optional(),
+  occurredAt: z.string().datetime().optional(),
+  spokenText: z.string().trim().min(1).max(5_000),
+});
+const voiceLogRouteSchema = z.enum(["capture_only", "reasoning_candidate"]);
+export const voiceLogResponseSchema = z.object({
+  capture: eventRecordSchema,
+  route: voiceLogRouteSchema,
+  spokenResponse: z.string(),
+});
 
 export const apiContract = {
   actions: {
@@ -657,5 +668,11 @@ export const apiContract = {
       .route({ method: "GET", path: "/traces/recent" })
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
       .output(z.object({ spans: z.array(traceSpanSummarySchema) })),
+  },
+  voice: {
+    log: oc
+      .route({ method: "POST", path: "/voice/log" })
+      .input(voiceLogInputSchema)
+      .output(voiceLogResponseSchema),
   },
 };
