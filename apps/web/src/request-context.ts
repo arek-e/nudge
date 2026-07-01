@@ -5,7 +5,7 @@ import type { VestaAppService, RunEffect } from "./Services/VestaApp";
 export type HonoHandlerContext = Parameters<Handler<ObservabilityHonoEnv>>[0];
 
 export type RequestSession = {
-  readonly authMode: "better-auth" | "dev" | "unauthenticated";
+  readonly authMode: "anonymous" | "better-auth" | "unauthenticated";
   readonly user: {
     readonly id: string;
     readonly displayName: string;

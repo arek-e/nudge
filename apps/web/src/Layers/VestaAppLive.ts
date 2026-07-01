@@ -1,6 +1,5 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { Db } from "@vesta/db";
-import { AuthService } from "@vesta/effect-services";
 import type { AuthSessionResolver } from "../auth";
 import type { Env } from "../env";
 import { VestaApp, type VestaAppRuntime, type VestaOkfSandboxFactory } from "../Services/VestaApp";
@@ -18,17 +17,11 @@ interface MakeVestaAppRuntimeInput extends MakeVestaAppLayerInput {
   readonly memoMap: Layer.MemoMap;
 }
 
-const currentUser = Effect.gen(function* () {
-  const auth = yield* AuthService;
-  return yield* auth.currentUser;
-});
-
 export function makeVestaAppLayer(input: MakeVestaAppLayerInput) {
   return Layer.effect(
     VestaApp,
     Effect.gen(function* () {
       const db = yield* Db;
-      const devUser = yield* Effect.provide(currentUser, AuthService.layerDev);
       const env = input.env;
       const agentInternalSecret = env.AGENT_INTERNAL_SECRET ?? env.BETTER_AUTH_SECRET;
 
@@ -38,9 +31,9 @@ export function makeVestaAppLayer(input: MakeVestaAppLayerInput) {
         aiModel: env.EXTRACTION_MODEL ?? env.THINK_MODEL,
         dailyAnalysisWorkflow: env.DAILY_DIGEST_WORKFLOW,
         db,
-        devUser,
         env,
         googleAuthConfigured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+        ...(env.MEDIA_FILES ? { mediaFiles: env.MEDIA_FILES } : {}),
         okfSandboxFor: async (user) => input.okfSandboxFactory({ env, user }),
         resolveSession: input.resolveSession,
         traceDb: env.DB,

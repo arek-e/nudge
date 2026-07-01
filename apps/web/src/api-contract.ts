@@ -411,7 +411,7 @@ export const sessionResponseSchema = z.object({
     google: z.boolean(),
     passkey: z.boolean(),
   }),
-  authMode: z.enum(["better-auth", "dev", "unauthenticated"]),
+  authMode: z.enum(["anonymous", "better-auth", "unauthenticated"]),
   user: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   workspace: z.object({ id: z.string(), label: z.string() }).nullable(),
 });

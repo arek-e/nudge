@@ -7,14 +7,11 @@ type AuthMethods = {
 export function loginAuthMethodsForView(
   session: {
     readonly authMethods: AuthMethods;
-    readonly authMode: "better-auth" | "dev" | "unauthenticated";
+    readonly authMode: "anonymous" | "better-auth" | "unauthenticated";
   },
   search: string,
 ): AuthMethods | null {
   if (session.authMode === "unauthenticated") return session.authMethods;
-  // ponytail: visual-only local preview, use real Better Auth config for auth-flow QA.
-  if (session.authMode === "dev" && new URLSearchParams(search).get("auth") === "login") {
-    return { emailOtp: true, google: false, passkey: true };
-  }
+  void search;
   return null;
 }

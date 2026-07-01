@@ -4,7 +4,6 @@ import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
   defaultFrame,
-  type DevUser,
 } from "@vesta/domain";
 
 export * from "./okf";
@@ -34,20 +33,6 @@ export const currentWorkflowVersion = 1;
 export type WorkflowVersion = typeof currentWorkflowVersion;
 
 export const workflowStepName = (version: WorkflowVersion, name: string) => `v${version}.${name}`;
-
-export class AuthService extends Context.Service<
-  AuthService,
-  {
-    readonly currentUser: Effect.Effect<DevUser>;
-  }
->()("vesta/AuthService") {
-  static readonly layerDev = Layer.succeed(AuthService)({
-    currentUser: Effect.succeed({
-      id: "dev-user",
-      displayName: "Dev User",
-    }),
-  });
-}
 
 export interface MemorySearchResult {
   readonly chunkId: string;

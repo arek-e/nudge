@@ -23,6 +23,7 @@
   "dependencies": {
     "@better-auth/drizzle-adapter": "catalog:",
     "@better-auth/passkey": "catalog:",
+    "@clerk/react": "catalog:",
     "@cloudflare/sandbox": "catalog:",
     "@cloudflare/think": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
@@ -44,6 +45,7 @@
     "ai": "catalog:",
     "better-auth": "catalog:",
     "braintrust": "3.20.0",
+    "convex": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "evlog": "catalog:",

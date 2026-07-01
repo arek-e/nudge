@@ -2,6 +2,7 @@ node_modules/
 .tsbuild/
 .wrangler/
 .dev.vars
+.env.local
 .envrc.local
 dist/
 coverage/

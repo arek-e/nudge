@@ -1,4 +1,6 @@
+import type { FunctionReturnType } from "convex/server";
 import { passkeyClient } from "@better-auth/passkey/client";
+import { ClerkProvider, SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
   createRootRoute,
@@ -11,7 +13,17 @@ import {
 } from "@tanstack/react-router";
 import { createAuthClient } from "better-auth/client";
 import { emailOTPClient } from "better-auth/client/plugins";
-import { createContext, type FormEvent, StrictMode, useState, useTransition } from "react";
+import { ConvexProvider, ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
+import {
+  createContext,
+  type FormEvent,
+  type ReactNode,
+  StrictMode,
+  useEffect,
+  useState,
+  useTransition,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   AddActionSheet,
@@ -30,13 +42,21 @@ import {
   Surface,
   WritingDrawer,
 } from "@vesta/ui";
+import { api } from "../../../../convex/_generated/api";
 import { apiClient, streamConversationMessage } from "./api-client";
+import { dailyNoteDrawerText } from "./daily-note-drawer";
 import { loginAuthMethodsForView } from "./login-preview";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
 const queryClient = new QueryClient();
 const authClient = createAuthClient({ plugins: [emailOTPClient(), passkeyClient()] });
+const convexUrl =
+  import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
+const convexClient = new ConvexReactClient(convexUrl);
+const clerkPublishableKey = configuredClerkPublishableKey();
+
+type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
 interface CaptureContextValue {
   readonly status: string;
@@ -48,6 +68,8 @@ const CaptureContext = createContext<CaptureContextValue | null>(null);
 
 const todayLocalDate = () => new Date().toISOString().slice(0, 10);
 
+const simplePayloadHash = (value: string) => `${value.length}:${value}`;
+
 const noteTextFromPayload = (payload: unknown) => {
   if (payload && typeof payload === "object" && "note" in payload) {
     return String(payload.note);
@@ -57,6 +79,11 @@ const noteTextFromPayload = (payload: unknown) => {
   }
   return typeof payload === "string" ? payload : JSON.stringify(payload);
 };
+
+function configuredClerkPublishableKey() {
+  const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
+  return typeof value === "string" && value.startsWith("pk_") ? value : null;
+}
 
 const rootRoute = createRootRoute({ component: AppShell });
 const indexRoute = createRoute({
@@ -108,6 +135,8 @@ declare module "@tanstack/react-router" {
 }
 
 function AppShell() {
+  const convex = useConvex();
+  const convexAuth = useConvexAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigate = useNavigate();
   const session = useSession();
@@ -115,42 +144,56 @@ function AppShell() {
   const [noteDocument, setNoteDocument] = useState<RichTextDocument>(
     plainTextToRichTextDocument(""),
   );
+  const [noteDirty, setNoteDirty] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [isPending, startTransition] = useTransition();
+  const localDate = todayLocalDate();
+  const dailyNoteState = useConvexDailyNote(localDate);
+  const dailyNoteDocument = dailyNoteState?.document;
+
+  useEffect(() => {
+    const nextNote = dailyNoteDrawerText({
+      currentText: note,
+      dirty: noteDirty,
+      remoteBodyText: dailyNoteDocument?.bodyText,
+    });
+    if (nextNote === note) return;
+    setNote(nextNote);
+    setNoteDocument(plainTextToRichTextDocument(nextNote));
+  }, [dailyNoteDocument?.bodyText, note, noteDirty]);
+
   const saveDailyNote = useMutation({
     mutationFn: async (value: string) => {
-      const localDate = todayLocalDate();
-      await Promise.all([
-        apiClient.journal.save({
-          bodyDocument: noteDocument,
-          bodyText: value,
-          localDate,
-          title: localDate,
-        }),
-        apiClient.captures.append({
-          type: "manual_check_in_submitted",
-          source: "today_app",
-          occurredAt: new Date().toISOString(),
-          schemaVersion: 1,
-          payload: { note: value },
-        }),
-      ]);
+      if (!clerkPublishableKey) {
+        throw new Error("Clerk auth is not configured for Convex sync.");
+      }
+      if (!convexAuth.isAuthenticated) {
+        throw new Error("Sign in with Clerk to sync daily notes.");
+      }
+      const result = await convex.mutation(api.documents.patchDailyNote, {
+        bodyDocument: noteDocument,
+        bodyText: value,
+        idempotencyKey: crypto.randomUUID(),
+        localDate,
+        payloadHash: simplePayloadHash(value),
+        title: localDate,
+        ...(dailyNoteDocument?.serverRevision
+          ? { baseServerRevision: dailyNoteDocument.serverRevision }
+          : {}),
+      });
+      if (!result.ok) {
+        throw new Error(result.error?.code ?? "Convex note save failed");
+      }
     },
-    onSuccess: async () => {
-      const localDate = todayLocalDate();
-      setNote("");
-      setNoteDocument(plainTextToRichTextDocument(""));
+    onSuccess: () => {
+      setNoteDirty(false);
       setCaptureOpen(false);
-      setStatus("Saved");
-      await queryClient.invalidateQueries({ queryKey: ["journal", localDate] });
-      await queryClient.invalidateQueries({ queryKey: ["events"] });
-      await queryClient.invalidateQueries({ queryKey: ["actions"] });
-      await queryClient.invalidateQueries({ queryKey: ["summaries"] });
+      setStatus("Saved to Convex");
     },
-    onError: () => {
-      setStatus("Could not save. Check the deployment logs.");
+    onError: (error) => {
+      setStatus(error instanceof Error ? error.message : "Could not save to Convex.");
     },
   });
 
@@ -193,12 +236,16 @@ function AppShell() {
         open={captureOpen}
         body={note}
         bodyDocument={noteDocument}
-        onBodyChange={setNote}
+        onBodyChange={(value) => {
+          setNote(value);
+          setNoteDirty(true);
+        }}
         onBodyDocumentChange={setNoteDocument}
         onAiDraft={() => {
           const draft = "Today I need to clarify priorities, constraints, and the next follow-up.";
           setNote(draft);
           setNoteDocument(plainTextToRichTextDocument(draft));
+          setNoteDirty(true);
         }}
         onCancel={() => setCaptureOpen(false)}
         onCommit={() => {
@@ -597,10 +644,7 @@ function SettingsScreen() {
 function TodayScreen() {
   const navigate = useNavigate();
   const localDate = todayLocalDate();
-  const journal = useQuery({
-    queryKey: ["journal", localDate],
-    queryFn: async () => apiClient.journal.get({ localDate }),
-  });
+  const convexDailyNote = useConvexDailyNote(localDate);
   const events = useEvents();
   const actions = useActions();
   const recentNotes = (events.data?.events ?? []).slice(0, 4);
@@ -632,13 +676,15 @@ function TodayScreen() {
     <VestaAppShell>
       <HomeDashboard
         eventCount={events.data?.events.length ?? 0}
-        hasJournalEntry={(journal.data?.document?.bodyText.trim().length ?? 0) > 0}
+        hasJournalEntry={(convexDailyNote?.document?.bodyText.trim().length ?? 0) > 0}
         loading={events.isLoading}
         onOpenSettings={() => navigate({ to: "/settings" })}
         onSignOut={() => signOut.mutate()}
         openLoopCount={openLoopCount}
         weeklyActivity={weeklyActivity}
       />
+
+      <ConvexSyncSpikePanel localDate={localDate} />
 
       <Surface id="recent-notes-title" eyebrow="Notes" title="Recent notes" primary>
         <div className="mt-4 grid gap-2">
@@ -660,6 +706,177 @@ function TodayScreen() {
       </Surface>
     </VestaAppShell>
   );
+}
+
+function ConvexSyncSpikePanel(props: { readonly localDate: string }) {
+  const convex = useConvex();
+  const convexAuth = useConvexAuth();
+  const noteState = useConvexDailyNote(props.localDate);
+  const [bodyText, setBodyText] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [lastStatusMutationId, setLastStatusMutationId] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState("");
+  const document = noteState?.document;
+  const paragraphStatuses = noteState?.statuses ?? [];
+  const agentStatus = paragraphStatuses.slice(-1)[0] ?? noteState?.status;
+
+  useEffect(() => {
+    if (!dirty) {
+      setBodyText(document?.bodyText ?? "");
+    }
+  }, [dirty, document?.bodyText]);
+
+  const saveNote = useMutation({
+    mutationFn: async () => {
+      if (!clerkPublishableKey) {
+        throw new Error("Clerk auth is not configured for Convex sync.");
+      }
+      if (!convexAuth.isAuthenticated) {
+        throw new Error("Sign in with Clerk to sync daily notes.");
+      }
+      const nextBodyText = bodyText.trim();
+      const idempotencyKey = crypto.randomUUID();
+      const result = await convex.mutation(api.documents.patchDailyNote, {
+        bodyDocument: plainTextToRichTextDocument(nextBodyText),
+        bodyText: nextBodyText,
+        idempotencyKey,
+        localDate: props.localDate,
+        payloadHash: simplePayloadHash(nextBodyText),
+        title: props.localDate,
+        ...(document?.serverRevision ? { baseServerRevision: document.serverRevision } : {}),
+      });
+      if (!result.ok) {
+        throw new Error(result.error?.code ?? "Convex note save failed");
+      }
+      return { idempotencyKey };
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : "Could not save to Convex."),
+    onSuccess: (result) => {
+      setDirty(false);
+      setLastStatusMutationId(result.idempotencyKey);
+      setStatusMessage("Synced through Convex.");
+    },
+  });
+  const updateAgentStatus = useMutation({
+    mutationFn: async (status: "queued" | "running" | "ready" | "failed") => {
+      if (!clerkPublishableKey) {
+        throw new Error("Clerk auth is not configured for Convex sync.");
+      }
+      if (!convexAuth.isAuthenticated) {
+        throw new Error("Sign in with Clerk to sync daily notes.");
+      }
+      const idempotencyKey = lastStatusMutationId ?? agentStatus?.idempotencyKey;
+      if (!idempotencyKey) {
+        throw new Error("Save a paragraph before setting AI status.");
+      }
+      const result = await convex.mutation(api.documents.setAgentStatus, {
+        idempotencyKey,
+        localDate: props.localDate,
+        status,
+      });
+      if (!result.ok) {
+        throw new Error(result.error?.code ?? "Convex status update failed");
+      }
+    },
+    onError: (error) =>
+      setStatusMessage(
+        error instanceof Error ? error.message : "Create a Convex note before setting AI status.",
+      ),
+    onSuccess: () => setStatusMessage("AI status updated through Convex."),
+  });
+
+  return (
+    <Surface eyebrow="Convex spike" title="Realtime daily note" primary>
+      <div className="mt-4 grid gap-3">
+        <div className="flex min-h-10 items-center justify-between gap-3 rounded-2xl bg-white/5 px-3 py-2 text-xs text-neutral-300">
+          <span>
+            {clerkPublishableKey
+              ? convexAuth.isLoading
+                ? "Checking Clerk session"
+                : convexAuth.isAuthenticated
+                  ? "Clerk session connected"
+                  : "Sign in to sync through Convex"
+              : "Clerk auth is not configured"}
+          </span>
+          {clerkPublishableKey ? (
+            convexAuth.isAuthenticated ? (
+              <UserButton />
+            ) : (
+              <div className="flex items-center gap-2">
+                <SignUpButton mode="modal">
+                  <button
+                    className="min-h-9 rounded-full bg-white/10 px-3 text-xs font-semibold text-neutral-100"
+                    type="button"
+                  >
+                    Create account
+                  </button>
+                </SignUpButton>
+                <SignInButton mode="modal">
+                  <button
+                    className="min-h-9 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
+                    type="button"
+                  >
+                    Sign in
+                  </button>
+                </SignInButton>
+              </div>
+            )
+          ) : null}
+        </div>
+        <textarea
+          className="min-h-32 w-full resize-y rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-neutral-100 outline-none focus:border-white/25"
+          placeholder="Write the Convex spike note..."
+          value={bodyText}
+          onChange={(event) => {
+            setBodyText(event.target.value);
+            setDirty(true);
+          }}
+        />
+        <div className="grid grid-cols-2 gap-2 text-xs text-neutral-400">
+          <span>Revision {document?.serverRevision ?? "local"}</span>
+          <span className="text-right">AI {agentStatus?.status ?? "not queued"}</span>
+        </div>
+        {statusMessage ? <p className="m-0 text-sm text-neutral-300">{statusMessage}</p> : null}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className="min-h-11 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
+            disabled={saveNote.isPending || !bodyText.trim() || !convexAuth.isAuthenticated}
+            type="button"
+            onClick={() => saveNote.mutate()}
+          >
+            {saveNote.isPending ? "Syncing..." : "Save via Convex"}
+          </button>
+          <button
+            className="min-h-11 rounded-full bg-white/5 px-4 text-sm font-semibold text-neutral-100 disabled:opacity-60"
+            disabled={updateAgentStatus.isPending || !convexAuth.isAuthenticated}
+            type="button"
+            onClick={() =>
+              updateAgentStatus.mutate(agentStatus?.status === "running" ? "ready" : "running")
+            }
+          >
+            {agentStatus?.status === "running" ? "Mark ready" : "Simulate AI"}
+          </button>
+        </div>
+      </div>
+    </Surface>
+  );
+}
+
+function useConvexDailyNote(localDate: string) {
+  const convex = useConvex();
+  const [state, setState] = useState<ConvexDailyNoteState | undefined>();
+
+  useEffect(() => {
+    const watch = convex.watchQuery(api.documents.getDailyNote, {
+      localDate,
+    });
+    const refresh = () => setState(watch.localQueryResult());
+    refresh();
+    return watch.onUpdate(refresh);
+  }, [convex, localDate]);
+
+  return state;
 }
 
 function JourneyScreen() {
@@ -733,10 +950,39 @@ function useSession() {
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Missing #root element");
 
+function VestaConvexProvider(props: { readonly children: ReactNode }) {
+  if (!clerkPublishableKey) {
+    return <ConvexProvider client={convexClient}>{props.children}</ConvexProvider>;
+  }
+
+  return (
+    <ClerkProvider publishableKey={clerkPublishableKey}>
+      <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
+        <ConvexUserMaterializer>{props.children}</ConvexUserMaterializer>
+      </ConvexProviderWithClerk>
+    </ClerkProvider>
+  );
+}
+
+function ConvexUserMaterializer(props: { readonly children: ReactNode }) {
+  const convex = useConvex();
+  const convexAuth = useConvexAuth();
+
+  useEffect(() => {
+    if (convexAuth.isLoading || !convexAuth.isAuthenticated) return;
+
+    void convex.mutation(api.users.store, {}).catch(() => undefined);
+  }, [convex, convexAuth.isAuthenticated, convexAuth.isLoading]);
+
+  return <>{props.children}</>;
+}
+
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <VestaConvexProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </VestaConvexProvider>
   </StrictMode>,
 );

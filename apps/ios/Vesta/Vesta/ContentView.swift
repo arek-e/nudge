@@ -30,14 +30,17 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    TopChrome(dailyStreak: model.dailyStreak, perform: perform)
+                    TopChrome(
+                        dailyStreak: model.dailyStreak,
+                        signal: model.chromeSignal,
+                        perform: perform
+                    )
                         .padding(.horizontal, 24)
                         .padding(.top, 14)
 
                     CaptureCanvas(
                         model: model,
-                        focused: $captureFocused,
-                        openLatestResult: { model.openLatestResult() }
+                        focused: $captureFocused
                     )
                         .padding(.horizontal, 26)
                         .padding(.top, 48)
@@ -82,6 +85,8 @@ struct ContentView: View {
             }
             .navigationDestination(for: VestaDestination.self) { destination in
                 switch destination {
+                case .settings:
+                    SettingsScreen(model: model)
                 case .todayCalendar:
                     TodayCalendarScreen(model: model)
                 }
@@ -164,6 +169,15 @@ struct ContentView: View {
     }
 
     private func perform(_ action: VestaChromeAction) {
+        if action == .statusSignal {
+            if model.latestResult != nil {
+                model.openLatestResult()
+            } else {
+                Task { await model.refreshContext() }
+            }
+            return
+        }
+
         if let destination = action.destination {
             navigationPath.append(destination)
         }

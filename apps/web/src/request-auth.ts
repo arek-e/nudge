@@ -1,6 +1,13 @@
 import type { RequestSession } from "./request-context";
 import type { VestaAppService } from "./Services/VestaApp";
-import { isBetterAuthConfigured } from "./auth";
+
+const anonymousUserIdPattern =
+  /^anon_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+function anonymousUserIdFrom(headers: Headers) {
+  const userId = headers.get("x-lares-anonymous-user-id")?.trim().toLowerCase();
+  return userId && anonymousUserIdPattern.test(userId) ? userId : null;
+}
 
 export async function resolveCurrentUser(input: {
   readonly app: VestaAppService;
@@ -18,15 +25,19 @@ export async function resolveCurrentUser(input: {
     };
   }
 
-  if (isBetterAuthConfigured(input.app.env)) {
+  const anonymousUserId = anonymousUserIdFrom(input.headers);
+  if (anonymousUserId) {
     return {
-      authMode: "unauthenticated",
-      user: null,
+      authMode: "anonymous",
+      user: {
+        displayName: "Anonymous User",
+        id: anonymousUserId,
+      },
     };
   }
 
   return {
-    authMode: "dev",
-    user: input.app.devUser,
+    authMode: "unauthenticated",
+    user: null,
   };
 }

@@ -40,7 +40,7 @@ enum CalendarStatsSelftest {
 
         assert(VestaChromeAction.todayCalendar.destination == .todayCalendar)
         assert(VestaChromeAction.todayCalendar.sheet == nil)
-        assert(VestaChromeAction.streakCalendar.destination == nil)
-        assert(VestaChromeAction.streakCalendar.sheet == .streakCalendar)
+        assert(VestaChromeAction.settings.destination == .settings)
+        assert(VestaChromeAction.settings.sheet == nil)
     }
 }

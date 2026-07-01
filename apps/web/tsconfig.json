@@ -4,11 +4,11 @@
     "composite": true,
     "jsx": "react-jsx",
     "outDir": "../../.tsbuild/apps/web",
-    "rootDir": "src",
+    "rootDir": "../..",
     "tsBuildInfoFile": "../../.tsbuild/apps/web.tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/**/*.test.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../convex/**/*.ts", "../../convex/**/*.d.ts"],
+  "exclude": ["src/**/*.test.ts", "../../convex/**/*.test.ts"],
   "references": [
     { "path": "../../packages/domain" },
     { "path": "../../packages/effect-services" },

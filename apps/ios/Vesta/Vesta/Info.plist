@@ -6,6 +6,8 @@
 	<string>Vesta</string>
 	<key>CFBundleSpokenName</key>
 	<string>Vesta</string>
+	<key>ClerkPublishableKey</key>
+	<string>$(CLERK_PUBLISHABLE_KEY)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

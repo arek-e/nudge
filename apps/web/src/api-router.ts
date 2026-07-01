@@ -598,9 +598,9 @@ export const apiRouter = api.router({
   session: api.session.handler(({ context }) => {
     return {
       authMethods: {
-        emailOtp: context.session.authMode !== "dev",
-        google: context.session.authMode !== "dev" && context.googleAuthConfigured,
-        passkey: context.session.authMode !== "dev",
+        emailOtp: true,
+        google: context.googleAuthConfigured,
+        passkey: true,
       },
       authMode: context.session.authMode,
       user: context.session.user,

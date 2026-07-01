@@ -1,0 +1,2318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lares iOS Sync Engine Plan</title>
+    <script>
+      (function () {
+        const saved = localStorage.getItem("lares-ios-sync-plan-theme");
+        const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+    <style>
+      :root {
+        --bg: #faf9f5;
+        --surface: #ffffff;
+        --surface-2: #f0eee6;
+        --surface-3: #e3dacc;
+        --ink: #141413;
+        --body: #3d3d3a;
+        --muted: #87867f;
+        --line: #d1cfc5;
+        --line-soft: #e8e4d9;
+        --clay: #d97757;
+        --clay-soft: rgba(217, 119, 87, 0.12);
+        --olive: #788c5d;
+        --olive-soft: rgba(120, 140, 93, 0.14);
+        --gold: #c9a45c;
+        --gold-soft: rgba(201, 164, 92, 0.15);
+        --blue: #587b7f;
+        --blue-soft: rgba(88, 123, 127, 0.12);
+        --rust: #b04a3f;
+        --rust-soft: rgba(176, 74, 63, 0.12);
+        --shadow: rgba(30, 25, 18, 0.1);
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+
+      html.dark {
+        --bg: #121211;
+        --surface: #1f1f1d;
+        --surface-2: #2a2a28;
+        --surface-3: #35332f;
+        --ink: #faf9f5;
+        --body: #d1cfc5;
+        --muted: #9c9a91;
+        --line: #3d3d3a;
+        --line-soft: #2c2c29;
+        --clay: #e48a6e;
+        --clay-soft: rgba(228, 138, 110, 0.16);
+        --olive: #9db07c;
+        --olive-soft: rgba(157, 176, 124, 0.17);
+        --gold: #d4b36f;
+        --gold-soft: rgba(212, 179, 111, 0.18);
+        --blue: #75adb2;
+        --blue-soft: rgba(117, 173, 178, 0.16);
+        --rust: #e07a72;
+        --rust-soft: rgba(224, 122, 114, 0.16);
+        --shadow: rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--body);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.58;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--line-soft);
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        backdrop-filter: blur(18px);
+      }
+
+      .brand {
+        min-width: 0;
+      }
+
+      .brand strong {
+        display: block;
+        color: var(--ink);
+        font-family: var(--serif);
+        font-size: 19px;
+        font-weight: 520;
+        letter-spacing: -0.01em;
+        line-height: 1.1;
+      }
+
+      .brand span {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 7px;
+      }
+
+      .nav a,
+      #themeToggle {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        padding: 6px 11px;
+        text-decoration: none;
+      }
+
+      #themeToggle {
+        border-radius: 8px;
+        text-transform: uppercase;
+      }
+
+      .nav a:hover,
+      #themeToggle:hover {
+        border-color: var(--muted);
+        color: var(--ink);
+      }
+
+      .page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 58px 28px 120px;
+      }
+
+      header {
+        max-width: 860px;
+        margin-bottom: 44px;
+      }
+
+      .eyebrow {
+        margin-bottom: 12px;
+        color: var(--clay);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        color: var(--ink);
+      }
+
+      h1 {
+        max-width: 760px;
+        font-family: var(--serif);
+        font-size: clamp(32px, 5vw, 52px);
+        font-weight: 500;
+        letter-spacing: -0.015em;
+        line-height: 1.05;
+      }
+
+      .lead {
+        max-width: 760px;
+        margin: 18px 0 0;
+        color: var(--body);
+        font-size: 16px;
+      }
+
+      code {
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 0.92em;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 58px;
+      }
+
+      .stat {
+        min-height: 118px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        box-shadow: 0 18px 60px var(--shadow);
+        padding: 18px 18px 16px;
+      }
+
+      .stat .k {
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .stat .v {
+        color: var(--ink);
+        font-size: 19px;
+        font-weight: 700;
+        line-height: 1.24;
+      }
+
+      .stat .note {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.45;
+      }
+
+      section {
+        margin-bottom: 64px;
+      }
+
+      .sec-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .num {
+        border-radius: 8px;
+        background: var(--surface-3);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 3px 9px;
+      }
+
+      h2 {
+        font-family: var(--serif);
+        font-size: 27px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+      }
+
+      .sec-intro {
+        max-width: 760px;
+        margin: 0 0 24px;
+        color: var(--muted);
+        font-size: 14.5px;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 20px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 20px;
+      }
+
+      .panel.tint-blue {
+        background: linear-gradient(180deg, var(--blue-soft), var(--surface));
+      }
+
+      .panel.tint-clay {
+        background: linear-gradient(180deg, var(--clay-soft), var(--surface));
+      }
+
+      .panel h3 {
+        margin-bottom: 8px;
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 500;
+      }
+
+      .panel p {
+        margin: 0;
+        color: var(--body);
+        font-size: 14px;
+      }
+
+      .panel ul {
+        margin: 12px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .panel li {
+        position: relative;
+        padding: 0 0 9px 18px;
+        color: var(--body);
+        font-size: 13.5px;
+      }
+
+      .panel li::before {
+        content: "";
+        position: absolute;
+        top: 0.68em;
+        left: 0;
+        width: 8px;
+        height: 1px;
+        background: var(--muted);
+      }
+
+      .schema {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        gap: 18px;
+        align-items: start;
+      }
+
+      .contract-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .contract-grid + .contract-grid {
+        margin-top: 18px;
+      }
+
+      .table-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .table-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 14px 15px;
+      }
+
+      .table-card strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+
+      .table-card span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .code {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface-2);
+        padding: 16px 18px;
+      }
+
+      pre {
+        margin: 0;
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+
+      .milestones {
+        display: grid;
+        gap: 0;
+      }
+
+      .milestone {
+        display: grid;
+        grid-template-columns: 130px 28px minmax(0, 1fr);
+        gap: 0 18px;
+      }
+
+      .when {
+        padding-top: 4px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        text-align: right;
+      }
+
+      .rail {
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+      }
+
+      .dot {
+        width: 14px;
+        height: 14px;
+        margin-top: 4px;
+        border: 3px solid var(--clay);
+        border-radius: 999px;
+        background: var(--surface);
+      }
+
+      .dot.green {
+        border-color: var(--olive);
+        background: var(--olive);
+      }
+
+      .line {
+        width: 2px;
+        flex: 1;
+        margin: 5px 0;
+        background: var(--line);
+      }
+
+      .milestone:last-child .line {
+        display: none;
+      }
+
+      .m-body {
+        padding-bottom: 34px;
+      }
+
+      .m-body h3 {
+        margin-bottom: 5px;
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 500;
+      }
+
+      .m-body p {
+        max-width: 720px;
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .tag {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--surface-2);
+        color: var(--body);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        padding: 3px 8px;
+      }
+
+      .swimlane {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .lane {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .lane .head {
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        padding: 11px 13px;
+        text-transform: uppercase;
+      }
+
+      .lane .body {
+        padding: 13px;
+      }
+
+      .step {
+        border: 1px solid var(--line-soft);
+        border-left: 3px solid var(--clay);
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 10px 11px;
+        background: color-mix(in srgb, var(--surface) 86%, var(--clay-soft));
+        color: var(--body);
+        font-size: 13px;
+      }
+
+      .step.green {
+        border-left-color: var(--olive);
+        background: color-mix(in srgb, var(--surface) 86%, var(--olive-soft));
+      }
+
+      .step.blue {
+        border-left-color: var(--blue);
+        background: color-mix(in srgb, var(--surface) 86%, var(--blue-soft));
+      }
+
+      .step.gold {
+        border-left-color: var(--gold);
+        background: color-mix(in srgb, var(--surface) 86%, var(--gold-soft));
+      }
+
+      .risk-table {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+
+      .risk-table + .control-table {
+        margin-top: 18px;
+      }
+
+      .two-col + .control-table,
+      .contract-grid + .control-table {
+        margin-top: 18px;
+      }
+
+      .control-table + .control-table {
+        margin-top: 18px;
+      }
+
+      .risk-row {
+        display: grid;
+        grid-template-columns: 1.15fr 90px 1.55fr;
+      }
+
+      .risk-row + .risk-row {
+        border-top: 1px solid var(--line);
+      }
+
+      .risk-cell {
+        padding: 14px 16px;
+        color: var(--body);
+        font-size: 13.5px;
+      }
+
+      .risk-cell + .risk-cell {
+        border-left: 1px solid var(--line);
+      }
+
+      .control-table {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 1.05fr 1.25fr 1.35fr 1.25fr;
+      }
+
+      .control-row + .control-row {
+        border-top: 1px solid var(--line);
+      }
+
+      .control-cell {
+        padding: 14px 15px;
+        color: var(--body);
+        font-size: 13px;
+      }
+
+      .control-cell + .control-cell {
+        border-left: 1px solid var(--line);
+      }
+
+      .control-cell strong {
+        color: var(--ink);
+      }
+
+      .risk-head {
+        background: var(--surface-2);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .sev {
+        display: inline-block;
+        border-radius: 7px;
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+      }
+
+      .sev.high {
+        background: var(--rust-soft);
+        color: var(--rust);
+      }
+
+      .sev.med {
+        background: var(--gold-soft);
+        color: var(--gold);
+      }
+
+      .sev.low {
+        background: var(--olive-soft);
+        color: var(--olive);
+      }
+
+      .decision {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .status-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 17px 18px;
+      }
+
+      .status-card .badge {
+        display: inline-block;
+        margin-bottom: 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.07em;
+        padding: 4px 9px;
+        text-transform: uppercase;
+      }
+
+      .status-card h3 {
+        margin-bottom: 7px;
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 500;
+      }
+
+      .status-card p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 13.5px;
+      }
+
+      .status-card dl {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+      }
+
+      .status-card dt {
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .status-card dd {
+        margin: 2px 0 0;
+        color: var(--body);
+        font-size: 13px;
+      }
+
+      .callout {
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--clay);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 17px 20px;
+      }
+
+      .callout strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--ink);
+      }
+
+      .callout p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13.5px;
+      }
+
+      @media (max-width: 920px) {
+        .summary,
+        .two-col,
+        .schema,
+        .contract-grid,
+        .swimlane,
+        .status-grid,
+        .decision {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .spacer {
+          display: none;
+        }
+
+        .nav {
+          justify-content: flex-start;
+        }
+
+        .milestone {
+          grid-template-columns: 28px minmax(0, 1fr);
+        }
+
+        .when {
+          grid-column: 2;
+          grid-row: 1;
+          padding-top: 0;
+          text-align: left;
+        }
+
+        .rail {
+          grid-column: 1;
+          grid-row: 1 / span 2;
+        }
+
+        .m-body {
+          grid-column: 2;
+          grid-row: 2;
+        }
+
+        .risk-row {
+          grid-template-columns: 1fr;
+        }
+
+        .control-row {
+          grid-template-columns: 1fr;
+        }
+
+        .risk-cell + .risk-cell {
+          border-left: 0;
+          border-top: 1px solid var(--line-soft);
+        }
+
+        .control-cell + .control-cell {
+          border-left: 0;
+          border-top: 1px solid var(--line-soft);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">
+        <strong>Lares iOS Sync</strong>
+        <span>Convex spike + durable GRDB offline writes</span>
+      </div>
+      <div class="spacer"></div>
+      <nav class="nav" aria-label="Sections">
+        <a href="#status-model">Status</a>
+        <a href="#convex-spike">Spike</a>
+        <a href="#domain-fit">Domains</a>
+        <a href="#shape">Shape</a>
+        <a href="#schema">Schema</a>
+        <a href="#flow">Flow</a>
+        <a href="#api">Contract</a>
+        <a href="#slices">Slices</a>
+        <a href="#risks">Risks</a>
+      </nav>
+      <button id="themeToggle">Theme</button>
+    </div>
+
+    <main class="page">
+      <header>
+        <div class="eyebrow">Implementation plan</div>
+        <h1>Validate Convex before building our own iOS sync engine.</h1>
+        <p class="lead">
+          Your note is safe immediately on this device. Lares syncs it when possible. AI starts only
+          after the backend receives it. Because Lares is still early, first run a Convex spike to
+          see whether Convex can own canonical notes, typed mutations, subscriptions, storage, and
+          AI job state while GRDB preserves durable offline writes on iOS.
+        </p>
+      </header>
+
+      <div class="summary" aria-label="Plan summary">
+        <div class="stat">
+          <div class="k">Client source</div>
+          <div class="v">SQLite read model</div>
+          <div class="note">SwiftUI reads GRDB. Network refresh is not the UI source of truth.</div>
+        </div>
+        <div class="stat">
+          <div class="k">Client writes</div>
+          <div class="v">Outbox commands</div>
+          <div class="note">User intent is durable before the app touches the network.</div>
+        </div>
+        <div class="stat">
+          <div class="k">Decision gate</div>
+          <div class="v">Convex spike first</div>
+          <div class="note">
+            Adopt Convex only if it removes real sync complexity without weakening offline safety.
+          </div>
+        </div>
+        <div class="stat">
+          <div class="k">Fallback path</div>
+          <div class="v">Custom sync protocol</div>
+          <div class="note">
+            Build the GRDB/outbox/change-feed design only if Convex fails the spike.
+          </div>
+        </div>
+      </div>
+
+      <section id="status-model">
+        <div class="sec-head">
+          <span class="num">01</span>
+          <h2>Product status model</h2>
+        </div>
+        <p class="sec-intro">
+          The product promise is: keep writing now, sync later, let AI catch up when the Engine can
+          see the note. The UI must keep global connectivity, per-note sync, and AI review state
+          separate so offline writing never looks lost or already processed.
+        </p>
+
+        <div class="status-grid">
+          <div class="status-card">
+            <span class="badge">Global</span>
+            <h3>App sync status</h3>
+            <p>Connectivity and queue state for the whole app.</p>
+            <dl>
+              <div>
+                <dt>Show when</dt>
+                <dd>
+                  The device goes offline, sync starts, all rows catch up, or sync is blocked.
+                </dd>
+              </div>
+              <div>
+                <dt>Copy</dt>
+                <dd>
+                  <code>Offline</code>, <code>Syncing 3 changes</code>, <code>Up to date</code>,
+                  <code>Sync failed</code>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="status-card">
+            <span class="badge">Per item</span>
+            <h3>Note or capture state</h3>
+            <p>Whether this specific note/capture is safe locally and accepted by the Engine.</p>
+            <dl>
+              <div>
+                <dt>Show when</dt>
+                <dd>
+                  The local transaction commits, the outbox command is queued, accepted, or fails.
+                </dd>
+              </div>
+              <div>
+                <dt>Copy</dt>
+                <dd>
+                  <code>Saved on this device</code>, <code>Pending sync</code>,
+                  <code>Synced to Lares</code>, <code>Needs retry</code>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="status-card">
+            <span class="badge">AI state</span>
+            <h3>AI review state</h3>
+            <p>
+              AI is server-side derived state. It starts only after the note reaches the Engine.
+            </p>
+            <dl>
+              <div>
+                <dt>Show when</dt>
+                <dd>The note is local-only, queued for review, running, completed, or failed.</dd>
+              </div>
+              <div>
+                <dt>Copy</dt>
+                <dd>
+                  <code>Not reviewed yet</code>, <code>Lares is reviewing this</code>,
+                  <code>Review ready</code>, <code>Analysis failed</code>
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section id="convex-spike">
+        <div class="sec-head">
+          <span class="num">02</span>
+          <h2>Convex spike</h2>
+        </div>
+        <p class="sec-intro">
+          Treat Convex as a candidate source-of-truth platform, not just an iOS helper. The spike
+          should prove whether Convex can replace most of the custom sync contract while GRDB still
+          gives Lares the hard offline guarantee: edits survive app restart before the network
+          returns.
+        </p>
+
+        <div class="two-col">
+          <div class="panel tint-blue">
+            <h3>Spike architecture</h3>
+            <p>One vertical slice, intentionally small but realistic.</p>
+            <ul>
+              <li>SwiftUI reads local GRDB projections.</li>
+              <li>
+                GRDB stores editable notes, local patches, pending mutations, and status labels.
+              </li>
+              <li>Convex Swift sends typed mutations when the device reconnects.</li>
+              <li>Convex subscriptions stream canonical notes and AI job state back to iOS.</li>
+              <li>
+                Convex stores canonical note documents, patch receipts, files, and AI processing
+                state for the spike.
+              </li>
+            </ul>
+          </div>
+          <div class="panel tint-clay">
+            <h3>Questions to answer</h3>
+            <p>Each answer must come from working code, not just API reading.</p>
+            <ul>
+              <li>
+                Can an offline note edit survive app restart in GRDB and sync to Convex later?
+              </li>
+              <li>Can Convex subscriptions replace our planned <code>sync_changes</code> feed?</li>
+              <li>Can Convex mutations cleanly apply, rebase, or reject note patches?</li>
+              <li>Can AI job state fit naturally in Convex without splitting ownership badly?</li>
+              <li>
+                Does this reduce Lares Engine complexity instead of creating a second backend brain?
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Convex spike work plan">
+          <div class="control-row risk-head">
+            <div class="control-cell">Step</div>
+            <div class="control-cell">Build</div>
+            <div class="control-cell">Evidence</div>
+            <div class="control-cell">Stop condition</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>1. Ownership map</strong></div>
+            <div class="control-cell">
+              Define the spike schema, auth path, note ownership, and AI state ownership before
+              wiring clients.
+            </div>
+            <div class="control-cell">
+              A short ADR draft says what Convex owns, what GRDB owns, and what Cloudflare still
+              owns.
+            </div>
+            <div class="control-cell">
+              Stop if ownership is already split in a way that makes note truth ambiguous.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>2. Local durable note</strong></div>
+            <div class="control-cell">
+              Add the smallest GRDB note projection, patch table, and persisted pending mutation
+              row.
+            </div>
+            <div class="control-cell">
+              A Swift test or manual simulator script proves offline edit, app kill, and offline
+              relaunch.
+            </div>
+            <div class="control-cell">Stop if the UI cannot be driven from local state first.</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>3. Convex mutation bridge</strong></div>
+            <div class="control-cell">
+              Send the queued patch to a typed Convex mutation with an idempotency key and payload
+              hash.
+            </div>
+            <div class="control-cell">
+              Reconnect drains once, records a receipt, and keeps retry behavior deterministic.
+            </div>
+            <div class="control-cell">
+              Stop if we have to rebuild the full custom receipt protocol around Convex.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>4. Subscription return path</strong></div>
+            <div class="control-cell">
+              Subscribe to canonical note and AI state from Convex, then project the result into
+              GRDB.
+            </div>
+            <div class="control-cell">
+              A second client or server change appears in iOS without a custom cursor feed.
+            </div>
+            <div class="control-cell">
+              Stop if subscriptions cannot be reconciled with local pending patches.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>5. Conflict and AI proof</strong></div>
+            <div class="control-cell">
+              Implement one non-overlapping rebase, one overlapping conflict, and one AI review
+              state transition.
+            </div>
+            <div class="control-cell">
+              The UI shows conflict review without data loss and AI labels move through
+              queued/running/ready.
+            </div>
+            <div class="control-cell">
+              Stop if conflict or AI lifecycle complexity equals the custom sync plan.
+            </div>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Convex spike acceptance criteria">
+          <div class="control-row risk-head">
+            <div class="control-cell">Acceptance test</div>
+            <div class="control-cell">Pass condition</div>
+            <div class="control-cell">What it proves</div>
+            <div class="control-cell">Failure signal</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Offline restart</strong></div>
+            <div class="control-cell">
+              Edit note offline, kill app, relaunch offline, note still shows
+              <code>Saved on this device</code>.
+            </div>
+            <div class="control-cell">
+              GRDB still owns durable local safety; Convex does not need to solve restart
+              persistence.
+            </div>
+            <div class="control-cell">
+              If data disappears or status is ambiguous, Convex cannot replace the local store.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Reconnect mutation drain</strong></div>
+            <div class="control-cell">
+              Reconnecting sends the pending patch to Convex once and marks the local row
+              <code>Synced to Lares</code>.
+            </div>
+            <div class="control-cell">Convex mutations can be the remote command target.</div>
+            <div class="control-cell">
+              If we need our full custom receipt protocol anyway, the benefit shrinks.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Reactive truth</strong></div>
+            <div class="control-cell">
+              A second client or server mutation updates Convex and iOS receives the canonical note
+              through subscription.
+            </div>
+            <div class="control-cell">
+              Convex can replace custom cursor polling for connected clients.
+            </div>
+            <div class="control-cell">
+              If subscriptions are not enough for our state model, keep the custom feed.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Patch conflict</strong></div>
+            <div class="control-cell">
+              Non-overlapping stale edits rebase; overlapping edits keep local text and show
+              <code>document_conflict</code>.
+            </div>
+            <div class="control-cell">
+              Rich note sync can work from day one, not as append-only capture sync.
+            </div>
+            <div class="control-cell">
+              If conflict handling becomes as complex as the custom plan, Convex is less compelling.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>AI state</strong></div>
+            <div class="control-cell">
+              Server schedules or records an AI review, then iOS sees
+              <code>Lares is reviewing this</code> and <code>Review ready</code>.
+            </div>
+            <div class="control-cell">
+              Convex can own at least note-adjacent AI lifecycle state.
+            </div>
+            <div class="control-cell">
+              If AI state must remain entirely in Cloudflare, define a strict integration boundary.
+            </div>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Convex decision rules">
+          <div class="control-row risk-head">
+            <div class="control-cell">Decision</div>
+            <div class="control-cell">Choose when</div>
+            <div class="control-cell">Resulting architecture</div>
+            <div class="control-cell">Next step</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Adopt Convex for notes/sync</strong></div>
+            <div class="control-cell">
+              Offline restart, mutation drain, reactive truth, patch conflicts, and AI state all
+              pass cleanly.
+            </div>
+            <div class="control-cell">
+              Convex owns canonical notes, subscriptions, storage, mutation receipts, and
+              note-adjacent AI state. GRDB remains the durable local offline store.
+            </div>
+            <div class="control-cell">
+              Rewrite the custom sections below as Convex-backed implementation slices.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Keep custom sync</strong></div>
+            <div class="control-cell">
+              Convex does not remove enough protocol work or weakens offline/recovery guarantees.
+            </div>
+            <div class="control-cell">
+              Proceed with the GRDB/outbox/custom change-feed plan below.
+            </div>
+            <div class="control-cell">
+              Build <code>sync_changes</code>, command receipts, patch merge, and AI feed seam in
+              Lares Engine.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Hybrid only with a hard boundary</strong></div>
+            <div class="control-cell">
+              Convex is strong for notes but AI/memory must stay in Cloudflare for clear reasons.
+            </div>
+            <div class="control-cell">
+              Convex owns canonical note state; Lares Engine consumes note events and owns derived
+              AI/memory state.
+            </div>
+            <div class="control-cell">
+              Write an ADR before implementation to prevent split-brain ownership.
+            </div>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Convex spike risks">
+          <div class="control-row risk-head">
+            <div class="control-cell">Spike risk</div>
+            <div class="control-cell">Why it matters</div>
+            <div class="control-cell">Guardrail</div>
+            <div class="control-cell">Decision impact</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Swift SDK offline gap</strong></div>
+            <div class="control-cell">
+              If Convex Swift does not durably queue offline mutations across restarts, users could
+              still lose unsent intent.
+            </div>
+            <div class="control-cell">
+              GRDB remains the durable mutation queue; Convex is the remote command target, not the
+              local offline store.
+            </div>
+            <div class="control-cell">
+              Acceptable only if the GRDB bridge is small and reliable.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Split-brain backend</strong></div>
+            <div class="control-cell">
+              Lares could end up with note truth in Convex and AI truth in Cloudflare without a
+              clear boundary.
+            </div>
+            <div class="control-cell">
+              Pick one owner for canonical notes. If Cloudflare owns AI, it consumes note events and
+              publishes derived state back through one contract.
+            </div>
+            <div class="control-cell">
+              If ownership is fuzzy, keep custom sync or write an ADR before building.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Migration lock-in</strong></div>
+            <div class="control-cell">
+              Early adoption is cheap, but the data model still needs an exit path if product needs
+              change.
+            </div>
+            <div class="control-cell">
+              Use stable note ids, explicit document revisions, portable patch payloads, and
+              exportable AI state.
+            </div>
+            <div class="control-cell">
+              Adopt only if the model can be exported without rewriting note history.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="domain-fit">
+        <div class="sec-head">
+          <span class="num">03</span>
+          <h2>Domain fit</h2>
+        </div>
+        <p class="sec-intro">
+          Convex should compete for realtime product state, not every storage/search/runtime job.
+          The architecture stays clearer if each domain goes to the backend that is naturally
+          strongest for it.
+        </p>
+
+        <div class="control-table" aria-label="Domain ownership fit">
+          <div class="control-row risk-head">
+            <div class="control-cell">Domain</div>
+            <div class="control-cell">Best fit</div>
+            <div class="control-cell">Why</div>
+            <div class="control-cell">Lares use cases</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Local offline edits</strong></div>
+            <div class="control-cell">GRDB / SQLite</div>
+            <div class="control-cell">
+              Native persistence survives app restart before any network or SDK queue succeeds.
+            </div>
+            <div class="control-cell">
+              Drafts, editable daily notes, pending patches, unsynced labels, retry queue.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Realtime product state</strong></div>
+            <div class="control-cell">Convex</div>
+            <div class="control-cell">
+              Typed mutations, transactional writes, reactive subscriptions, and consistent client
+              updates fit sync-heavy state.
+            </div>
+            <div class="control-cell">
+              Canonical notes, shared notes, review queue items, AI job labels, multi-device
+              updates.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Memory retrieval</strong></div>
+            <div class="control-cell">Turbopuffer</div>
+            <div class="control-cell">
+              Dedicated hybrid vector plus BM25 search, filtering, namespaces, and large-scale
+              retrieval are the core product.
+            </div>
+            <div class="control-cell">
+              Related memories, similar notes, context packs for agents, long-term semantic search.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>AI orchestration</strong></div>
+            <div class="control-cell">Cloudflare Workers / Agents / Workflows</div>
+            <div class="control-cell">
+              Lares already has agent sessions, durable workflows, Think, tool boundaries, OKF, MCP,
+              and observability here.
+            </div>
+            <div class="control-cell">
+              Daily digest, extraction, proposal generation, human review waits, agent tools, OKF
+              projection.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Files and attachments</strong></div>
+            <div class="control-cell">Convex Storage or R2</div>
+            <div class="control-cell">
+              Use Convex when files belong to shared notes; use R2 when files belong to
+              agent/runtime artifacts or OKF exports.
+            </div>
+            <div class="control-cell">
+              Voice note assets, screenshots, PDFs, generated artifacts, export bundles.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>API shell and ops</strong></div>
+            <div class="control-cell">Hono / Workers</div>
+            <div class="control-cell">
+              Existing route composition, auth surface, deployment, tracing, and operational hooks
+              remain useful even if note sync moves.
+            </div>
+            <div class="control-cell">
+              PWA routes, auth callbacks, MCP, health checks, admin/debug routes, telemetry.
+            </div>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Realtime Lares use cases">
+          <div class="control-row risk-head">
+            <div class="control-cell">Realtime use case</div>
+            <div class="control-cell">Why Convex is interesting</div>
+            <div class="control-cell">What to spike</div>
+            <div class="control-cell">What stays elsewhere</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Personal note across devices</strong></div>
+            <div class="control-cell">
+              One mutation updates canonical note state and every connected client receives the new
+              projection.
+            </div>
+            <div class="control-cell">
+              Edit on iOS, observe on web, then edit on web and reconcile back into GRDB.
+            </div>
+            <div class="control-cell">
+              Offline durability stays in GRDB; AI interpretation stays in the agent runtime.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Shared notes later</strong></div>
+            <div class="control-cell">
+              Subscriptions and typed server mutations are closer to collaborative document state
+              than a hand-rolled polling feed.
+            </div>
+            <div class="control-cell">
+              Two users edit the same note, test permissions, stale patch rebase, and conflict
+              visibility.
+            </div>
+            <div class="control-cell">
+              Long-term memory search and cross-note retrieval stay in Turbopuffer.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Review queue</strong></div>
+            <div class="control-cell">
+              Review items are product state that should appear, change, and disappear live across
+              devices.
+            </div>
+            <div class="control-cell">
+              Agent creates a proposal, iOS sees it, user accepts, web updates without refresh.
+            </div>
+            <div class="control-cell">
+              The agent/workflow that creates the proposal can remain on Workers.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>AI job status</strong></div>
+            <div class="control-cell">
+              Convex can be the reactive status board for queued/running/ready/failed states.
+            </div>
+            <div class="control-cell">
+              Workers update job state after extraction; clients subscribe to status changes.
+            </div>
+            <div class="control-cell">
+              Model calls, retries, and tool execution remain in Workers unless a later spike says
+              otherwise.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="shape">
+        <div class="sec-head">
+          <span class="num">04</span>
+          <h2>Fallback target shape</h2>
+        </div>
+        <p class="sec-intro">
+          Keep this custom design as the fallback and comparison baseline. If Convex passes the
+          spike, replace this section with a Convex-backed plan instead of building a duplicate sync
+          engine.
+        </p>
+
+        <div class="two-col">
+          <div class="panel tint-blue">
+            <h3>iOS owns</h3>
+            <p>The app surface owns fast local interaction and durable intent capture.</p>
+            <ul>
+              <li>Editable local note documents, capture rows, and reactive query projections.</li>
+              <li>Drafts, attachment manifests, pending save state, and failed retry state.</li>
+              <li><code>sync_outbox</code> rows for typed mutations owed to the Engine.</li>
+              <li>A <code>SyncCoordinator</code> actor that pushes commands and pulls facts.</li>
+              <li>No local note revision, extraction, proposal, or memory-writing behavior.</li>
+            </ul>
+          </div>
+          <div class="panel tint-clay">
+            <h3>Engine owns</h3>
+            <p>The Engine remains the durable runtime for product behavior.</p>
+            <ul>
+              <li>Canonical journal and daily note document state.</li>
+              <li>Server-side mutation execution and deterministic patch merge/rebase.</li>
+              <li>Note revision creation and dedupe.</li>
+              <li>Agent run lifecycle, extraction, proposals, memory indexing, and summaries.</li>
+              <li>
+                A schema-backed <code>sync_changes</code> feed for canonical read model updates.
+              </li>
+              <li>
+                A <code>SyncChangeWriter</code> seam behind persistence so workflows emit changes
+                idempotently.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Convex-style target model">
+          <div class="control-row risk-head">
+            <div class="control-cell">Reference model</div>
+            <div class="control-cell">What Lares copies</div>
+            <div class="control-cell">What Lares adds</div>
+            <div class="control-cell">What Lares avoids</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Convex-like</strong></div>
+            <div class="control-cell">
+              Typed server mutations, reactive query results, and optimistic local updates while
+              mutations are pending.
+            </div>
+            <div class="control-cell">
+              Durable offline GRDB storage, persisted mutation queue, and explicit retry/recovery
+              state.
+            </div>
+            <div class="control-cell">
+              Duplicating Engine behavior in Swift or treating local optimistic state as canonical.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>TanStack DB / Electric-like</strong></div>
+            <div class="control-cell">
+              Local database is the UI source of truth and remote changes stream back into local
+              projections.
+            </div>
+            <div class="control-cell">
+              Lares-specific command semantics, AI lifecycle changes, and review boundaries.
+            </div>
+            <div class="control-cell">
+              Generic bidirectional table replication for sensitive derived AI state.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="schema">
+        <div class="sec-head">
+          <span class="num">05</span>
+          <h2>Local SQLite schema</h2>
+        </div>
+        <p class="sec-intro">
+          First version must support real editable notes, not append-only capture logs. GRDB stores
+          the current local document, local patch history, and reactive projections. Pulls merge
+          server changes with pending local patches instead of overwriting unsynced text.
+        </p>
+
+        <div class="schema">
+          <div class="table-list">
+            <div class="table-card">
+              <strong>client_meta</strong>
+              <span>Stores device id, sync cursor, last sync status, and schema version.</span>
+            </div>
+            <div class="table-card">
+              <strong>journal_documents</strong>
+              <span
+                >Editable local note document with local revision, base server revision, and merge
+                state.</span
+              >
+            </div>
+            <div class="table-card">
+              <strong>captures</strong>
+              <span
+                >Local record of the user's saved note/capture, including pending sync state.</span
+              >
+            </div>
+            <div class="table-card">
+              <strong>document_patches</strong>
+              <span
+                >Ordered local edits against a note document. Patches are replayed after remote
+                changes.</span
+              >
+            </div>
+            <div class="table-card">
+              <strong>sync_outbox</strong>
+              <span>Durable queue of typed mutations like <code>note_document.patch</code>.</span>
+            </div>
+            <div class="table-card">
+              <strong>agent_runs / extracted_items</strong>
+              <span>Read-only local projections pulled from the Engine change feed.</span>
+            </div>
+            <div class="table-card">
+              <strong>attachments / attachment_uploads</strong>
+              <span>Local files, manifests, upload sessions, checksums, and retry state.</span>
+            </div>
+          </div>
+
+          <div class="code" aria-label="Suggested SQLite schema">
+            <pre>
+-- status values:
+-- sync_status: local_only | pending_sync | syncing | synced | needs_retry | terminal_failed
+-- ai_status: not_reviewed | queued | running | review_ready | failed
+-- outbox status: pending | in_flight | accepted | retryable_failed | terminal_failed
+-- merge_status: clean | dirty | rebasing | conflicted
+
+create table client_meta (
+  key text primary key,
+  value text not null
+);
+
+create table captures (
+  id text primary key,
+  local_date text not null,
+  note_text text not null,
+  attachment_manifest_json text,
+  occurred_at text not null,
+  sync_status text not null,
+  ai_status text not null,
+  source_mutation_id text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table sync_outbox (
+  id text primary key,
+  idempotency_key text not null unique,
+  operation text not null,
+  entity_type text not null,
+  entity_id text not null,
+  dependency_group text not null,
+  payload_json text not null,
+  payload_hash text not null,
+  status text not null,
+  attempt_count integer not null default 0,
+  locked_until text,
+  next_attempt_at text,
+  last_error text,
+  last_error_kind text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table journal_documents (
+  id text primary key,
+  local_date text not null unique,
+  title text not null,
+  body_text text not null,
+  body_document_json text,
+  local_revision integer not null default 0,
+  server_revision text,
+  base_server_revision text,
+  merge_status text not null,
+  server_updated_at text,
+  sync_status text not null,
+  ai_status text not null,
+  last_sync_error text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table document_patches (
+  id text primary key,
+  document_id text not null,
+  local_revision integer not null,
+  base_server_revision text,
+  patch_json text not null,
+  status text not null,
+  created_at text not null
+);
+
+create table agent_runs (
+  id text primary key,
+  source_revision_id text,
+  status text not null,
+  error_code text,
+  payload_json text not null,
+  updated_at text not null
+);
+
+create table extracted_items (
+  id text primary key,
+  source_note_id text not null,
+  source_revision_id text not null,
+  kind text not null,
+  title text not null,
+  status text not null,
+  payload_json text not null,
+  updated_at text not null
+);
+
+create table attachment_uploads (
+  id text primary key,
+  capture_id text not null,
+  local_url text not null,
+  content_hash text not null,
+  mime_type text not null,
+  byte_size integer not null,
+  remote_key text,
+  upload_session_json text,
+  status text not null,
+  attempt_count integer not null default 0,
+  last_error text,
+  updated_at text not null
+);</pre
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="flow">
+        <div class="sec-head">
+          <span class="num">06</span>
+          <h2>Behavior flow</h2>
+        </div>
+        <p class="sec-intro">
+          The user sees local save immediately. The Engine acknowledges the command quickly, then
+          async AI work updates iOS later through the same pull feed.
+        </p>
+
+        <div class="swimlane">
+          <div class="lane">
+            <div class="head">SwiftUI</div>
+            <div class="body">
+              <div class="step blue">User taps save on a note or capture.</div>
+              <div class="step blue">UI clears draft and shows "Saved on this device".</div>
+              <div class="step blue">Views subscribe to GRDB queries.</div>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="head">Local SQLite</div>
+            <div class="body">
+              <div class="step green">Transaction applies the edit to the local note document.</div>
+              <div class="step green">Insert ordered <code>document_patches</code> row.</div>
+              <div class="step green">
+                Insert <code>note_document.patch</code> outbox mutation with idempotency key.
+              </div>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="head">SyncCoordinator</div>
+            <div class="body">
+              <div class="step">Push pending outbox commands.</div>
+              <div class="step">Mark accepted commands synced.</div>
+              <div class="step">Pull <code>/api/sync/changes</code> from stored cursor.</div>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="head">Lares Engine</div>
+            <div class="body">
+              <div class="step gold">Upsert journal and daily note.</div>
+              <div class="step gold">Create note revision and queue agent run.</div>
+              <div class="step gold">Emit changes as AI results appear.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="api">
+        <div class="sec-head">
+          <span class="num">07</span>
+          <h2>Sync contract</h2>
+        </div>
+        <p class="sec-intro">
+          These endpoints must be schema-backed in <code>apps/web/src/api-contract.ts</code> and
+          exposed through the generated OpenAPI/oRPC surface. Backend route tests and Swift decoder
+          tests should share sample JSON fixtures.
+        </p>
+
+        <div class="contract-grid">
+          <div class="panel">
+            <h3><code>POST /api/sync/mutations</code></h3>
+            <p>Accepts user commands from the outbox.</p>
+            <ul>
+              <li>
+                <code>note_document.patch</code> applies local note edits against a base server
+                revision.
+              </li>
+              <li><code>capture.create</code> records explicit captures and media events.</li>
+              <li><code>item.status.update</code> changes a review item or action status.</li>
+              <li>
+                <code>proposal.review</code> records accept, edit, reject, defer, or more-context
+                decisions.
+              </li>
+              <li>
+                Same <code>idempotencyKey</code> plus same payload hash returns the prior result.
+              </li>
+              <li>
+                Same <code>idempotencyKey</code> plus different payload hash fails with
+                <code>idempotency_conflict</code>.
+              </li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3><code>GET /api/sync/changes</code></h3>
+            <p>Returns canonical facts after a cursor.</p>
+            <ul>
+              <li>Ordered by server-issued <code>changeId</code>, never device clocks.</li>
+              <li>
+                Initial entities: journal document, capture event, agent run, extracted item,
+                tombstone.
+              </li>
+              <li>Next entities: proposal, item event, commitment, summary, synthesis.</li>
+              <li>
+                Supports <code>limit</code>, <code>hasMore</code>, <code>nextCursor</code>, old
+                cursor replay, and full backfill.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="contract-grid">
+          <div class="code" aria-label="Mutation request and response fixture">
+            <pre>
+{
+  "deviceId": "ios-device-1",
+  "mutations": [
+    {
+      "mutationId": "local-mut-1",
+      "idempotencyKey": "uuid-v7",
+      "operation": "note_document.patch",
+      "payloadHash": "sha256:...",
+      "payload": {
+        "documentId": "note_2026_07_01",
+        "localDate": "2026-07-01",
+        "baseServerRevision": "rev_1841",
+        "localRevision": 7,
+        "patches": [
+          {
+            "op": "replace_text_range",
+            "blockId": "block_2",
+            "from": 12,
+            "to": 12,
+            "text": "Follow up with Maya"
+          }
+        ],
+        "attachmentIds": []
+      }
+    }
+  ]
+}
+
+{
+  "accepted": [
+    {
+      "mutationId": "local-mut-1",
+      "idempotencyKey": "uuid-v7",
+      "status": "accepted",
+      "canonicalEntityIds": ["capture_123", "note_2026_07_01"],
+      "serverRevision": "rev_1843",
+      "mergeStatus": "applied",
+      "emittedChangeIds": ["1842", "1843"]
+    }
+  ],
+  "rejected": [],
+  "nextCursor": "1843"
+}</pre
+            >
+          </div>
+
+          <div class="code" aria-label="Change feed fixture">
+            <pre>
+{
+  "changes": [
+    {
+      "changeId": "1843",
+      "userId": "user_123",
+      "entityType": "agent_run",
+      "entityId": "run_456",
+      "operation": "upsert",
+      "entityVersion": 2,
+      "schemaVersion": 1,
+      "sourceMutationId": "local-mut-1",
+      "payload": {
+        "status": "queued",
+        "sourceRevisionId": "rev_789",
+        "errorCode": null
+      },
+      "createdAt": "2026-07-01T10:00:00.000Z"
+    }
+  ],
+  "nextCursor": "1843",
+  "hasMore": false
+}</pre
+            >
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Server durability contract">
+          <div class="control-row risk-head">
+            <div class="control-cell">Part</div>
+            <div class="control-cell">Durable rule</div>
+            <div class="control-cell">Test requirement</div>
+            <div class="control-cell">Recovery behavior</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell">
+              <strong><code>sync_changes</code></strong>
+            </div>
+            <div class="control-cell">
+              Emit in the same transaction as canonical writes with <code>change_id</code>,
+              <code>entity_version</code>, <code>operation</code>, <code>schema_version</code>, and
+              tombstones.
+            </div>
+            <div class="control-cell">
+              Route test pulls initial sync, replay from old cursor, pagination, tombstone, and
+              invalid cursor.
+            </div>
+            <div class="control-cell">
+              Client can backfill from no cursor and applies only after full batch success.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Document patches</strong></div>
+            <div class="control-cell">
+              Mutations carry <code>baseServerRevision</code>, local revision, and block/range-level
+              patch ops.
+            </div>
+            <div class="control-cell">
+              Server accepts clean patches, deterministically rebases non-overlapping stale patches,
+              and rejects overlapping edits as <code>document_conflict</code>.
+            </div>
+            <div class="control-cell">
+              Client keeps local text, marks <code>merge_status=conflicted</code>, and shows
+              conflict review without data loss.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Command receipts</strong></div>
+            <div class="control-cell">
+              Store by <code>(user_id, idempotency_key)</code> with operation, payload hash, status,
+              result envelope, and emitted change ids.
+            </div>
+            <div class="control-cell">
+              Same key and same payload returns prior result; same key and different payload returns
+              <code>idempotency_conflict</code>.
+            </div>
+            <div class="control-cell">
+              If the client is unsure, it can retry safely or pull changes by cursor.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>AI feed seam</strong></div>
+            <div class="control-cell">
+              <code>SyncChangeWriter</code> emits workflow lifecycle changes idempotently by entity
+              and version.
+            </div>
+            <div class="control-cell">
+              Queued, completed, and failed agent-run paths produce feed rows without sleeps or
+              polling.
+            </div>
+            <div class="control-cell">
+              Manual refresh catches missed silent pushes; failed runs carry error codes.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Attachments</strong></div>
+            <div class="control-cell">
+              Upload binaries before processing, or mark the Engine row
+              <code>awaiting_attachments</code>.
+            </div>
+            <div class="control-cell">
+              Checksum, MIME, size, retry, and missing-binary states are covered by fixture tests.
+            </div>
+            <div class="control-cell">
+              Text can sync first only when the Engine clearly shows attachment processing is
+              waiting.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="slices">
+        <div class="sec-head">
+          <span class="num">08</span>
+          <h2>Implementation slices</h2>
+        </div>
+        <p class="sec-intro">
+          Start with the Convex spike. Only continue into the custom sync slices if the spike fails
+          the decision gate or proves Convex should not own note/sync state.
+        </p>
+
+        <div class="milestones">
+          <div class="milestone">
+            <div class="when">Phase 0</div>
+            <div class="rail"><span class="dot green"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Convex source-of-truth spike</h3>
+              <p>
+                Build one editable daily note with GRDB offline persistence, Convex mutation drain,
+                Convex subscription return path, patch conflict handling, and AI review state.
+                Decide adopt, custom, or hard-boundary hybrid from the acceptance tests.
+              </p>
+              <div class="tags">
+                <span class="tag">Convex Swift</span><span class="tag">GRDB</span
+                ><span class="tag">decision gate</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 1</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Schema-backed sync contract</h3>
+              <p>
+                Add command, receipt, change, cursor, tombstone, and error schemas to
+                <code>apps/web/src/api-contract.ts</code>. Backend route tests and Swift decoder
+                tests use the same JSON fixtures.
+              </p>
+              <div class="tags">
+                <span class="tag">api-contract.ts</span><span class="tag">OpenAPI/oRPC</span
+                ><span class="tag">fixtures</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 2</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Server accepts one document patch</h3>
+              <p>
+                Route test posts <code>note_document.patch</code>, verifies the mutation response,
+                then verifies <code>GET /api/sync/changes</code> returns the canonical note,
+                revision, and queued agent-run changes.
+              </p>
+              <div class="tags">
+                <span class="tag">public route test</span
+                ><span class="tag">note_document.patch</span><span class="tag">change feed</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 3</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Durable <code>sync_changes</code> feed</h3>
+              <p>
+                Db service tests prove server-issued ordering, same-transaction emission,
+                tombstones, pagination, old cursor replay, invalid cursor handling, and user
+                isolation.
+              </p>
+              <div class="tags">
+                <span class="tag">packages/db</span><span class="tag">sync_changes</span
+                ><span class="tag">user scope</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 4</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Idempotency receipts</h3>
+              <p>
+                Server stores command receipts by user and idempotency key. Same payload returns the
+                prior envelope; changed payload fails with <code>idempotency_conflict</code>.
+              </p>
+              <div class="tags">
+                <span class="tag">command_receipts</span><span class="tag">payload_hash</span
+                ><span class="tag">safe retry</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 5</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>iOS editable local note save</h3>
+              <p>
+                Swift test edits a note through a public database API and verifies local document
+                text, local revision, document patch row, outbox mutation, and
+                <code>Saved on this device</code>.
+              </p>
+              <div class="tags">
+                <span class="tag">GRDB</span><span class="tag">document_patches</span
+                ><span class="tag">local revision</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 6</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Outbox claim and successful push</h3>
+              <p>
+                <code>SyncCoordinator</code> claims due rows with <code>locked_until</code>, sends
+                one mutation, and marks the outbox row plus patch row accepted after the server
+                receipt.
+              </p>
+              <div class="tags">
+                <span class="tag">SyncCoordinator actor</span><span class="tag">locked_until</span
+                ><span class="tag">FIFO group</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 7</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Retry taxonomy and manual retry</h3>
+              <p>
+                503/network errors keep the same idempotency key and set
+                <code>next_attempt_at</code> with jitter. Validation errors become terminal
+                failures. Manual retry requeues only retryable rows.
+              </p>
+              <div class="tags">
+                <span class="tag">retryable_failed</span><span class="tag">terminal_failed</span
+                ><span class="tag">manual retry</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 8</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Pull and apply Engine facts</h3>
+              <p>
+                Pull changes after the stored cursor and apply them transactionally to local read
+                models. Cursor advances only after full apply, including across app restart and
+                failed apply recovery.
+              </p>
+              <div class="tags">
+                <span class="tag">nextCursor</span><span class="tag">hasMore</span
+                ><span class="tag">atomic apply</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 9</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Patch merge, rebase, and conflict state</h3>
+              <p>
+                Server rebases non-overlapping stale patches. Overlapping edits return
+                <code>document_conflict</code>. iOS keeps local text and shows conflict review
+                instead of losing data.
+              </p>
+              <div class="tags">
+                <span class="tag">baseServerRevision</span><span class="tag">document_conflict</span
+                ><span class="tag">no overwrite</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 10</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Attachment upload lifecycle</h3>
+              <p>
+                Attachment tests cover local file metadata, upload sessions, checksum verification,
+                retry state, and Engine <code>awaiting_attachments</code> before AI processing.
+              </p>
+              <div class="tags">
+                <span class="tag">attachment_uploads</span><span class="tag">checksum</span
+                ><span class="tag">awaiting_attachments</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 11</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Deterministic AI lifecycle feed</h3>
+              <p>
+                Route tests use a workflow test adapter or typed receipt for queued runs. Completion
+                and failure feed tests use a deterministic workflow drain seam, never sleeps or
+                polling.
+              </p>
+              <div class="tags">
+                <span class="tag">SyncChangeWriter</span><span class="tag">drain seam</span
+                ><span class="tag">agent_runs</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 12</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>UI reads local projections and status labels</h3>
+              <p>
+                Move the capture surface from direct refresh calls to local observed state. Show the
+                global, per-note, and AI status matrix from GRDB-backed state.
+              </p>
+              <div class="tags">
+                <span class="tag">SwiftUI</span><span class="tag">GRDB observation</span
+                ><span class="tag">status matrix</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="milestone">
+            <div class="when">Custom 13</div>
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="m-body">
+              <h3>Background and wakeups</h3>
+              <p>
+                Add foreground sync first, then network-regained sync, background refresh, and
+                finally silent push as a wakeup after the feed contract is proven.
+              </p>
+              <div class="tags">
+                <span class="tag">foreground</span><span class="tag">NWPathMonitor</span
+                ><span class="tag">silent push wakeup</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="states">
+        <div class="sec-head">
+          <span class="num">09</span>
+          <h2>UI states</h2>
+        </div>
+        <p class="sec-intro">
+          Notes and captures should display the user's mental model, not internal transport details.
+          Treat these as product requirements, not just internal enum names.
+        </p>
+
+        <div class="decision">
+          <div class="callout">
+            <strong>Global status</strong>
+            <p>
+              Show <code>Offline</code>, <code>Syncing 3 changes</code>, <code>Up to date</code>, or
+              <code>Sync failed</code>.
+            </p>
+          </div>
+          <div class="callout">
+            <strong>Per note or capture</strong>
+            <p>
+              Show <code>Saved on this device</code>, <code>Pending sync</code>,
+              <code>Synced to Lares</code>, or <code>Needs retry</code>.
+            </p>
+          </div>
+          <div class="callout">
+            <strong>AI processing state</strong>
+            <p>
+              Show <code>Not reviewed yet</code>, <code>Lares is reviewing this</code>,
+              <code>Review ready</code>, or <code>Analysis failed</code>.
+            </p>
+          </div>
+          <div class="callout">
+            <strong>Detail sheet</strong>
+            <p>
+              Show local save time, last sync attempt, Engine receipt, and the latest AI run state.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="risks">
+        <div class="sec-head">
+          <span class="num">10</span>
+          <h2>Risks</h2>
+        </div>
+        <p class="sec-intro">
+          The largest risk is letting client-side sync grow into a second product engine. Keep the
+          client boring, make the server change feed complete, and turn every risk into a guardrail,
+          a test, and a recovery path.
+        </p>
+
+        <div class="risk-table">
+          <div class="risk-row risk-head">
+            <div class="risk-cell">Risk</div>
+            <div class="risk-cell">Severity</div>
+            <div class="risk-cell">Mitigation</div>
+          </div>
+          <div class="risk-row">
+            <div class="risk-cell">
+              iOS starts duplicating note revision or AI extraction behavior.
+            </div>
+            <div class="risk-cell"><span class="sev high">High</span></div>
+            <div class="risk-cell">
+              Only push commands. Pull derived facts. Do not create local note revisions except as
+              pending UI metadata.
+            </div>
+          </div>
+          <div class="risk-row">
+            <div class="risk-cell">Change feed misses async AI outputs.</div>
+            <div class="risk-cell"><span class="sev high">High</span></div>
+            <div class="risk-cell">
+              Emit sync changes from every server write path that affects iOS read models, including
+              workflow completion and failure paths.
+            </div>
+          </div>
+          <div class="risk-row">
+            <div class="risk-cell">Editable document conflicts lose user text.</div>
+            <div class="risk-cell"><span class="sev high">High</span></div>
+            <div class="risk-cell">
+              Sync block/range patches with <code>baseServerRevision</code>. Rebase non-overlapping
+              edits and preserve local text on <code>document_conflict</code>.
+            </div>
+          </div>
+          <div class="risk-row">
+            <div class="risk-cell">Attachments make outbox rows huge.</div>
+            <div class="risk-cell"><span class="sev med">Med</span></div>
+            <div class="risk-cell">
+              Store attachment files separately on device; put manifests in SQLite. Move binary
+              upload into a dedicated command if needed.
+            </div>
+          </div>
+          <div class="risk-row">
+            <div class="risk-cell">Silent push is treated as source of truth.</div>
+            <div class="risk-cell"><span class="sev low">Low</span></div>
+            <div class="risk-cell">
+              Push only wakes sync. The cursor feed is the truth, so missed pushes are harmless.
+            </div>
+          </div>
+        </div>
+
+        <div class="control-table" aria-label="Risk controls">
+          <div class="control-row risk-head">
+            <div class="control-cell">Risk</div>
+            <div class="control-cell">Guardrail</div>
+            <div class="control-cell">Required test</div>
+            <div class="control-cell">Recovery path</div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>User thinks writing was lost.</strong></div>
+            <div class="control-cell">
+              Commit SQLite before clearing the draft; show <code>Saved on this device</code>.
+            </div>
+            <div class="control-cell">
+              Offline save test verifies local note row, capture row, and pending outbox row.
+            </div>
+            <div class="control-cell">
+              Keep the local capture visible and expose retry when sync fails.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>User thinks AI processed offline notes.</strong></div>
+            <div class="control-cell">
+              Keep local safety, Engine receipt, and AI state as separate labels.
+            </div>
+            <div class="control-cell">
+              Offline note never shows <code>Review ready</code> until an Engine agent-run change is
+              pulled.
+            </div>
+            <div class="control-cell">
+              Show <code>Not reviewed yet</code> or <code>Lares is reviewing this</code> until
+              completion.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Retries create duplicate notes.</strong></div>
+            <div class="control-cell">
+              Every outbox command has a stable <code>idempotency_key</code>.
+            </div>
+            <div class="control-cell">
+              Repeated <code>note_document.patch</code> with the same key and payload hash returns
+              the original receipt.
+            </div>
+            <div class="control-cell">
+              If client state is uncertain, pull from cursor and reconcile by mutation key.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Concurrent edits conflict.</strong></div>
+            <div class="control-cell">
+              Use document patches with <code>baseServerRevision</code>, local revision, and merge
+              status.
+            </div>
+            <div class="control-cell">
+              Tests cover clean apply, non-overlapping rebase, overlapping conflict, and pull while
+              local patches are pending.
+            </div>
+            <div class="control-cell">
+              Keep local text, mark the note conflicted, and show review instead of overwriting.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>AI outputs do not reach iOS.</strong></div>
+            <div class="control-cell">
+              Every Engine write path that affects iOS emits a <code>sync_changes</code> row.
+            </div>
+            <div class="control-cell">
+              Agent run queued, completed, and failed paths each have feed tests.
+            </div>
+            <div class="control-cell">
+              Manual refresh pulls missed rows; silent push is only a wakeup.
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-cell"><strong>Sync gets stuck.</strong></div>
+            <div class="control-cell">
+              Outbox rows keep attempt count, next attempt time, and last error.
+            </div>
+            <div class="control-cell">
+              Retry policy test verifies retryable failure, non-retryable failure, and manual retry.
+            </div>
+            <div class="control-cell">
+              Show <code>Needs retry</code>, keep local data, and provide a full backfill pull.
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      document.getElementById("themeToggle").addEventListener("click", () => {
+        const dark = !document.documentElement.classList.contains("dark");
+        document.documentElement.classList.toggle("dark", dark);
+        localStorage.setItem("lares-ios-sync-plan-theme", dark ? "dark" : "light");
+      });
+    </script>
+  </body>
+</html>

@@ -3,6 +3,7 @@ import type { ResolveRequestApp } from "../request-context";
 import { conversationMessageInputSchema } from "../api-contract";
 import { makeApiHandler, type ApiContext } from "../api-router";
 import { conversationStreamPath, proxyConversationStream } from "../conversation-proxy";
+import { mediaIdSchema, mediaObjectKey, storeMediaUpload } from "../media-storage";
 import {
   addWideEventFields,
   type ObservabilityHonoEnv,
@@ -51,6 +52,38 @@ export function registerApiRoutes(
       );
     }
 
+    if (c.req.path === "/api/media" && c.req.method === "POST") {
+      const mediaFiles = appServices.mediaFiles;
+      if (!mediaFiles) {
+        return c.json({ error: "Media storage unavailable" }, 503);
+      }
+      const payload = await c.req.json().catch(() => null);
+      const result = await storeMediaUpload({ bucket: mediaFiles, payload, userId: user.id });
+      if (!result.ok) {
+        return c.json({ error: result.error }, result.status);
+      }
+      return c.json(result.media);
+    }
+
+    if (c.req.path.startsWith("/api/media/") && c.req.method === "GET") {
+      const mediaFiles = appServices.mediaFiles;
+      if (!mediaFiles) {
+        return c.json({ error: "Media storage unavailable" }, 503);
+      }
+      const mediaId = mediaIdSchema.safeParse(decodeURIComponent(c.req.path.slice(11)));
+      if (!mediaId.success) {
+        return c.json({ error: "Media not found" }, 404);
+      }
+      const object = await mediaFiles.get(mediaObjectKey(user.id, mediaId.data));
+      if (!object) {
+        return c.json({ error: "Media not found" }, 404);
+      }
+      const headers = new Headers();
+      object.writeHttpMetadata(headers);
+      headers.set("etag", object.httpEtag);
+      return new Response(object.body, { headers });
+    }
+
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
@@ -89,6 +122,8 @@ export function registerApiRoutes(
 function apiRouteWideEventFields(path: string) {
   if (path.startsWith("/api/captures")) {
     return { routeName: "api.captures" };
+  } else if (path.startsWith("/api/media")) {
+    return { routeName: "api.media" };
   } else if (path.startsWith("/api/conversations")) {
     if (path.includes("/tools/list-recent-signals")) {
       return { agentTool: "listRecentSignals", routeName: "api.conversations" };
