@@ -38,7 +38,7 @@ The web deploy script injects client-side Convex and Clerk settings before the V
 - Local/dev Convex: `https://grandiose-hamster-855.eu-west-1.convex.cloud`
 - Staging Clerk app: `Vesta Staging`
 - Production Clerk app: `Vesta`
-- Staging web lockup: `/icons/vesta-logo-long-beta.svg`
+- Staging web lockup: `/icons/nudge-logo-lockup-blobby-n-transparent.svg`
 
 Before the first staging deploy, provision the staging Cloudflare resources named in `apps/web/wrangler.jsonc` or let Wrangler resolve/create supported resources where available:
 

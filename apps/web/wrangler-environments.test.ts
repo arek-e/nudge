@@ -33,7 +33,9 @@ describe("Vesta Worker environments", () => {
     expect(deployScript).toContain(
       'VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud"',
     );
-    expect(deployScript).toContain('VITE_VESTA_LOGO_LONG_SRC: "/icons/vesta-logo-long-beta.svg"');
+    expect(deployScript).toContain(
+      'VITE_VESTA_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg"',
+    );
     expect(clientEntry).toContain(
       'import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud"',
     );

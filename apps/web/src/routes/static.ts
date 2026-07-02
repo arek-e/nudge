@@ -1,7 +1,7 @@
 import type { Handler, Hono } from "hono";
 import { type ObservabilityHonoEnv, wideEventFields } from "../observability";
 
-const vestaAppIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="vesta-app-icon-title vesta-app-icon-desc"><title id="vesta-app-icon-title">Vesta app icon</title><desc id="vesta-app-icon-desc">A Vesta ember mark on a warm rounded square background.</desc><rect width="256" height="256" rx="46" fill="#f7f3ec"/><g transform="translate(-59.6519,-31.2324)"><g transform="matrix(1.7664652,0,0,1.7664652,-71.621554,-202.73348)"><path fill="#ec5c29" d="m 142.28728,226.43281 c -10.75786,-1.65243 -19.76579,-8.03254 -24.00309,-17.00074 -7.70875,-16.31563 -1.24475,-36.24872 20.656,-63.6971 5.20129,-6.51882 6.59975,-7.57737 9.16122,-6.93447 2.73501,0.68642 15.71807,16.93672 21.7567,27.23174 6.88418,11.73665 9.63779,20.15238 9.65419,29.50574 0.0153,9.32262 -2.72836,16.44328 -8.60225,22.31718 -6.64934,6.64931 -18.34955,10.15563 -28.62277,8.57765 z m 9.09811,-22.98888 c 1.90984,-3.58676 7.20067,-8.59374 10.97361,-10.38504 1.67301,-0.79429 3.03758,-1.58435 3.03237,-1.7557 -0.005,-0.17131 -1.34262,-0.96572 -2.97204,-1.76536 -1.62944,-0.7996 -4.21751,-2.52646 -5.7512,-3.83742 -3.03812,-2.59692 -7.31858,-9.2707 -8.48945,-13.23614 -0.73758,-2.49807 -0.73758,-2.49807 -1.51429,0.0944 -2.04619,6.82961 -7.46369,13.38649 -13.89051,16.81196 -3.76852,2.0086 -3.76852,2.0086 -0.13335,3.82512 6.30673,3.15148 11.68431,9.44269 13.79505,16.13873 1.01301,3.21363 1.01301,3.21363 2.26196,0.0123 0.68692,-1.76052 1.89645,-4.41694 2.68783,-5.90312 z"/><path fill="#1a2735" d="M 140.45499,269.46764 C 126.39094,267.82602 112.96308,261.27256 102.65393,251.01878 91.628734,240.0528 86.86117,228.34638 90.81498,221.949 c 2.390285,-3.86756 10.35281,-6.28197 15.31574,-4.64408 2.61587,0.86334 4.34686,2.74647 7.97774,8.67902 8.43887,13.78838 22.77383,20.86376 38.11263,18.81146 13.01947,-1.74199 22.24538,-7.92339 29.62347,-19.84789 4.11421,-6.64942 5.47747,-7.73236 10.16017,-8.07106 6.89037,-0.4984 12.69387,2.875 13.64217,7.92973 0.551,2.93718 -0.46786,6.99066 -3.04189,12.102 -5.66521,11.24964 -15.36721,20.51956 -27.78756,26.55015 -7.0529,3.42446 -12.96856,5.14882 -20.63088,6.01366 -6.05296,0.68317 -7.84625,0.6826 -13.73158,-0.005 z"/></g></g></svg>`;
+const nudgeAppIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="nudge-app-icon-title nudge-app-icon-desc"><title id="nudge-app-icon-title">Nudge app icon</title><desc id="nudge-app-icon-desc">A rounded orange N mark on a warm background.</desc><rect width="256" height="256" fill="#fffaf6"/><path fill="#f14f23" d="M79.6 28.4c-24.9 0-38.4 20.7-37.2 54.6.7 21.1 4.8 31.1-3.6 59.8-9.3 31.8.2 63.8 27.1 75 26.2 10.9 46.6-3.8 43.6-32.3-1.4-13.5 2-23.5 11.7-23.8 8.6-.3 15.2 11.1 24.2 25.5 14.2 22.8 31.4 34.8 56.7 31.9 25.8-2.9 37.1-24.7 33.3-57.2-3-26.1-3.3-42.4.9-66.1 6.7-38.3-9.4-67.2-37.1-67.5-25.5-.3-39.5 18.8-39.9 51.3-.3 21.4-5.1 33.7-14.5 35.2-10.1 1.7-18-11.9-27.8-31.1-15.3-29.9-20.6-55.3-37.4-55.3Z"/></svg>`;
 
 export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   const versionHandler: Handler<ObservabilityHonoEnv> = (c) => {
@@ -16,8 +16,8 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
   app.get("/manifest.webmanifest", wideEventFields({ routeName: "manifest" }), (c) => {
     return c.json({
-      name: "Vesta",
-      short_name: "Vesta",
+      name: "Nudge",
+      short_name: "Nudge",
       description: "A private daily operating loop for personal context and follow-through.",
       start_url: "/",
       scope: "/",
@@ -66,20 +66,20 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1a2735" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Vesta" />
+    <meta name="apple-mobile-web-app-title" content="Nudge" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>Vesta Offline</title>
+    <title>Nudge Offline</title>
   </head>
-  <body><main><p>Vesta</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Vesta.</p></main></body>
+  <body><main><p>Nudge</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Nudge.</p></main></body>
 </html>`);
   });
 
   app.get("/icons/icon.svg", wideEventFields({ routeName: "pwa.icon" }), (c) => {
     c.header("content-type", "image/svg+xml; charset=utf-8");
-    return c.body(vestaAppIconSvg);
+    return c.body(nudgeAppIconSvg);
   });
 
   app.get("/", wideEventFields({ routeName: "today" }), (c) => {
@@ -90,14 +90,14 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1a2735" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Vesta" />
+    <meta name="apple-mobile-web-app-title" content="Nudge" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>Vesta Daily Operating Loop</title>
+    <title>Nudge Daily Operating Loop</title>
     <style>
       :root {
         color-scheme: dark;
@@ -248,21 +248,21 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   <body>
     <main>
       <header>
-        <p class="eyebrow">Vesta</p>
+        <p class="eyebrow">Nudge</p>
         <h1>Daily Operating Loop</h1>
-        <p class="summary">Your private operating layer for what changed, what matters now, and what Vesta should remember before it helps you act.</p>
+        <p class="summary">Your private operating layer for what changed, what matters now, and what Nudge should remember before it helps you act.</p>
       </header>
 
       <section class="card" aria-labelledby="today-title">
         <p class="eyebrow">Today</p>
         <h2 id="today-title">Start with the current state</h2>
-        <p class="summary">Capture priorities, constraints, energy, and follow-ups. Vesta stores this as user-owned context for the Daily Operating Loop.</p>
+        <p class="summary">Capture priorities, constraints, energy, and follow-ups. Nudge stores this as user-owned context for the Daily Operating Loop.</p>
       </section>
 
       <section class="card" aria-labelledby="check-in-title">
         <h2 id="check-in-title">Morning check-in</h2>
         <form id="check-in-form">
-          <label for="note">What should Vesta know this morning?</label>
+          <label for="note">What should Nudge know this morning?</label>
           <textarea id="note" name="note" autocomplete="off" placeholder="Priorities, energy, constraints, people to follow up with..."></textarea>
           <div class="actions">
             <button type="submit">Save check-in</button>
