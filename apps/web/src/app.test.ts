@@ -25,7 +25,6 @@ const env = {
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
-  BETTER_AUTH_URL: "http://localhost:8787",
   LOG_HTTP_REQUESTS: "false",
   AI: testAi,
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
@@ -137,95 +136,12 @@ describe("web app", () => {
     expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
-  test("GET /api/auth/session is unavailable until Better Auth is configured", async () => {
+  test("legacy app auth routes are no longer registered", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/auth/session", {}, env);
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
-  });
-
-  test("POST /api/auth/sign-in/magic-link is unavailable until Better Auth is configured", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-in/magic-link",
-      {
-        method: "POST",
-        headers: anonymousJsonHeaders,
-        body: JSON.stringify({ email: "lana@example.com" }),
-      },
-      env,
-    );
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
-  });
-
-  test("POST /api/auth/email-otp/send-verification-otp is unavailable until Better Auth is configured", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/email-otp/send-verification-otp",
-      {
-        method: "POST",
-        headers: anonymousJsonHeaders,
-        body: JSON.stringify({ email: "lana@example.com", type: "sign-in" }),
-      },
-      env,
-    );
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
-  });
-
-  test("POST /api/auth/sign-out clears Better Auth cookies", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-out",
-      {
-        method: "POST",
-        headers: anonymousJsonHeaders,
-        body: JSON.stringify({}),
-      },
-      { ...env, BETTER_AUTH_SECRET: "test-secret" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toContain("better-auth.session_token=; Max-Age=0");
-  });
-
-  test("GET /api/auth/passkey/generate-register-options returns an auth error instead of 404 or 500", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/passkey/generate-register-options?name=Vesta%20passkey",
-      {},
-      { ...env, BETTER_AUTH_SECRET: "test-secret", BETTER_AUTH_URL: "https://vesta.test" },
-    );
-
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.status).toBeLessThan(500);
-  });
-
-  test("GET /api/auth/sign-up/email does not expose public sign-up by default", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-up/email",
-      {
-        method: "POST",
-        headers: anonymousJsonHeaders,
-        body: JSON.stringify({
-          email: "test@example.com",
-          name: "Test User",
-          password: "password1234",
-        }),
-      },
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test-secret",
-      },
-    );
-
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
@@ -1147,21 +1063,19 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "anonymous",
       user: anonymousUser,
       workspace: { id: anonymousUserId, label: "Anonymous User's workspace" },
     });
   });
 
-  test("custom integrations see an unauthenticated session when Better Auth is configured without a cookie", async () => {
+  test("custom integrations see an unauthenticated session without a Clerk token", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request("/api/session", {}, { ...env, BETTER_AUTH_SECRET: "test" });
+    const response = await app.request("/api/session", {}, env);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "unauthenticated",
       user: null,
       workspace: null,
@@ -1178,12 +1092,11 @@ describe("web app", () => {
           "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
-      { ...env, BETTER_AUTH_SECRET: "test" },
+      env,
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "anonymous",
       user: {
         displayName: "Anonymous User",
@@ -1196,40 +1109,10 @@ describe("web app", () => {
     });
   });
 
-  test("custom integrations expose Google as an auth method when OAuth credentials are configured", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/session",
-      {},
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test",
-        GOOGLE_CLIENT_ID: "google-client-id",
-        GOOGLE_CLIENT_SECRET: "google-client-secret",
-      },
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: true, passkey: true },
-      authMode: "unauthenticated",
-      user: null,
-      workspace: null,
-    });
-  });
-
   test("custom integrations cannot use user data routes without an authenticated production session", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request(
-      "/api/signals?limit=10",
-      {},
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test",
-      },
-    );
+    const response = await app.request("/api/signals?limit=10", {}, env);
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication required" });
@@ -1245,17 +1128,14 @@ describe("web app", () => {
           "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test",
-      },
+      env,
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ signals: [] });
   });
 
-  test("custom integrations resolve workspace from a Better Auth session", async () => {
+  test("custom integrations resolve workspace from a Clerk session", async () => {
     const app = createApp({
       authSessionResolver: async () => ({
         user: {
@@ -1271,8 +1151,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
-      authMode: "better-auth",
+      authMode: "clerk",
       user: { id: "auth-user-1", displayName: "Lana" },
       workspace: { id: "auth-user-1", label: "Lana's workspace" },
     });

@@ -27,8 +27,8 @@ export function registerApiRoutes(
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "vesta.auth.provider": "better-auth" }, name: "auth.current_user" },
-      () => resolveCurrentUser({ app: appServices, headers: c.req.raw.headers }),
+      { attributes: { "vesta.auth.provider": "clerk" }, name: "auth.current_user" },
+      () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
     if (!auth.user && !c.req.path.startsWith("/api/session")) {
       return c.json({ error: "Authentication required" }, 401);
@@ -98,7 +98,6 @@ export function registerApiRoutes(
             aiModel: appServices.aiModel,
             dailyAnalysisWorkflow: appServices.dailyAnalysisWorkflow,
             db: appServices.db,
-            googleAuthConfigured: appServices.googleAuthConfigured,
             getOkfSandbox: () => appServices.okfSandboxFor(user),
             recordSpan,
             runEffect,

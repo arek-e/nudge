@@ -1,6 +1,5 @@
 import type { FunctionReturnType } from "convex/server";
-import { passkeyClient } from "@better-auth/passkey/client";
-import { ClerkProvider, SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/react";
+import { ClerkProvider, SignIn, UserButton, useAuth, useClerk } from "@clerk/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
   createRootRoute,
@@ -11,13 +10,10 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { createAuthClient } from "better-auth/client";
-import { emailOTPClient } from "better-auth/client/plugins";
-import { ConvexProvider, ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
+import { ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import {
   createContext,
-  type FormEvent,
   type ReactNode,
   StrictMode,
   useEffect,
@@ -32,29 +28,26 @@ import {
   deriveJourneyDayGroups,
   HomeDashboard,
   JourneyTimeline,
-  VestaAppShell,
-  VestaChat,
-  LoginCard,
   plainTextToRichTextDocument,
-  type VestaChatAttachment,
-  type VestaChatMessage,
   type RichTextDocument,
   Surface,
+  VestaAppShell,
+  VestaChat,
+  type VestaChatAttachment,
+  type VestaChatMessage,
   WritingDrawer,
 } from "@vesta/ui";
 import { api } from "../../../../convex/_generated/api";
-import { apiClient, streamConversationMessage } from "./api-client";
+import { apiClient, setSessionTokenResolver, streamConversationMessage } from "./api-client";
 import { dailyNoteDrawerText } from "./daily-note-drawer";
-import { loginAuthMethodsForView } from "./login-preview";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
 const queryClient = new QueryClient();
-const authClient = createAuthClient({ plugins: [emailOTPClient(), passkeyClient()] });
 const convexUrl =
   import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
 const convexClient = new ConvexReactClient(convexUrl);
-const clerkPublishableKey = configuredClerkPublishableKey();
+const clerkPublishableKey = requiredClerkPublishableKey();
 
 type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
@@ -80,9 +73,10 @@ const noteTextFromPayload = (payload: unknown) => {
   return typeof payload === "string" ? payload : JSON.stringify(payload);
 };
 
-function configuredClerkPublishableKey() {
+function requiredClerkPublishableKey() {
   const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
-  return typeof value === "string" && value.startsWith("pk_") ? value : null;
+  if (typeof value === "string" && value.startsWith("pk_")) return value;
+  throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Vesta");
 }
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -135,6 +129,23 @@ declare module "@tanstack/react-router" {
 }
 
 function AppShell() {
+  const auth = useAuth();
+  if (!auth.isLoaded) {
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
+  }
+  if (!auth.isSignedIn) return <ClerkSignInScreen />;
+  return <AuthenticatedAppShell />;
+}
+
+function ClerkSignInScreen() {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[#111] px-4 py-8">
+      <SignIn routing="hash" />
+    </main>
+  );
+}
+
+function AuthenticatedAppShell() {
   const convex = useConvex();
   const convexAuth = useConvexAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -166,9 +177,6 @@ function AppShell() {
 
   const saveDailyNote = useMutation({
     mutationFn: async (value: string) => {
-      if (!clerkPublishableKey) {
-        throw new Error("Clerk auth is not configured for Convex sync.");
-      }
       if (!convexAuth.isAuthenticated) {
         throw new Error("Sign in with Clerk to sync daily notes.");
       }
@@ -199,11 +207,6 @@ function AppShell() {
 
   if (!session.data) {
     return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
-  }
-
-  const loginAuthMethods = loginAuthMethodsForView(session.data, window.location.search);
-  if (loginAuthMethods) {
-    return <LoginScreen authMethods={loginAuthMethods} />;
   }
 
   return (
@@ -371,89 +374,6 @@ function ChatScreen() {
   );
 }
 
-function LoginScreen(props: {
-  readonly authMethods: {
-    readonly emailOtp: boolean;
-    readonly google: boolean;
-    readonly passkey: boolean;
-  };
-}) {
-  type EmailOtpFlowResult = "sent" | "signed-in";
-  const [email, setEmail] = useState("alek@teampitch.app");
-  const [otp, setOtp] = useState("");
-  const [error, setError] = useState("");
-  const [sentTo, setSentTo] = useState("");
-  const continueWithEmail = useMutation({
-    mutationFn: async (): Promise<EmailOtpFlowResult> => {
-      if (sentTo) {
-        const result = await authClient.signIn.emailOtp({
-          email,
-          name: email,
-          otp,
-        });
-        if (result.error) throw new Error("Could not verify sign-in code");
-        return "signed-in";
-      }
-
-      const result = await authClient.emailOtp.sendVerificationOtp({
-        email,
-        type: "sign-in",
-      });
-      if (result.error) throw new Error("Could not send sign-in code");
-      return "sent";
-    },
-    onError: () =>
-      setError(
-        sentTo ? "Code is incorrect or expired." : "Could not send a sign-in code. Try again.",
-      ),
-    onSuccess: async (result) => {
-      setError("");
-      if (result === "signed-in") {
-        await queryClient.invalidateQueries({ queryKey: ["session"] });
-        return;
-      }
-      setSentTo(email);
-    },
-  });
-  const continueWithGoogle = async () => {
-    await authClient.signIn.social({ callbackURL: "/", provider: "google" });
-  };
-  const continueWithPasskey = useMutation({
-    mutationFn: async () => {
-      const result = await authClient.signIn.passkey();
-      if (result.error) throw new Error("Could not sign in with passkey");
-    },
-    onError: () => setError("Could not sign in with passkey."),
-    onSuccess: async () => {
-      setError("");
-      await queryClient.invalidateQueries({ queryKey: ["session"] });
-    },
-  });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    continueWithEmail.mutate();
-  };
-
-  return (
-    <LoginCard
-      email={email}
-      emailOtpEnabled={props.authMethods.emailOtp}
-      error={error}
-      googleEnabled={props.authMethods.google}
-      passkeyEnabled={props.authMethods.passkey}
-      pendingEmail={continueWithEmail.isPending}
-      pendingPasskey={continueWithPasskey.isPending}
-      sentTo={sentTo}
-      otp={otp}
-      onEmailChange={setEmail}
-      onGoogle={continueWithGoogle}
-      onOtpChange={setOtp}
-      onPasskey={() => continueWithPasskey.mutate()}
-      onSubmit={submit}
-    />
-  );
-}
-
 function readObjectProperty(value: unknown, key: string) {
   return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
 }
@@ -587,38 +507,16 @@ function SettingsScreen() {
       await queryClient.invalidateQueries();
     },
   });
-  const addPasskey = useMutation({
-    mutationFn: async () => {
-      const result = await authClient.passkey.addPasskey({ name: "Vesta passkey" });
-      if (result.error) throw new Error("Could not add passkey");
-    },
-  });
   return (
     <VestaAppShell>
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
       </Surface>
-      {session.data?.authMethods.passkey ? (
-        <Surface eyebrow="Security" title="Passkeys">
-          <p className="summary">
-            Add a passkey to sign in with Face ID, Touch ID, your device PIN, or a security key.
-          </p>
-          <button
-            className="mt-4 min-h-12 rounded-full bg-[#f4f1eb] px-4 text-sm font-semibold text-[#080808] disabled:opacity-60"
-            disabled={addPasskey.isPending}
-            type="button"
-            onClick={() => addPasskey.mutate()}
-          >
-            {addPasskey.isPending ? "Opening passkey..." : "Add passkey"}
-          </button>
-          {addPasskey.isError ? (
-            <p className="m-0 mt-3 text-sm text-red-300">Could not add a passkey.</p>
-          ) : null}
-          {addPasskey.isSuccess ? (
-            <p className="m-0 mt-3 text-sm text-emerald-300">Passkey added.</p>
-          ) : null}
-        </Surface>
-      ) : null}
+      <Surface eyebrow="Security" title="Clerk account">
+        <div className="mt-4 flex items-center">
+          <UserButton />
+        </div>
+      </Surface>
       <Surface eyebrow="Data controls" title="Your data">
         <div className="mt-4 grid gap-2">
           <button
@@ -643,6 +541,7 @@ function SettingsScreen() {
 
 function TodayScreen() {
   const navigate = useNavigate();
+  const clerk = useClerk();
   const localDate = todayLocalDate();
   const convexDailyNote = useConvexDailyNote(localDate);
   const events = useEvents();
@@ -655,20 +554,11 @@ function TodayScreen() {
     ).length ?? 0;
   const signOut = useMutation({
     mutationFn: async () => {
-      const response = await fetch("/api/auth/sign-out", {
-        body: JSON.stringify({}),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      if (!response.ok) throw new Error("Could not sign out");
+      await clerk.signOut();
     },
     onSettled: () => {
-      queryClient.setQueryData(["session"], {
-        authMethods: { emailOtp: true, google: false, passkey: true },
-        authMode: "unauthenticated",
-        user: null,
-        workspace: null,
-      });
+      setSessionTokenResolver(null);
+      queryClient.clear();
     },
   });
 
@@ -728,9 +618,6 @@ function ConvexSyncSpikePanel(props: { readonly localDate: string }) {
 
   const saveNote = useMutation({
     mutationFn: async () => {
-      if (!clerkPublishableKey) {
-        throw new Error("Clerk auth is not configured for Convex sync.");
-      }
       if (!convexAuth.isAuthenticated) {
         throw new Error("Sign in with Clerk to sync daily notes.");
       }
@@ -760,9 +647,6 @@ function ConvexSyncSpikePanel(props: { readonly localDate: string }) {
   });
   const updateAgentStatus = useMutation({
     mutationFn: async (status: "queued" | "running" | "ready" | "failed") => {
-      if (!clerkPublishableKey) {
-        throw new Error("Clerk auth is not configured for Convex sync.");
-      }
       if (!convexAuth.isAuthenticated) {
         throw new Error("Sign in with Clerk to sync daily notes.");
       }
@@ -791,38 +675,13 @@ function ConvexSyncSpikePanel(props: { readonly localDate: string }) {
       <div className="mt-4 grid gap-3">
         <div className="flex min-h-10 items-center justify-between gap-3 rounded-2xl bg-white/5 px-3 py-2 text-xs text-neutral-300">
           <span>
-            {clerkPublishableKey
-              ? convexAuth.isLoading
-                ? "Checking Clerk session"
-                : convexAuth.isAuthenticated
-                  ? "Clerk session connected"
-                  : "Sign in to sync through Convex"
-              : "Clerk auth is not configured"}
+            {convexAuth.isLoading
+              ? "Checking Clerk session"
+              : convexAuth.isAuthenticated
+                ? "Clerk session connected"
+                : "Sign in to sync through Convex"}
           </span>
-          {clerkPublishableKey ? (
-            convexAuth.isAuthenticated ? (
-              <UserButton />
-            ) : (
-              <div className="flex items-center gap-2">
-                <SignUpButton mode="modal">
-                  <button
-                    className="min-h-9 rounded-full bg-white/10 px-3 text-xs font-semibold text-neutral-100"
-                    type="button"
-                  >
-                    Create account
-                  </button>
-                </SignUpButton>
-                <SignInButton mode="modal">
-                  <button
-                    className="min-h-9 rounded-full bg-[#f4f1eb] px-3 text-xs font-semibold text-[#080808]"
-                    type="button"
-                  >
-                    Sign in
-                  </button>
-                </SignInButton>
-              </div>
-            )
-          ) : null}
+          {convexAuth.isAuthenticated ? <UserButton /> : null}
         </div>
         <textarea
           className="min-h-32 w-full resize-y rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-neutral-100 outline-none focus:border-white/25"
@@ -951,17 +810,44 @@ const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Missing #root element");
 
 function VestaConvexProvider(props: { readonly children: ReactNode }) {
-  if (!clerkPublishableKey) {
-    return <ConvexProvider client={convexClient}>{props.children}</ConvexProvider>;
-  }
-
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey}>
+    <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
       <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
-        <ConvexUserMaterializer>{props.children}</ConvexUserMaterializer>
+        <ClerkTokenBridge>
+          <ConvexUserMaterializer>{props.children}</ConvexUserMaterializer>
+        </ClerkTokenBridge>
       </ConvexProviderWithClerk>
     </ClerkProvider>
   );
+}
+
+function ClerkTokenBridge(props: { readonly children: ReactNode }) {
+  const auth = useAuth();
+  const expectedState = auth.isSignedIn ? "signed-in" : "signed-out";
+  const [readyState, setReadyState] = useState<"loading" | "signed-in" | "signed-out">("loading");
+
+  useEffect(() => {
+    if (!auth.isLoaded) {
+      setReadyState("loading");
+      return;
+    }
+
+    if (!auth.isSignedIn) {
+      setSessionTokenResolver(null);
+      setReadyState("signed-out");
+      return;
+    }
+
+    setSessionTokenResolver(async () => auth.getToken());
+    setReadyState("signed-in");
+    return () => setSessionTokenResolver(null);
+  }, [auth.getToken, auth.isLoaded, auth.isSignedIn]);
+
+  if (!auth.isLoaded || readyState !== expectedState) {
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
+  }
+
+  return <>{props.children}</>;
 }
 
 function ConvexUserMaterializer(props: { readonly children: ReactNode }) {

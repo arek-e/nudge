@@ -1,8 +1,5 @@
-import { drizzleAdapter } from "@better-auth/drizzle-adapter";
-import { passkey } from "@better-auth/passkey";
-import { betterAuth } from "better-auth";
-import { emailOTP, magicLink } from "better-auth/plugins";
-import { createD1DrizzleDatabase, schema } from "@vesta/db";
+import type { User } from "@clerk/backend";
+import { createClerkClient } from "@clerk/backend";
 import type { Env } from "./env";
 
 export type AuthSessionUser = {
@@ -17,140 +14,55 @@ export type AuthSession = {
 
 export type AuthSessionResolver = (input: {
   readonly env: Env;
-  readonly headers: Headers;
+  readonly request: Request;
 }) => Promise<AuthSession | null>;
 
-export function createBetterAuth(
-  env: Env,
-  options: { readonly allowSignUpForSeed?: boolean } = {},
-) {
-  if (!env.BETTER_AUTH_SECRET) {
-    throw new Error("BETTER_AUTH_SECRET is required to enable Better Auth");
+export const isClerkConfigured = (env: Env) => Boolean(env.CLERK_SECRET_KEY);
+
+export const resolveClerkSession: AuthSessionResolver = async ({ env, request }) => {
+  const secretKey = env.CLERK_SECRET_KEY;
+  if (!secretKey) {
+    if (env.ENVIRONMENT === "production") {
+      throw new Error("CLERK_SECRET_KEY is required to authenticate production requests");
+    }
+    return null;
   }
 
-  const db = createD1DrizzleDatabase(env.DB);
-
-  return betterAuth({
-    baseURL: env.BETTER_AUTH_URL,
-    database: drizzleAdapter(db, {
-      provider: "sqlite",
-      schema: {
-        ...schema,
-        account: schema.authAccounts,
-        passkey: schema.authPasskeys,
-        session: schema.authSessions,
-        user: schema.authUsers,
-        verification: schema.authVerifications,
-      },
-    }),
-    emailAndPassword: {
-      disableSignUp: !options.allowSignUpForSeed && env.BETTER_AUTH_ALLOW_SIGN_UP !== "true",
-      enabled: true,
-    },
-    plugins: [
-      emailOTP({
-        sendVerificationOTP: async ({ email, otp, type }) => {
-          await sendOtpEmail(env, { email, otp, type });
-        },
-      }),
-      magicLink({
-        sendMagicLink: async ({ email, url }) => {
-          await sendMagicLinkEmail(env, { email, url });
-        },
-      }),
-      passkey({
-        origin: env.BETTER_AUTH_URL,
-        rpID: resolveRpId(env.BETTER_AUTH_URL),
-        rpName: "Vesta",
-      }),
-    ],
-    secret: env.BETTER_AUTH_SECRET,
-    socialProviders:
-      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-        ? {
-            google: {
-              clientId: env.GOOGLE_CLIENT_ID,
-              clientSecret: env.GOOGLE_CLIENT_SECRET,
-            },
-          }
-        : undefined,
+  const clerk = createClerkClient({
+    ...(env.CLERK_PUBLISHABLE_KEY ? { publishableKey: env.CLERK_PUBLISHABLE_KEY } : {}),
+    secretKey,
   });
-}
+  const authorizedParties = clerkAuthorizedParties(env);
+  const requestState = await clerk.authenticateRequest(request, {
+    acceptsToken: "session_token",
+    ...(authorizedParties ? { authorizedParties } : {}),
+  });
+  if (!requestState.isAuthenticated) return null;
 
-export const isBetterAuthConfigured = (env: Env) => Boolean(env.BETTER_AUTH_SECRET);
+  const auth = requestState.toAuth();
+  if (!auth.isAuthenticated || !auth.userId) return null;
 
-export const resolveBetterAuthSession: AuthSessionResolver = async ({ env, headers }) => {
-  if (!isBetterAuthConfigured(env)) return null;
-
-  const auth = createBetterAuth(env);
-  return auth.api.getSession({ headers });
+  const user = await clerk.users.getUser(auth.userId);
+  return {
+    user: {
+      email: user.primaryEmailAddress?.emailAddress ?? null,
+      id: auth.userId,
+      name: clerkDisplayName(user),
+    },
+  };
 };
 
-async function sendOtpEmail(
-  env: Env,
-  input: { readonly email: string; readonly otp: string; readonly type: string },
-) {
-  await sendAuthEmail(env, {
-    email: input.email,
-    html: `<p>Your Vesta sign-in code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:0.16em">${escapeHtml(input.otp)}</p><p>This code expires soon.</p>`,
-    logLabel: "Email OTP requested without SEND_EMAIL binding",
-    subject: input.type === "sign-in" ? "Your Vesta sign-in code" : "Your Vesta verification code",
-    text: `Your Vesta code is: ${input.otp}`,
-  });
+function clerkDisplayName(user: User) {
+  return user.fullName ?? user.username ?? user.primaryEmailAddress?.emailAddress ?? user.id;
 }
 
-async function sendMagicLinkEmail(
-  env: Env,
-  input: { readonly email: string; readonly url: string },
-) {
-  await sendAuthEmail(env, {
-    email: input.email,
-    html: `<p>Click this link to continue to Vesta:</p><p><a href="${escapeHtml(input.url)}">Continue to Vesta</a></p><p>This link expires soon.</p>`,
-    logLabel: "Magic link requested without SEND_EMAIL binding",
-    subject: "Continue to Vesta",
-    text: `Continue to Vesta: ${input.url}`,
-  });
-}
+function clerkAuthorizedParties(env: Env) {
+  const rawParties = env.CLERK_AUTHORIZED_PARTIES;
+  if (!rawParties) return undefined;
 
-async function sendAuthEmail(
-  env: Env,
-  input: {
-    readonly email: string;
-    readonly html: string;
-    readonly logLabel: string;
-    readonly subject: string;
-    readonly text: string;
-  },
-) {
-  if (!env.SEND_EMAIL) {
-    if (env.ENVIRONMENT === "production") {
-      throw new Error("SEND_EMAIL binding is required to send auth emails");
-    }
-    console.info(input.logLabel, {
-      email: input.email,
-    });
-    return;
-  }
-
-  await env.SEND_EMAIL.send({
-    from: "Vesta <auth@teampitch.app>",
-    html: input.html,
-    subject: input.subject,
-    text: input.text,
-    to: input.email,
-  });
-}
-
-function resolveRpId(baseUrl: string | undefined) {
-  if (!baseUrl) return undefined;
-  return new URL(baseUrl).hostname;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  const parties = rawParties
+    .split(",")
+    .map((party) => party.trim())
+    .filter((party) => party.length > 0);
+  return parties.length > 0 ? parties : undefined;
 }

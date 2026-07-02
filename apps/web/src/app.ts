@@ -4,7 +4,7 @@ import { Db } from "@vesta/db";
 import type { Env } from "./env";
 import type { HonoHandlerContext } from "./request-context";
 import type { VestaAppRuntime, VestaOkfSandboxFactory, RunEffect } from "./Services/VestaApp";
-import { resolveBetterAuthSession, type AuthSessionResolver } from "./auth";
+import { resolveClerkSession, type AuthSessionResolver } from "./auth";
 import {
   makeVestaAppRuntime,
   resolveVestaApp,
@@ -25,7 +25,6 @@ import {
 import { defaultOkfSandboxFactory } from "./okf-sandbox-live";
 import { resolveCurrentUser } from "./request-auth";
 import { registerApiRoutes } from "./routes/api";
-import { registerAuthRoutes } from "./routes/auth";
 import { registerStaticRoutes } from "./routes/static";
 
 interface CreateAppOptions {
@@ -37,7 +36,7 @@ interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<ObservabilityHonoEnv>();
   const okfSandboxFactory = options.okfSandboxFactory ?? defaultOkfSandboxFactory;
-  const resolveSession = options.authSessionResolver ?? resolveBetterAuthSession;
+  const resolveSession = options.authSessionResolver ?? resolveClerkSession;
   const runtimeMemoMap = Layer.makeMemoMapUnsafe();
   const appRuntimes = new WeakMap<Env, VestaAppRuntime>();
   const d1Layers = new WeakMap<D1Database, VestaAppDbLayer>();
@@ -87,8 +86,8 @@ export function createApp(options: CreateAppOptions = {}) {
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "vesta.auth.provider": "better-auth" }, name: "auth.current_user" },
-      () => resolveCurrentUser({ app: appServices, headers: c.req.raw.headers }),
+      { attributes: { "vesta.auth.provider": "clerk" }, name: "auth.current_user" },
+      () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
     if (!auth.user) return c.json({ error: "Authentication required" }, 401);
     return handleVestaMcpRequest(c.req.raw, {
@@ -98,8 +97,6 @@ export function createApp(options: CreateAppOptions = {}) {
       version: appServices.version,
     });
   });
-
-  registerAuthRoutes(app, resolveRequestApp);
 
   registerApiRoutes(app, resolveRequestApp);
 

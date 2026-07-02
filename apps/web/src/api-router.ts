@@ -114,7 +114,6 @@ export interface ApiContext {
   readonly aiModel: string;
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
-  readonly googleAuthConfigured: boolean;
   readonly getOkfSandbox: () => Promise<OkfSandbox | null>;
   readonly recordSpan: <A>(
     name: string,
@@ -597,11 +596,6 @@ export const apiRouter = api.router({
   },
   session: api.session.handler(({ context }) => {
     return {
-      authMethods: {
-        emailOtp: true,
-        google: context.googleAuthConfigured,
-        passkey: true,
-      },
       authMode: context.session.authMode,
       user: context.session.user,
       workspace: context.session.user

@@ -14,20 +14,22 @@ describe("worktree direnv environment", () => {
     expect(devPort).toBeLessThanOrEqual(60999);
     expect(Number(first.VESTA_WRANGLER_INSPECTOR_PORT)).toBe(devPort + 1);
     expect(first.VESTA_DEV_URL).toBe(`http://localhost:${devPort}`);
-    expect(first.BETTER_AUTH_URL).toBe(first.VESTA_DEV_URL);
+    expect(first.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")).toBe(true);
+    expect(first.VITE_CLERK_PUBLISHABLE_KEY).toBe(first.CLERK_PUBLISHABLE_KEY);
     expect(first.VESTA_WORKTREE_ROOT).toBe("/tmp/vesta-alpha");
     expect(first.VESTA_WRANGLER_PERSIST_TO).toBe("/tmp/vesta-alpha/apps/engine/.wrangler/state");
   });
 
   test("keeps explicit local overrides while deriving dependent defaults", () => {
     const env = loadWorktreeEnv("/tmp/vesta-alpha", {
-      BETTER_AUTH_URL: "http://localhost:45557",
+      CLERK_PUBLISHABLE_KEY: "pk_test_override",
       VESTA_DEV_PORT: "45555",
     });
 
     expect(env.VESTA_DEV_PORT).toBe("45555");
     expect(env.VESTA_DEV_URL).toBe("http://localhost:45555");
-    expect(env.BETTER_AUTH_URL).toBe("http://localhost:45557");
+    expect(env.CLERK_PUBLISHABLE_KEY).toBe("pk_test_override");
+    expect(env.VITE_CLERK_PUBLISHABLE_KEY).toBe("pk_test_override");
     expect(env.VESTA_WRANGLER_INSPECTOR_PORT).toBe("45556");
   });
 });
@@ -58,7 +60,12 @@ function loadWorktreeEnv(root: string, env: Record<string, string> = {}) {
     result.stdout
       .toString()
       .split("\n")
-      .filter((line) => line.startsWith("VESTA_") || line.startsWith("BETTER_AUTH_URL="))
+      .filter(
+        (line) =>
+          line.startsWith("VESTA_") ||
+          line.startsWith("CLERK_PUBLISHABLE_KEY=") ||
+          line.startsWith("VITE_CLERK_PUBLISHABLE_KEY="),
+      )
       .map((line) => {
         const equalsIndex = line.indexOf("=");
         return [line.slice(0, equalsIndex), line.slice(equalsIndex + 1)];

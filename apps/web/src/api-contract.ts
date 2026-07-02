@@ -406,12 +406,7 @@ export const conversationMessageResponseSchema = z.object({
 });
 
 export const sessionResponseSchema = z.object({
-  authMethods: z.object({
-    emailOtp: z.boolean(),
-    google: z.boolean(),
-    passkey: z.boolean(),
-  }),
-  authMode: z.enum(["anonymous", "better-auth", "unauthenticated"]),
+  authMode: z.enum(["anonymous", "clerk", "unauthenticated"]),
   user: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   workspace: z.object({ id: z.string(), label: z.string() }).nullable(),
 });
