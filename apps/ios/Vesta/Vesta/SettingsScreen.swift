@@ -1,11 +1,10 @@
+import ComposableArchitecture
 import ClerkKit
 import SwiftUI
 
 struct SettingsScreen: View {
-    @ObservedObject var model: VestaCaptureViewModel
+    @Bindable var store: StoreOf<VestaCaptureFeature>
     @Environment(Clerk.self) private var clerk
-    @State private var signingOut = false
-    @State private var signOutError: String?
 
     var body: some View {
         let account = accountSnapshot
@@ -76,23 +75,23 @@ struct SettingsScreen: View {
                     SettingsRow(
                         icon: "calendar",
                         title: "Today",
-                        value: SettingsDateFormatting.title(for: model.todayLocalDate),
+                        value: SettingsDateFormatting.title(for: store.todayLocalDate),
                         tint: .accentGoal
                     )
                 }
 
                 SettingsSection(title: "Sync") {
                     SettingsRow(
-                        icon: model.isOnline ? "wifi" : "wifi.slash",
+                        icon: store.isOnline ? "wifi" : "wifi.slash",
                         title: "Connection",
-                        value: model.isOnline ? "Online" : "Offline",
-                        tint: model.isOnline ? .accentSuccess : .accentPrimary
+                        value: store.isOnline ? "Online" : "Offline",
+                        tint: store.isOnline ? .accentSuccess : .accentPrimary
                     )
                     SettingsDivider()
                     SettingsRow(
                         icon: "arrow.triangle.2.circlepath",
                         title: "Note sync",
-                        value: model.statusMessage.isEmpty ? "Ready" : model.statusMessage,
+                        value: store.statusMessage.isEmpty ? "Ready" : store.statusMessage,
                         tint: .accentPrimary
                     )
                     SettingsDivider()
@@ -105,7 +104,10 @@ struct SettingsScreen: View {
                 }
 
                 SettingsSection(title: "Access") {
-                    SettingsLogoutButton(isLoading: signingOut, action: signOut)
+                    SettingsLogoutButton(
+                        isLoading: store.settingsSigningOut,
+                        action: { store.send(.settingsSignOutTapped) }
+                    )
                 }
             }
             .padding(.horizontal, 20)
@@ -120,15 +122,15 @@ struct SettingsScreen: View {
         .preferredColorScheme(.dark)
         .alert("Could not log out", isPresented: signOutErrorPresented) {
             Button("OK", role: .cancel) {
-                signOutError = nil
+                store.send(.settingsSignOutDismissed)
             }
         } message: {
-            Text(signOutError ?? "Try again.")
+            Text(store.settingsSignOutError ?? "Try again.")
         }
     }
 
     private var streakText: String {
-        model.dailyStreak == 1 ? "1 day" : "\(model.dailyStreak) days"
+        store.dailyStreak == 1 ? "1 day" : "\(store.dailyStreak) days"
     }
 
     private var accountSnapshot: AccountSettingsSnapshot {
@@ -146,32 +148,13 @@ struct SettingsScreen: View {
 
     private var signOutErrorPresented: Binding<Bool> {
         Binding(
-            get: { signOutError != nil },
+            get: { store.settingsSignOutError != nil },
             set: { isPresented in
                 if !isPresented {
-                    signOutError = nil
+                    store.send(.settingsSignOutDismissed)
                 }
             }
         )
-    }
-
-    private func signOut() {
-        guard !signingOut else { return }
-        signingOut = true
-        signOutError = nil
-
-        Task {
-            do {
-                if let sessionId = clerk.session?.id {
-                    try await clerk.auth.signOut(sessionId: sessionId)
-                } else {
-                    try await clerk.auth.signOut()
-                }
-            } catch {
-                signOutError = error.localizedDescription
-            }
-            signingOut = false
-        }
     }
 }
 

@@ -28,6 +28,8 @@
 		1A0000142C00000000000001 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0A2C00000000000001 /* ClerkKit */; };
 		1A0000152C00000000000001 /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0B2C00000000000001 /* ClerkKitUI */; };
 		1A0000162C00000000000001 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001122C00000000000001 /* SettingsScreen.swift */; };
+		1A0000172C00000000000001 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0D2C00000000000001 /* ComposableArchitecture */; };
+		1A0000182C00000000000001 /* VestaCaptureFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001132C00000000000001 /* VestaCaptureFeature.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +50,7 @@
 		1A0001102C00000000000001 /* ConvexNoteSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvexNoteSync.swift; sourceTree = "<group>"; };
 		1A0001112C00000000000001 /* VestaAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VestaAuth.swift; sourceTree = "<group>"; };
 		1A0001122C00000000000001 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		1A0001132C00000000000001 /* VestaCaptureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VestaCaptureFeature.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +64,7 @@
 				1A0000132C00000000000001 /* ClerkConvex in Frameworks */,
 				1A0000142C00000000000001 /* ClerkKit in Frameworks */,
 				1A0000152C00000000000001 /* ClerkKitUI in Frameworks */,
+				1A0000172C00000000000001 /* ComposableArchitecture in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,6 +84,7 @@
 			children = (
 				1A0001012C00000000000001 /* VestaApp.swift */,
 				1A0001022C00000000000001 /* ContentView.swift */,
+				1A0001132C00000000000001 /* VestaCaptureFeature.swift */,
 				1A0001082C00000000000001 /* VestaCaptureViewModel.swift */,
 				1A0001102C00000000000001 /* ConvexNoteSync.swift */,
 				1A0001032C00000000000001 /* VestaAPI.swift */,
@@ -129,6 +134,7 @@
 				1A000A082C00000000000001 /* ClerkConvex */,
 				1A000A0A2C00000000000001 /* ClerkKit */,
 				1A000A0B2C00000000000001 /* ClerkKitUI */,
+				1A000A0D2C00000000000001 /* ComposableArchitecture */,
 			);
 			productName = Vesta;
 			productReference = 1A0001062C00000000000001 /* Vesta.app */;
@@ -164,6 +170,7 @@
 				1A000A052C00000000000001 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				1A000A072C00000000000001 /* XCRemoteSwiftPackageReference "clerk-convex-swift" */,
 				1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				1A000A0C2C00000000000001 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
 			);
 			productRefGroup = 1A0003032C00000000000001 /* Products */;
 			projectDirPath = "";
@@ -196,6 +203,7 @@
 				1A0000052C00000000000001 /* CalendarStats.swift in Sources */,
 				1A0000072C00000000000001 /* VestaCaptureViewModel.swift in Sources */,
 				1A0000082C00000000000001 /* VestaTheme.swift in Sources */,
+				1A0000182C00000000000001 /* VestaCaptureFeature.swift in Sources */,
 				1A00000F2C00000000000001 /* ConvexNoteSync.swift in Sources */,
 				1A0000122C00000000000001 /* VestaAuth.swift in Sources */,
 				1A0000092C00000000000001 /* TopChrome.swift in Sources */,
@@ -434,6 +442,14 @@
 				minimumVersion = 1.2.0;
 			};
 		};
+		1A000A0C2C00000000000001 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-composable-architecture";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.25.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -466,6 +482,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */;
 			productName = ClerkKitUI;
+		};
+		1A000A0D2C00000000000001 /* ComposableArchitecture */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A0C2C00000000000001 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
+			productName = ComposableArchitecture;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

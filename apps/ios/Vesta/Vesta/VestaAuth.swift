@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import ClerkKit
 import ClerkKitUI
 import ConvexMobile
@@ -17,48 +18,80 @@ enum VestaClerkConfig {
 }
 
 struct VestaAuthenticatedRoot: View {
-    var body: some View {
-        VestaAuthGate {
-            ContentView()
+    let store: StoreOf<VestaRootFeature>
+
+    init(
+        store: StoreOf<VestaRootFeature> = Store(initialState: VestaRootFeature.State()) {
+            VestaRootFeature()
         }
+    ) {
+        self.store = store
+    }
+
+    var body: some View {
+        VestaAuthGate(store: store)
         .prefetchClerkImages()
         .environment(Clerk.shared)
     }
 }
 
-struct VestaAuthGate<Content: View>: View {
-    @State private var authState: AuthState<String> = .loading
-    let content: () -> Content
+struct VestaAuthGate: View {
+    let store: StoreOf<VestaRootFeature>
 
     var body: some View {
         Group {
-            switch VestaAuthPresentationPolicy.evaluate(sessionState: sessionState) {
+            switch VestaAuthPresentationPolicy.evaluate(sessionState: store.sessionState) {
             case .loading:
                 VestaAuthLoadingView()
             case .authForm:
                 AuthView()
             case .content:
-                content()
+                ContentView(
+                    store: store.scope(state: \.capture, action: \.capture)
+                )
             }
         }
         .task {
-            for await state in vestaConvexClient.authState.values {
-                authState = state
-            }
-        }
-        .task(id: sessionState) {
-            guard sessionState == .signedIn else { return }
-            let args = [String: ConvexEncodable?]()
-            let _: ConvexStoreUserResponse? = try? await vestaConvexClient.mutation("users:store", with: args)
+            await store.send(.task).finish()
         }
         .onOpenURL { url in
-            Task {
-                try? await Clerk.shared.handle(url)
-            }
+            store.send(.openURL(url))
         }
     }
+}
 
-    private var sessionState: VestaAuthSessionState {
+struct VestaAuthClient {
+    var authStates: @Sendable () -> AsyncStream<VestaAuthSessionState>
+    var handleOpenURL: @Sendable (_ url: URL) async -> Void
+    var signOut: @Sendable () async throws -> Void
+    var storeUser: @Sendable () async throws -> Void
+}
+
+extension VestaAuthClient: DependencyKey {
+    static let liveValue = VestaAuthClient(
+        authStates: {
+            AsyncStream { continuation in
+                let task = Task { @MainActor in
+                    for await state in vestaConvexClient.authState.values {
+                        continuation.yield(Self.sessionState(from: state))
+                    }
+                    continuation.finish()
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        },
+        handleOpenURL: { url in
+            await Self.handle(url: url)
+        },
+        signOut: {
+            try await Self.signOut()
+        },
+        storeUser: {
+            try await Self.storeUser()
+        }
+    )
+
+    private static func sessionState(from authState: AuthState<String>) -> VestaAuthSessionState {
         switch authState {
         case .loading:
             .loading
@@ -66,6 +99,100 @@ struct VestaAuthGate<Content: View>: View {
             .signedOut
         case .authenticated:
             .signedIn
+        }
+    }
+
+    @MainActor
+    private static func handle(url: URL) async {
+        _ = try? await Clerk.shared.handle(url)
+    }
+
+    @MainActor
+    private static func signOut() async throws {
+        if let sessionId = Clerk.shared.session?.id {
+            try await Clerk.shared.auth.signOut(sessionId: sessionId)
+        } else {
+            try await Clerk.shared.auth.signOut()
+        }
+    }
+
+    @MainActor
+    private static func storeUser() async throws {
+        let args = [String: ConvexEncodable?]()
+        let _: ConvexStoreUserResponse? = try await vestaConvexClient.mutation("users:store", with: args)
+    }
+}
+
+extension DependencyValues {
+    var vestaAuthClient: VestaAuthClient {
+        get { self[VestaAuthClient.self] }
+        set { self[VestaAuthClient.self] = newValue }
+    }
+}
+
+@Reducer
+struct VestaRootFeature {
+    @ObservableState
+    struct State {
+        var capture = VestaCaptureFeature.State()
+        var sessionState: VestaAuthSessionState = .loading
+    }
+
+    enum Action {
+        case authStateChanged(VestaAuthSessionState)
+        case capture(VestaCaptureFeature.Action)
+        case openURL(URL)
+        case storeUserResponse(Result<Void, VestaClientFailure>)
+        case task
+    }
+
+    @Dependency(\.vestaAuthClient) private var auth
+
+    private enum CancelID {
+        case authStates
+    }
+
+    var body: some ReducerOf<Self> {
+        Scope(state: \.capture, action: \.capture) {
+            VestaCaptureFeature()
+        }
+
+        Reduce { state, action in
+            switch action {
+            case .authStateChanged(let sessionState):
+                state.sessionState = sessionState
+                guard sessionState == .signedIn else { return .none }
+                return .merge(
+                    .run { send in
+                        do {
+                            try await auth.storeUser()
+                            await send(.storeUserResponse(.success(())))
+                        } catch {
+                            await send(.storeUserResponse(.failure(VestaClientFailure(error: error))))
+                        }
+                    },
+                    .send(.capture(.task))
+                )
+
+            case .capture:
+                return .none
+
+            case .openURL(let url):
+                return .run { _ in
+                    await auth.handleOpenURL(url)
+                }
+
+            case .storeUserResponse:
+                return .none
+
+            case .task:
+                return .run { send in
+                    for await sessionState in auth.authStates() {
+                        await send(.authStateChanged(sessionState))
+                    }
+                }
+                .cancellable(id: CancelID.authStates, cancelInFlight: true)
+            }
         }
     }
 }

@@ -1,21 +1,15 @@
+import ComposableArchitecture
 import PencilKit
 import SwiftUI
 import UIKit
 
 struct ContentView: View {
-    @StateObject private var model = VestaCaptureViewModel()
+    @Bindable var store: StoreOf<VestaCaptureFeature>
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var captureFocused: CaptureFocusTarget?
-    @State private var navigationPath: [VestaDestination] = []
-    @State private var activeSheet: VestaSheet?
-    @State private var addMenuOpen = false
-    @State private var drawingOpen = false
-    @State private var formattingOpen = false
-    @State private var imagePickerSource: CaptureImagePickerSource?
-    @State private var voiceRecorderOpen = false
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack(path: $store.navigationPath) {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 LinearGradient(
@@ -31,15 +25,15 @@ struct ContentView: View {
 
                 VStack(spacing: 0) {
                     TopChrome(
-                        dailyStreak: model.dailyStreak,
-                        signal: model.chromeSignal,
-                        perform: perform
+                        dailyStreak: store.dailyStreak,
+                        signal: store.chromeSignal,
+                        perform: { store.send(.chromeActionTapped($0)) }
                     )
                         .padding(.horizontal, 24)
                         .padding(.top, 14)
 
                     CaptureCanvas(
-                        model: model,
+                        store: store,
                         focused: $captureFocused
                     )
                         .padding(.horizontal, 26)
@@ -49,32 +43,32 @@ struct ContentView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 BottomCaptureRail(
-                    hasDraft: model.hasDraft,
-                    saving: model.saving,
-                    addMenuOpen: $addMenuOpen,
-                    formattingOpen: $formattingOpen,
+                    hasDraft: store.hasDraft,
+                    saving: store.saving,
+                    addMenuOpen: $store.addMenuOpen,
+                    formattingOpen: $store.formattingOpen,
                     openCamera: {
                         if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            imagePickerSource = .camera
+                            store.send(.cameraButtonTapped(isAvailable: true))
                         } else {
-                            model.errorMessage = "Camera is not available on this device."
+                            store.send(.cameraButtonTapped(isAvailable: false))
                         }
                     },
-                    openDrawing: { drawingOpen = true },
-                    openPhotoLibrary: { imagePickerSource = .photoLibrary },
-                    openVoiceRecorder: { voiceRecorderOpen = true },
+                    openDrawing: { store.send(.drawingButtonTapped) },
+                    openPhotoLibrary: { store.send(.photoLibraryButtonTapped) },
+                    openVoiceRecorder: { store.send(.voiceRecorderButtonTapped) },
                     requestSuggestion: {
-                        model.addJournalingSuggestion()
-                        captureFocused = model.shouldFocusContinuationDraft || !model.attachments.isEmpty ? .trailingDraft : .draft
+                        store.send(.addJournalingSuggestion)
+                        captureFocused = store.shouldFocusContinuationDraft || !store.attachments.isEmpty ? .trailingDraft : .draft
                     },
                     applyFormat: {
-                        model.applyTextFormat($0)
-                        captureFocused = model.shouldFocusContinuationDraft || !model.attachments.isEmpty ? .trailingDraft : .draft
+                        store.send(.applyTextFormat($0))
+                        captureFocused = store.shouldFocusContinuationDraft || !store.attachments.isEmpty ? .trailingDraft : .draft
                     },
                     submit: {
                         Task {
-                            await model.submit()
-                            if model.shouldFocusContinuationDraft {
+                            await store.send(.submit).finish()
+                            if store.shouldFocusContinuationDraft {
                                 captureFocused = .trailingDraft
                             }
                         }
@@ -86,71 +80,71 @@ struct ContentView: View {
             .navigationDestination(for: VestaDestination.self) { destination in
                 switch destination {
                 case .settings:
-                    SettingsScreen(model: model)
+                    SettingsScreen(store: store)
                 case .todayCalendar:
-                    TodayCalendarScreen(model: model)
+                    TodayCalendarScreen(store: store)
                 }
             }
         }
         .preferredColorScheme(.dark)
-        .task { await model.refreshContext() }
-        .task(id: model.shouldPollProcessing) {
-            if model.shouldPollProcessing {
-                await model.pollProcessingResult()
+        .task { await store.send(.refreshContext).finish() }
+        .task(id: store.shouldPollProcessing) {
+            if store.shouldPollProcessing {
+                await store.send(.pollProcessingStarted).finish()
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await model.refreshContext() }
+                Task { await store.send(.refreshContext).finish() }
             }
         }
         .alert("Interrupt processing?", isPresented: processingEditAlertPresented) {
             Button("Keep processing", role: .cancel) {
-                model.cancelProcessingEditInterruption()
+                store.send(.cancelProcessingEditInterruption)
             }
             Button("Edit note", role: .destructive) {
-                model.confirmProcessingEditInterruption()
+                store.send(.confirmProcessingEditInterruption)
                 captureFocused = .draft
             }
         } message: {
             Text("Editing this note will stop tracking the current processing. You can submit the edited note again when you're ready.")
         }
-        .sheet(item: $model.presentedResult) { result in
+        .sheet(item: presentedResultBinding) { result in
             CaptureDetailSheet(result: result)
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.hidden)
         }
-        .sheet(item: $activeSheet) { sheet in
+        .sheet(item: activeSheetBinding) { sheet in
             switch sheet {
             case .streakCalendar:
-                StreakCalendarSheet(model: model)
+                StreakCalendarSheet(store: store)
                     .presentationDetents([.fraction(0.78), .large])
                     .presentationDragIndicator(.visible)
             }
         }
-        .sheet(item: $imagePickerSource) { source in
+        .sheet(item: imagePickerSourceBinding) { source in
             SystemImagePicker(source: source) { image in
-                model.appendImage(image, source: source)
+                store.send(.appendImage(image, source))
                 captureFocused = .trailingDraft
             }
         }
-        .fullScreenCover(isPresented: $drawingOpen) {
+        .fullScreenCover(isPresented: drawingOpenBinding) {
             DrawingSheet { drawing in
-                model.appendDrawing(drawing)
+                store.send(.appendDrawing(drawing))
                 captureFocused = .trailingDraft
             }
         }
-        .fullScreenCover(item: $model.editingDrawing) { attachment in
+        .fullScreenCover(item: editingDrawingBinding) { attachment in
             DrawingSheet(initialDrawing: attachment.drawing ?? PKDrawing()) { drawing in
-                model.updateDrawing(attachment, drawing: drawing)
+                store.send(.updateDrawing(attachment, drawing))
             }
         }
-        .sheet(item: $model.previewedAttachment) { attachment in
+        .sheet(item: previewedAttachmentBinding) { attachment in
             AttachmentPreviewSheet(attachment: attachment)
         }
-        .sheet(isPresented: $voiceRecorderOpen) {
+        .sheet(isPresented: voiceRecorderOpenBinding) {
             VoiceRecorderSheet { url in
-                model.appendVoiceRecording(url)
+                store.send(.appendVoiceRecording(url))
                 captureFocused = .trailingDraft
             }
             .presentationDetents([.height(320)])
@@ -159,36 +153,71 @@ struct ContentView: View {
 
     private var processingEditAlertPresented: Binding<Bool> {
         Binding(
-            get: { model.activeAlert == .processingEditInterruption },
+            get: { store.activeAlert == .processingEditInterruption },
             set: { isPresented in
                 if !isPresented {
-                    model.cancelProcessingEditInterruption()
+                    store.send(.cancelProcessingEditInterruption)
                 }
             }
         )
     }
 
-    private func perform(_ action: VestaChromeAction) {
-        if action == .statusSignal {
-            if model.latestResult != nil {
-                model.openLatestResult()
-            } else {
-                Task { await model.refreshContext() }
-            }
-            return
-        }
+    private var activeSheetBinding: Binding<VestaSheet?> {
+        Binding(
+            get: { store.activeSheet },
+            set: { store.send(.activeSheetChanged($0)) }
+        )
+    }
 
-        if let destination = action.destination {
-            navigationPath.append(destination)
-        }
-        if let sheet = action.sheet {
-            activeSheet = sheet
-        }
+    private var drawingOpenBinding: Binding<Bool> {
+        Binding(
+            get: { store.drawingOpen },
+            set: { store.send(.drawingOpenChanged($0)) }
+        )
+    }
+
+    private var editingDrawingBinding: Binding<CaptureAttachment?> {
+        Binding(
+            get: { store.editingDrawing },
+            set: { store.send(.editingDrawingChanged($0)) }
+        )
+    }
+
+    private var imagePickerSourceBinding: Binding<CaptureImagePickerSource?> {
+        Binding(
+            get: { store.imagePickerSource },
+            set: { store.send(.imagePickerSourceChanged($0)) }
+        )
+    }
+
+    private var presentedResultBinding: Binding<CaptureResult?> {
+        Binding(
+            get: { store.presentedResult },
+            set: { store.send(.presentedResultChanged($0)) }
+        )
+    }
+
+    private var previewedAttachmentBinding: Binding<CaptureAttachment?> {
+        Binding(
+            get: { store.previewedAttachment },
+            set: { store.send(.previewedAttachmentChanged($0)) }
+        )
+    }
+
+    private var voiceRecorderOpenBinding: Binding<Bool> {
+        Binding(
+            get: { store.voiceRecorderOpen },
+            set: { store.send(.voiceRecorderOpenChanged($0)) }
+        )
     }
 }
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView()
+        ContentView(
+            store: Store(initialState: VestaCaptureFeature.State()) {
+                VestaCaptureFeature()
+            }
+        )
     }
 }
