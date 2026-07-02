@@ -4,18 +4,26 @@ Native SwiftUI App Surface for logging spoken captures into the Vesta Engine.
 
 ## Run
 
-1. Start the Engine from the repo root:
+1. For local simulator work, start the Engine from the repo root:
 
    ```sh
    bun dev
    ```
 
 2. Open `apps/ios/Vesta/Vesta.xcodeproj` in Xcode.
-3. Run the `Vesta` scheme on an iOS Simulator.
-4. In the app, use the gear button to edit the Engine URL if your LAN IP changes.
+3. Pick the scheme for the environment you want:
 
-The checked-in default is `http://192.168.76.133:8787` so a plugged-in iPhone can reach the local Engine. For simulator-only testing, `http://127.0.0.1:8787` also works.
-If Siri says it cannot reach Vesta, check that `bun dev` is running and that `http://192.168.76.133:8787/health` opens from the phone.
+| Scheme             | Build config | Bundle id               | Icon             | Engine URL                                        | Convex URL                                              |
+| ------------------ | ------------ | ----------------------- | ---------------- | ------------------------------------------------- | ------------------------------------------------------- |
+| `Vesta Local`      | `Debug`      | `app.vesta.ios.local`   | `AppIcon`        | `http://localhost:8787`                           | `https://grandiose-hamster-855.eu-west-1.convex.cloud`  |
+| `Vesta Staging`    | `Staging`    | `app.vesta.ios.staging` | `AppIconStaging` | `https://vesta-web-staging.teampitch.workers.dev` | `https://abundant-retriever-130.eu-west-1.convex.cloud` |
+| `Vesta Production` | `Release`    | `app.vesta.ios`         | `AppIcon`        | `https://vesta-web.teampitch.workers.dev`         | `https://friendly-lion-904.eu-west-1.convex.cloud`      |
+
+Settings shows the active environment and Engine URL on-device. Use `Vesta Staging` for physical iPhone QA unless you explicitly need to test the local simulator flow.
+
+The staging iOS build has a separate bundle id, beta app icon, Engine endpoint, Clerk app, and Convex deployment. Use `Vesta Production` only when you want the app to talk to the production Worker and production Convex deployment.
+
+Production Clerk still uses the existing Clerk development instance until `clerk deploy` is completed with a production domain, DNS access, and OAuth credentials.
 
 ## Siri
 

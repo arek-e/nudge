@@ -44,7 +44,9 @@ describe("Vesta logo assets", () => {
     await expectSvg("icons/vesta-logo-dark.svg");
     await expectSvg("icons/vesta-logo-long-light.svg");
     await expectSvg("icons/vesta-logo-long-dark.svg");
+    await expectSvg("icons/vesta-logo-long-beta.svg");
     await expectSvg("icons/vesta-app-icon-light.svg");
+    await expectSvg("icons/vesta-app-icon-beta.svg");
     await expectPng("icons/icon-16.png", 16, 16);
     await expectPng("icons/icon-32.png", 32, 32);
     await expectPng("icons/icon-48.png", 48, 48);
@@ -88,6 +90,18 @@ describe("Vesta logo assets", () => {
       background: false,
       ink: "#f7f3ec",
     });
+  });
+
+  test("staging beta logo asset is visibly distinct", async () => {
+    const betaLogo = await readFile(new URL("icons/vesta-logo-long-beta.svg", publicUrl), "utf8");
+    const betaIcon = await readFile(new URL("icons/vesta-app-icon-beta.svg", publicUrl), "utf8");
+
+    expect(betaLogo).toContain("Vesta beta logo lockup");
+    expect(betaLogo).toContain("BETA");
+    expect(betaLogo).toContain("#ED5A26");
+    expect(betaLogo).toContain("#2D424E");
+    expect(betaIcon).toContain("Vesta beta app icon");
+    expect(betaIcon).toContain("vesta-logo-long-beta");
   });
 
   test("HTML entry points expose the complete Vesta favicon set", async () => {

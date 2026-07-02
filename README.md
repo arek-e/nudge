@@ -164,6 +164,7 @@ app shell.
 | ------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | Short mark    | [`vesta-logo-light.svg`](apps/web/public/icons/vesta-logo-light.svg)           | [`vesta-logo-dark.svg`](apps/web/public/icons/vesta-logo-dark.svg)           |
 | Long lockup   | [`vesta-logo-long-light.svg`](apps/web/public/icons/vesta-logo-long-light.svg) | [`vesta-logo-long-dark.svg`](apps/web/public/icons/vesta-logo-long-dark.svg) |
+| Beta lockup   | [`vesta-logo-long-beta.svg`](apps/web/public/icons/vesta-logo-long-beta.svg)   | staging only                                                                 |
 | App icon      | [`vesta-app-icon-light.svg`](apps/web/public/icons/vesta-app-icon-light.svg)   | [`vesta-app-icon.svg`](apps/web/public/icons/vesta-app-icon.svg)             |
 | Animated mark | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)     | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)   |
 
@@ -234,12 +235,12 @@ bun run traces:recent
 
 ## CI And Release Status
 
-| Area                            | Status                                                                                                                                        |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                              |
-| **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                |
-| **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Vesta`. Siri branding and phrase docs are covered by Bun tests.          |
-| **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow. |
+| Area                            | Status                                                                                                                                                                           |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                                                                 |
+| **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                                                   |
+| **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Vesta` with Local, Staging, and Production schemes. Siri branding and phrase docs are covered by Bun tests. |
+| **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow.                                    |
 
 ## Deployment
 
@@ -252,6 +253,8 @@ bun run deploy
 Run `bun run check` and `bun run test:e2e` before deploying. The deploy script refuses dirty working trees, builds the web app, stamps `APP_VERSION` with the short Git SHA, and deploys the Worker with a matching Cloudflare version tag/message.
 
 The current CI does not deploy the iOS app. To ship iOS from the repo, add a macOS release workflow that runs `xcodebuild archive`, signs with App Store Connect credentials, and uploads to TestFlight or App Store Connect.
+
+For physical-device QA, use the `Vesta Staging` Xcode scheme. It installs as `app.vesta.ios.staging` and points at `https://vesta-web-staging.teampitch.workers.dev`. Use `Vesta Production` only when validating the production backend at `https://vesta-web.teampitch.workers.dev`.
 
 For explicit prototype deploys only:
 

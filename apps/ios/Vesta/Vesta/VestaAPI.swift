@@ -240,6 +240,98 @@ enum JSONValue: Decodable {
     }
 }
 
+struct VestaEnvironmentConfig: Equatable {
+    static let convexDeploymentURLInfoKey = "VestaConvexDeploymentURL"
+    static let displayNameInfoKey = "CFBundleDisplayName"
+    static let engineURLInfoKey = "VestaEngineURL"
+    static let environmentNameInfoKey = "VestaEnvironmentName"
+    static let developmentConvexDeploymentURL = "https://grandiose-hamster-855.eu-west-1.convex.cloud"
+    static let localEngineURL = "http://localhost:8787"
+    static let productionConvexDeploymentURL = "https://friendly-lion-904.eu-west-1.convex.cloud"
+    static let productionEngineURL = "https://vesta-web.teampitch.workers.dev"
+    static let stagingConvexDeploymentURL = "https://abundant-retriever-130.eu-west-1.convex.cloud"
+    static let stagingEngineURL = "https://vesta-web-staging.teampitch.workers.dev"
+
+    let name: String
+    let displayName: String
+    let engineURL: String
+    let convexDeploymentURL: String
+
+    static var current: VestaEnvironmentConfig {
+        let bundle = Bundle.main
+        let environment = ProcessInfo.processInfo.environment
+        return evaluate(
+            environmentName: bundleString(environmentNameInfoKey, bundle: bundle)
+                ?? normalizedBuildValue(environment["VESTA_ENVIRONMENT_NAME"]),
+            displayName: bundleString(displayNameInfoKey, bundle: bundle)
+                ?? normalizedBuildValue(environment["VESTA_DISPLAY_NAME"]),
+            engineURL: bundleString(engineURLInfoKey, bundle: bundle)
+                ?? normalizedBuildValue(environment["VESTA_ENGINE_URL"]),
+            convexDeploymentURL: bundleString(convexDeploymentURLInfoKey, bundle: bundle)
+                ?? normalizedBuildValue(environment["VESTA_CONVEX_DEPLOYMENT_URL"])
+        )
+    }
+
+    static func evaluate(
+        environmentName: String?,
+        displayName: String?,
+        engineURL: String?,
+        convexDeploymentURL: String?
+    ) -> VestaEnvironmentConfig {
+        let name = normalizedBuildValue(environmentName) ?? "production"
+        return VestaEnvironmentConfig(
+            name: name,
+            displayName: normalizedBuildValue(displayName) ?? fallbackDisplayName(for: name),
+            engineURL: normalizedBuildValue(engineURL) ?? fallbackEngineURL(for: name),
+            convexDeploymentURL: normalizedBuildValue(convexDeploymentURL) ?? fallbackConvexDeploymentURL(for: name)
+        )
+    }
+
+    private static func bundleString(_ key: String, bundle: Bundle) -> String? {
+        normalizedBuildValue(bundle.object(forInfoDictionaryKey: key) as? String)
+    }
+
+    private static func fallbackDisplayName(for name: String) -> String {
+        switch name {
+        case "local":
+            "Vesta Local"
+        case "staging":
+            "Vesta Staging"
+        default:
+            "Vesta"
+        }
+    }
+
+    private static func fallbackEngineURL(for name: String) -> String {
+        switch name {
+        case "local":
+            localEngineURL
+        case "staging":
+            stagingEngineURL
+        default:
+            productionEngineURL
+        }
+    }
+
+    private static func fallbackConvexDeploymentURL(for name: String) -> String {
+        switch name {
+        case "local":
+            developmentConvexDeploymentURL
+        case "staging":
+            stagingConvexDeploymentURL
+        default:
+            productionConvexDeploymentURL
+        }
+    }
+
+    private static func normalizedBuildValue(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return nil }
+        return trimmed
+    }
+}
+
 enum VestaAPI {
     static let engineURLKey = "vesta.engineURL"
     private static let legacyEngineURLKey = "vesta.backendURL"
@@ -248,7 +340,10 @@ enum VestaAPI {
         "http://192.168.76.133:8787",
         "http://localhost:8787"
     ])
-    static let defaultEngineURL = "https://vesta-web.teampitch.workers.dev"
+    static var defaultEngineURL: String {
+        VestaEnvironmentConfig.current.engineURL
+    }
+
     static var configuredEngineURL: String {
         let defaults = UserDefaults.standard
         if let engineURL = defaults.string(forKey: engineURLKey) {
@@ -266,14 +361,15 @@ enum VestaAPI {
     private static let encoder = JSONEncoder()
 
     private static func normalizedEngineURL(_ engineURL: String, defaults: UserDefaults) -> String {
+        let fallbackURL = defaultEngineURL
         let trimmedURL = engineURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedURL.isEmpty else {
-            defaults.set(defaultEngineURL, forKey: engineURLKey)
-            return defaultEngineURL
+            defaults.set(fallbackURL, forKey: engineURLKey)
+            return fallbackURL
         }
-        guard !isStaleLocalEngineURL(trimmedURL) else {
-            defaults.set(defaultEngineURL, forKey: engineURLKey)
-            return defaultEngineURL
+        guard !isStaleLocalEngineURL(trimmedURL) || isStaleLocalEngineURL(fallbackURL) else {
+            defaults.set(fallbackURL, forKey: engineURLKey)
+            return fallbackURL
         }
         return trimmedURL
     }

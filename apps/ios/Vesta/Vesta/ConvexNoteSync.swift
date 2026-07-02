@@ -5,7 +5,9 @@ import Foundation
 import GRDB
 
 enum ConvexNoteSyncConfig {
-    static let deploymentURL = "https://grandiose-hamster-855.eu-west-1.convex.cloud"
+    static var deploymentURL: String {
+        VestaEnvironmentConfig.current.convexDeploymentURL
+    }
 }
 
 @MainActor

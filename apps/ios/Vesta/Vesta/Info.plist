@@ -3,11 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Vesta</string>
+	<string>$(VESTA_DISPLAY_NAME)</string>
 	<key>CFBundleSpokenName</key>
 	<string>Vesta</string>
 	<key>ClerkPublishableKey</key>
 	<string>$(CLERK_PUBLISHABLE_KEY)</string>
+	<key>VestaEnvironmentName</key>
+	<string>$(VESTA_ENVIRONMENT_NAME)</string>
+	<key>VestaEngineURL</key>
+	<string>$(VESTA_ENGINE_URL)</string>
+	<key>VestaConvexDeploymentURL</key>
+	<string>$(VESTA_CONVEX_DEPLOYMENT_URL)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
