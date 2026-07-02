@@ -60,27 +60,27 @@
       }
     },
     {
-      "name": "vesta-app-service",
+      "name": "nudge-app-service",
       "description": "The Worker runtime service seam keeps its public service, service shape, and runtime type exports.",
-      "paths": "apps/web/src/Services/VestaApp.ts",
+      "paths": "apps/web/src/Services/NudgeApp.ts",
       "must": {
-        "exportClasses": ["VestaApp"],
-        "exportInterfaces": ["VestaAppService"],
-        "exportTypes": ["VestaAppRuntime"]
+        "exportClasses": ["NudgeApp"],
+        "exportInterfaces": ["NudgeAppService"],
+        "exportTypes": ["NudgeAppRuntime"]
       }
     },
     {
-      "name": "vesta-app-live-layer",
+      "name": "nudge-app-live-layer",
       "description": "The live Worker layer keeps named composition functions instead of anonymous route setup.",
-      "paths": "apps/web/src/Layers/VestaAppLive.ts",
+      "paths": "apps/web/src/Layers/NudgeAppLive.ts",
       "must": {
         "exportFunctions": [
-          "makeVestaAppLayer",
-          "makeVestaAppRuntime",
-          "resolveVestaApp",
-          "runVestaAppDbEffect"
+          "makeNudgeAppLayer",
+          "makeNudgeAppRuntime",
+          "resolveNudgeApp",
+          "runNudgeAppDbEffect"
         ],
-        "exportTypes": ["VestaAppDbLayer"]
+        "exportTypes": ["NudgeAppDbLayer"]
       }
     },
     {
@@ -99,6 +99,65 @@
         "exportClasses": ["Db"],
         "exportConstants": ["createD1DrizzleDatabase"],
         "exportInterfaces": ["DbService"]
+      }
+    },
+    {
+      "name": "db-convex-effect-context-anchor",
+      "description": "The Convex database adapter package keeps Convex as an Effect context and exposes the DB adapter layer separately.",
+      "paths": "packages/db-convex/src/index.ts",
+      "must": {
+        "exportClasses": ["ConvexRuntime"],
+        "exportConstants": ["convexDbLayer"],
+        "exportFunctions": ["makeConvexRuntimeLayer"],
+        "exportInterfaces": ["ConvexClient", "ConvexDbStoreApi", "ConvexRuntimeService"]
+      }
+    },
+    {
+      "name": "db-convex-observability-anchor",
+      "description": "The Convex DB adapter records request-linked client spans and reads request trace context through the shared observability FiberRef.",
+      "paths": "packages/db-convex/src/index.ts",
+      "must": {
+        "import": [
+          { "name": "buildTraceSpanRow", "from": "@nudge/observability" },
+          { "name": "currentRuntimeTraceContext", "from": "@nudge/observability" },
+          { "name": "traceparentHeader", "from": "@nudge/observability" }
+        ]
+      }
+    },
+    {
+      "name": "convex-http-client-stays-in-db-convex",
+      "description": "Only the Convex DB adapter package may construct the Convex HTTP client; app runtime code provides Convex context instead.",
+      "paths": [
+        "apps/web/src/**/*.{ts,tsx}",
+        "packages/*/src/**/*.{ts,tsx}",
+        "!packages/db-convex/src/**/*.{ts,tsx}",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "mustNot": {
+        "import": [{ "name": "ConvexHttpClient", "from": "convex/browser" }]
+      }
+    },
+    {
+      "name": "web-db-layer-provides-convex-runtime-context",
+      "description": "The Worker DB layer provides ConvexRuntime into the Convex DB adapter layer instead of constructing a DB adapter directly.",
+      "paths": "apps/web/src/db-layer.ts",
+      "must": {
+        "import": [
+          { "name": "convexDbLayer", "from": "@nudge/db-convex" },
+          { "name": "makeConvexRuntimeLayer", "from": "@nudge/db-convex" }
+        ]
+      },
+      "mustNot": {
+        "import": [{ "name": "ConvexHttpClient", "from": "convex/browser" }]
+      }
+    },
+    {
+      "name": "web-db-effects-use-request-trace-context",
+      "description": "The Worker request app wraps DB effects with the current request trace context so adapter spans join the HTTP trace.",
+      "paths": "apps/web/src/app.ts",
+      "must": {
+        "import": [{ "name": "withRequestTraceContext", "from": "./observability" }]
       }
     },
     {

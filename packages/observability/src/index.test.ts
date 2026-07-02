@@ -7,15 +7,20 @@ import {
   buildTraceEventRow,
   createSpanId,
   createTraceId,
+  currentRuntimeTraceContext,
   finalizeRequestWideEvent,
   isTransientBackpressureError,
+  parseTraceparent,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
   pruneTraceCache,
   retryAfterSecondsFor,
   safeErrorFields,
+  safeExceptionAttributes,
   shouldSampleWideEvent,
   statusGroup,
+  traceparentHeader,
+  withRuntimeTraceContext,
 } from "./index";
 
 describe("observability", () => {
@@ -66,7 +71,7 @@ describe("observability", () => {
       finalizeRequestWideEvent({
         base: {
           event: "http_request_completed",
-          service: "vesta-web",
+          service: "nudge-web",
           requestId: "ray-1",
           method: "GET",
           path: "/health",
@@ -77,7 +82,7 @@ describe("observability", () => {
       }),
     ).toEqual({
       event: "http_request_completed",
-      service: "vesta-web",
+      service: "nudge-web",
       requestId: "ray-1",
       method: "GET",
       path: "/health",
@@ -96,7 +101,7 @@ describe("observability", () => {
       event: {
         event: "http_request_completed",
         logKind: "wide_event",
-        service: "vesta-web",
+        service: "nudge-web",
         environment: "test",
         version: "test-version",
         requestId: "ray-1",
@@ -118,7 +123,7 @@ describe("observability", () => {
       "2026-06-12T10:00:00.000Z",
       "http_request_completed",
       "wide_event",
-      "vesta-web",
+      "nudge-web",
       "test",
       "test-version",
       "ray-1",
@@ -140,7 +145,7 @@ describe("observability", () => {
       durationMs: 23,
       endedAt: "2026-06-12T10:00:00.023Z",
       event: {
-        service: "vesta-web",
+        service: "nudge-web",
         environment: "test",
         version: "test-version",
         requestId: "ray-1",
@@ -167,7 +172,7 @@ describe("observability", () => {
       "2026-06-12T10:00:00.000Z",
       "2026-06-12T10:00:00.023Z",
       23,
-      "vesta-web",
+      "nudge-web",
       "test",
       "test-version",
       "ray-1",
@@ -187,10 +192,10 @@ describe("observability", () => {
       "http.route": "health",
       "url.path": "/health",
       "user_agent.original": "test-agent",
-      "vesta.request_id": "ray-1",
-      "vesta.outcome": "error",
-      "vesta.debug_kind": "http",
-      "vesta.sampled": true,
+      "nudge.request_id": "ray-1",
+      "nudge.outcome": "error",
+      "nudge.debug_kind": "http",
+      "nudge.sampled": true,
     });
   });
 
@@ -199,7 +204,7 @@ describe("observability", () => {
       buildDebugWideEventFields({
         event: {
           event: "http_request_completed",
-          service: "vesta-web",
+          service: "nudge-web",
           environment: "test",
           version: "test-version",
           requestId: "ray-1",
@@ -210,7 +215,7 @@ describe("observability", () => {
           outcome: "error",
           durationMs: 10_001,
           sampleReason: "error",
-          userAgent: "Vesta/1",
+          userAgent: "Nudge/1",
           aiSystem: "cloudflare-think",
           aiModel: "@cf/zai-org/glm-4.7-flash",
           aiRunId: "run-1",
@@ -226,27 +231,73 @@ describe("observability", () => {
       "http.response.status_code": 504,
       "http.route": "api.journal.save",
       "url.path": "/api/journal",
-      "user_agent.original": "Vesta/1",
-      "service.name": "vesta-web",
+      "user_agent.original": "Nudge/1",
+      "service.name": "nudge-web",
       "service.version": "test-version",
       "deployment.environment.name": "test",
-      "vesta.request_id": "ray-1",
-      "vesta.outcome": "error",
-      "vesta.duration_ms": 10001,
-      "vesta.sample_reason": "error",
-      "vesta.debug_kind": "ai",
-      "vesta.ai.system": "cloudflare-think",
-      "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "vesta.ai.run_id": "run-1",
-      "vesta.ai.error_code": "AI_EXTRACTION_TIMEOUT",
+      "nudge.request_id": "ray-1",
+      "nudge.outcome": "error",
+      "nudge.duration_ms": 10001,
+      "nudge.sample_reason": "error",
+      "nudge.debug_kind": "ai",
+      "nudge.ai.system": "cloudflare-think",
+      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "nudge.ai.run_id": "run-1",
+      "nudge.ai.error_code": "AI_EXTRACTION_TIMEOUT",
       "exception.type": "TimeoutError",
       "exception.message": "The operation was aborted due to timeout",
+      "exception.stacktrace": null,
+    });
+  });
+
+  test("parses and builds W3C traceparent headers", () => {
+    const traceId = "0123456789abcdef0123456789abcdef";
+    const spanId = "0123456789abcdef";
+    const header = traceparentHeader({ flags: "01", spanId, traceId });
+
+    expect(header).toBe(`00-${traceId}-${spanId}-01`);
+    expect(parseTraceparent(header)).toEqual({
+      flags: "01",
+      parentSpanId: spanId,
+      traceId,
+    });
+    expect(parseTraceparent("not-a-traceparent")).toBeNull();
+  });
+
+  test("scopes runtime trace context to the current Effect fiber", async () => {
+    const context = {
+      cacheable: true,
+      environment: "test",
+      flags: "01",
+      parentSpanId: "parent-1",
+      requestId: "ray-1",
+      rootSpanId: "root-1",
+      service: "nudge-web",
+      traceId: "trace-1",
+      version: "test-version",
+    };
+
+    const inside = await Effect.runPromise(
+      withRuntimeTraceContext(currentRuntimeTraceContext, context),
+    );
+    const outside = await Effect.runPromise(currentRuntimeTraceContext);
+
+    expect(inside).toEqual(context);
+    expect(outside).toBeNull();
+  });
+
+  test("keeps exception stack traces in span attributes", () => {
+    const error = new Error("boom");
+    expect(safeExceptionAttributes(error)).toMatchObject({
+      "exception.type": "Error",
+      "exception.message": "boom",
+      "exception.stacktrace": expect.stringContaining("Error: boom"),
     });
   });
 
   test("builds reusable child spans without feature-specific route knowledge", () => {
     const span = buildTraceSpanRow({
-      attributes: { "db.system.name": "cloudflare-d1", "vesta.operation": "db.resolve" },
+      attributes: { "db.system.name": "cloudflare-d1", "nudge.operation": "db.resolve" },
       durationMs: 4,
       endedAt: "2026-06-12T10:00:00.004Z",
       environment: "test",
@@ -258,7 +309,7 @@ describe("observability", () => {
       path: "/api/syntheses",
       requestId: "ray-1",
       routeName: "api.syntheses",
-      service: "vesta-web",
+      service: "nudge-web",
       spanId: "span-1",
       startedAt: "2026-06-12T10:00:00.000Z",
       status: "ok",
@@ -276,7 +327,7 @@ describe("observability", () => {
       "2026-06-12T10:00:00.000Z",
       "2026-06-12T10:00:00.004Z",
       4,
-      "vesta-web",
+      "nudge-web",
       "test",
       "test-version",
       "ray-1",
@@ -325,7 +376,7 @@ describe("observability", () => {
             kind: "internal",
             name: "test.span",
             parentSpanId: null,
-            service: "vesta-web",
+            service: "nudge-web",
             spanId: "span-1",
             startedAt: "2026-06-12T10:00:00.000Z",
             status: "ok",

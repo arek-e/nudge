@@ -150,7 +150,7 @@ describe("agent evals", () => {
   test("can run eval cases against a live HTTP agent endpoint", async () => {
     const requested: string[] = [];
     const agent = createHttpAgentRunner({
-      baseUrl: "https://vesta.test",
+      baseUrl: "https://nudge.test",
       fetch: async (input, init) => {
         requested.push(String(input));
         expect(init?.method).toBe("POST");
@@ -173,7 +173,7 @@ describe("agent evals", () => {
     });
 
     expect(requested).toEqual([
-      "https://vesta.test/api/conversations/eval-current-journal-follow-up-maya-travel/messages",
+      "https://nudge.test/api/conversations/eval-current-journal-follow-up-maya-travel/messages",
     ]);
     expect(report.results[0]).toEqual(
       expect.objectContaining({

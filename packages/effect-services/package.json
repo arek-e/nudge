@@ -1,13 +1,13 @@
 {
-  "name": "@vesta/effect-services",
+  "name": "@nudge/effect-services",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@vesta/db": "workspace:*",
-    "@vesta/domain": "workspace:*",
+    "@nudge/db": "workspace:*",
+    "@nudge/domain": "workspace:*",
     "effect": "catalog:"
   }
 }

@@ -10,9 +10,9 @@ interface __BaseEnv_Env {
   ENVIRONMENT: "staging" | "production" | "local";
   APP_VERSION: "0.0.0";
   CLERK_AUTHORIZED_PARTIES:
-    | "https://vesta-web-staging.teampitch.workers.dev"
-    | "https://vesta-web.teampitch.workers.dev"
-    | "http://localhost:8787,https://vesta-web.teampitch.workers.dev";
+    | "https://nudge-web-staging.teampitch.workers.dev"
+    | "https://nudge-web.teampitch.workers.dev"
+    | "http://localhost:8787,https://nudge-web.teampitch.workers.dev";
   CLERK_PUBLISHABLE_KEY:
     | "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk"
     | "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
@@ -40,7 +40,7 @@ declare namespace Cloudflare {
     AI: Ai;
     ENVIRONMENT: "staging";
     APP_VERSION: "0.0.0";
-    CLERK_AUTHORIZED_PARTIES: "https://vesta-web-staging.teampitch.workers.dev";
+    CLERK_AUTHORIZED_PARTIES: "https://nudge-web-staging.teampitch.workers.dev";
     CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";
     LOG_HTTP_REQUESTS: "true";
     EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash";
@@ -61,7 +61,7 @@ declare namespace Cloudflare {
     AI: Ai;
     ENVIRONMENT: "production";
     APP_VERSION: "0.0.0";
-    CLERK_AUTHORIZED_PARTIES: "https://vesta-web.teampitch.workers.dev";
+    CLERK_AUTHORIZED_PARTIES: "https://nudge-web.teampitch.workers.dev";
     CLERK_PUBLISHABLE_KEY: "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
     LOG_HTTP_REQUESTS: "true";
     EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash";
@@ -10626,7 +10626,7 @@ interface Ai_Cf_Deepgram_Aura_2_En_Input {
     | "saturn"
     | "thalia"
     | "theia"
-    | "vesta"
+    | "nudge"
     | "zeus";
   /**
    * Encoding of the output audio.
@@ -14121,11 +14121,11 @@ declare namespace Cloudflare {
   // A project should have a declaration like this:
   //
   //     interface GlobalProps {
-  //       // Decvesta the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // Decnudge the main module's exports. Used to populate Cloudflare.Exports aka the type
   //       // of `ctx.exports`.
   //       mainModule: typeof import("my-main-module");
   //
-  //       // Decvesta which of the main module's exports are configured with durable storage, and
+  //       // Decnudge which of the main module's exports are configured with durable storage, and
   //       // thus should behave as Durable Object namsepace bindings.
   //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
   //     }

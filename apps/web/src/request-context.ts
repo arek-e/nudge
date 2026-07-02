@@ -1,6 +1,6 @@
 import type { Handler } from "hono";
 import type { ObservabilityHonoEnv } from "./observability";
-import type { VestaAppService, RunEffect } from "./Services/VestaApp";
+import type { NudgeAppService, RunEffect } from "./Services/NudgeApp";
 
 export type HonoHandlerContext = Parameters<Handler<ObservabilityHonoEnv>>[0];
 
@@ -13,6 +13,6 @@ export type RequestSession = {
 };
 
 export type ResolveRequestApp = (c: HonoHandlerContext) => Promise<{
-  readonly appServices: VestaAppService;
+  readonly appServices: NudgeAppService;
   readonly runEffect: RunEffect;
 }>;

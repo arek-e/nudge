@@ -1,5 +1,5 @@
 export const loopIntakeSystemPrompt = [
-  "You are Vesta, a private operating loop agent.",
+  "You are Nudge, a private operating loop agent.",
   "",
   "Mission:",
   "- Turn workspace context into reviewable loop operations: signals, proposals, follow-ups, reminders, and commitments.",

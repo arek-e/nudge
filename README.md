@@ -8,21 +8,21 @@
 
 iOS-first. Journal-led. Source-linked. Human-in-the-loop.
 
-[Live Web App](https://vesta-web.teampitch.workers.dev/) &middot; [iOS App](apps/ios/Vesta) &middot; [API Docs](https://vesta-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://vesta-web.teampitch.workers.dev/api/openapi.json)
+[Live Web App](https://nudge-web.teampitch.workers.dev/) &middot; [iOS App](apps/ios/Nudge) &middot; [API Docs](https://nudge-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://nudge-web.teampitch.workers.dev/api/openapi.json)
 
 </div>
 
 ---
 
-## What Vesta Is
+## What Nudge Is
 
-Vesta is an iOS-first private workspace for writing things down, capturing notes with Siri, and letting agents turn that context into reviewable drafts.
+Nudge is an iOS-first private workspace for writing things down, capturing notes with Siri, and letting agents turn that context into reviewable drafts.
 
-The native iOS app is the primary surface: quick captures, daily notes, calendar-aware context, and Siri phrases such as "Tell Vesta" or "Log this in Vesta." The Cloudflare backend stores the source material, runs analysis, and exposes OpenAPI/MCP surfaces for integrations and agents.
+The native iOS app is the primary surface: quick captures, daily notes, calendar-aware context, and Siri phrases such as "Tell Nudge" or "Log this in Nudge." The Cloudflare backend stores the source material, runs analysis, and exposes OpenAPI/MCP surfaces for integrations and agents.
 
 The web app is the companion surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development.
 
-Internally, Vesta keeps the model small and inspectable: Captures become Signals, Signals form Context, Frames define what Vesta is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
+Internally, Nudge keeps the model small and inspectable: Captures become Signals, Signals form Context, Frames define what Nudge is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
 
 The goal is not another chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks before it acts, and improves through evals.
 
@@ -31,7 +31,7 @@ The goal is not another chatbot. The goal is a private operating layer that reme
 | Surface               | What it is                                                                  |
 | --------------------- | --------------------------------------------------------------------------- |
 | **Native iOS app**    | SwiftUI app for journal capture, calendar context, Siri capture, and review |
-| **Siri App Intents**  | Voice capture phrases that post directly to the Vesta API                   |
+| **Siri App Intents**  | Voice capture phrases that post directly to the Nudge API                   |
 | **Web app / PWA**     | Companion surface for capture, review, actions, summaries, and settings     |
 | **OpenAPI + MCP API** | Integration surface for custom tools and agent workflows                    |
 
@@ -64,7 +64,7 @@ User / Integration
 
 What is live now:
 
-- Native iOS app source in `apps/ios/Vesta`, including Siri App Intents and local run instructions.
+- Native iOS app source in `apps/ios/Nudge`, including Siri App Intents and local run instructions.
 - Siri capture through `POST /api/voice/log`.
 - Mobile-first web captures, daily notes, and journal revisions.
 - User-owned Signals, notes, summaries, memory, and traces in D1/R2.
@@ -78,7 +78,7 @@ What is live now:
 - OpenAPI and MCP surfaces for custom integrations and agent tools.
 - Safe wide events and trace spans for debugging and evals.
 
-Model-backed extraction is narrow and draft-first. Vesta can suggest actions and memories, but behavior-changing automation stays reviewable before it becomes a commitment or external action.
+Model-backed extraction is narrow and draft-first. Nudge can suggest actions and memories, but behavior-changing automation stays reviewable before it becomes a commitment or external action.
 
 ## Quick Start
 
@@ -91,7 +91,7 @@ mkdir -p ~/.config/direnv
 cat > ~/.config/direnv/direnv.toml <<'EOF'
 [whitelist]
 prefix = [
-  "/path/to/your/vesta/worktree-parent",
+  "/path/to/your/nudge/worktree-parent",
 ]
 EOF
 exec zsh
@@ -99,7 +99,7 @@ exec zsh
 
 Also install [`mise`](https://mise.jdx.dev/) and authenticate Cloudflare/Wrangler
 for commands that use remote Cloudflare resources. The direnv whitelist lets every
-Vesta worktree under the configured parent load its `.envrc` without a separate
+Nudge worktree under the configured parent load its `.envrc` without a separate
 `direnv allow`.
 
 Per-worktree setup:
@@ -114,35 +114,35 @@ mise exec -- bun run dev
 If your shell already activates `mise`, the `mise exec --` prefix is optional.
 
 The checked-in `.envrc` loads a stable per-worktree development environment. By
-default each worktree gets a deterministic high-band `VESTA_DEV_PORT`,
-`VESTA_DEV_URL`, Wrangler inspector port, and local Wrangler state path so
+default each worktree gets a deterministic high-band `NUDGE_DEV_PORT`,
+`NUDGE_DEV_URL`, Wrangler inspector port, and local Wrangler state path so
 multiple dev stacks can run side by side. Use `.envrc.local` for untracked local
 overrides.
 
-`bun run dev` builds the web app, applies local D1 migrations, and starts the Vesta Worker with `wrangler dev` on the first available local port starting at `VESTA_DEV_PORT`.
+`bun run dev` builds the web app, applies local D1 migrations, and starts the Nudge Worker with `wrangler dev` on the first available local port starting at `NUDGE_DEV_PORT`.
 
 Then open:
 
-- App: `$VESTA_DEV_URL/`
-- Health: `$VESTA_DEV_URL/health`
-- API docs: `$VESTA_DEV_URL/api/docs`
-- OpenAPI spec: `$VESTA_DEV_URL/api/openapi.json`
+- App: `$NUDGE_DEV_URL/`
+- Health: `$NUDGE_DEV_URL/health`
+- API docs: `$NUDGE_DEV_URL/api/docs`
+- OpenAPI spec: `$NUDGE_DEV_URL/api/openapi.json`
 
 To run the iOS app:
 
 1. Keep `bun run dev` running from the repo root.
-2. Open `apps/ios/Vesta/Vesta.xcodeproj` in Xcode.
-3. Run the `Vesta` scheme on an iOS Simulator or device.
+2. Open `apps/ios/Nudge/Nudge.xcodeproj` in Xcode.
+3. Run the `Nudge Local` scheme on an iOS Simulator or device.
 4. If needed, update the Engine URL from the iOS app settings screen.
 
-See [`apps/ios/Vesta/README.md`](apps/ios/Vesta/README.md) for Siri phrases and device networking notes.
+See [`apps/ios/Nudge/README.md`](apps/ios/Nudge/README.md) for Siri phrases and device networking notes.
 
 ## Features
 
 |                   | Feature                     | Description                                                  |
 | ----------------- | --------------------------- | ------------------------------------------------------------ |
 | :iphone:          | **Native iOS app**          | SwiftUI app for capture, notes, calendar context, and Siri   |
-| :microphone:      | **Siri capture**            | App Intents for hands-free note logging into Vesta           |
+| :microphone:      | **Siri capture**            | App Intents for hands-free note logging into Nudge           |
 | :memo:            | **Captures**                | User or integration input recorded as source-linked Signals  |
 | :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload      |
 | :compass:         | **Frames**                  | Bounded questions like “What matters now?”                   |
@@ -169,7 +169,7 @@ brand assets for app UI and documentation.
 
 ```text
 +--------------------------------------------------+
-|                    Vesta Worker                  |
+|                    Nudge Worker                  |
 |       Cloudflare Worker - Hono - oRPC/OpenAPI     |
 +---------------------+----------------------------+
                       |
@@ -236,7 +236,7 @@ bun run traces:recent
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                                                                 |
 | **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                                                   |
-| **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Vesta` with Local, Staging, and Production schemes. Siri branding and phrase docs are covered by Bun tests. |
+| **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Nudge` with Local, Staging, and Production schemes. Siri branding and phrase docs are covered by Bun tests. |
 | **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow.                                    |
 
 ## Deployment
@@ -251,7 +251,7 @@ Run `bun run check` and `bun run test:e2e` before deploying. The deploy script r
 
 The current CI does not deploy the iOS app. To ship iOS from the repo, add a macOS release workflow that runs `xcodebuild archive`, signs with App Store Connect credentials, and uploads to TestFlight or App Store Connect.
 
-For physical-device QA, use the `Vesta Staging` Xcode scheme. It installs as `app.vesta.ios.staging` and points at `https://vesta-web-staging.teampitch.workers.dev`. Use `Vesta Production` only when validating the production backend at `https://vesta-web.teampitch.workers.dev`.
+For physical-device QA, use the `Nudge Staging` Xcode scheme. It installs as `app.nudge.ios.staging` and points at `https://nudge-web-staging.teampitch.workers.dev`. Use `Nudge Production` only when validating the production backend at `https://nudge-web.teampitch.workers.dev`.
 
 For explicit prototype deploys only:
 
@@ -278,7 +278,7 @@ Private project for now.
 
 <div align="center">
 <pre>
-Vesta — private context, source-linked memory,
+Nudge — private context, source-linked memory,
 and agents that ask before they act.
 </pre>
 </div>

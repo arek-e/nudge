@@ -7,6 +7,7 @@ import { mediaIdSchema, mediaObjectKey, storeMediaUpload } from "../media-storag
 import {
   addWideEventFields,
   type ObservabilityHonoEnv,
+  requestTraceHeaders,
   runWithRequestSpan,
   wideEventFieldsFrom,
 } from "../observability";
@@ -27,7 +28,7 @@ export function registerApiRoutes(
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "vesta.auth.provider": "clerk" }, name: "auth.current_user" },
+      { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
     if (!auth.user && !c.req.path.startsWith("/api/session")) {
@@ -49,6 +50,7 @@ export function registerApiRoutes(
         user,
         streamConversationId,
         input.data.message,
+        requestTraceHeaders(c),
       );
     }
 
@@ -102,6 +104,7 @@ export function registerApiRoutes(
             recordSpan,
             runEffect,
             session: auth,
+            traceHeaders: requestTraceHeaders(c),
             traceDb: appServices.traceDb,
             ...(appServices.turbopuffer ? { turbopuffer: appServices.turbopuffer } : {}),
             user,

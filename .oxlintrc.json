@@ -7,6 +7,7 @@
   },
   "rules": {
     "no-unused-vars": "warn",
+    "no-underscore-dangle": ["warn", { "allow": ["_id"] }],
     "import/no-duplicates": "error"
   },
   "ignorePatterns": ["node_modules/**", ".tsbuild/**", ".wrangler/**"]

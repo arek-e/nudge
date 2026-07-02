@@ -1,11 +1,11 @@
 import type { LocalMountBucketOptions } from "@cloudflare/sandbox";
 import type { OkfSandbox } from "./okf-sandbox";
-import type { VestaOkfSandboxFactoryInput } from "./Services/VestaApp";
+import type { NudgeOkfSandboxFactoryInput } from "./Services/NudgeApp";
 
 const localBucketOptions = { localBucket: true } satisfies LocalMountBucketOptions;
 
 export async function defaultOkfSandboxFactory(
-  input: VestaOkfSandboxFactoryInput,
+  input: NudgeOkfSandboxFactoryInput,
 ): Promise<OkfSandbox | null> {
   if (!input.env.OKF_SANDBOX) return null;
   const okfFiles = input.env.OKF_FILES;

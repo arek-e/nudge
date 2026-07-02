@@ -20,7 +20,7 @@ Tests should verify behavior, not implementation details. Prefer public seams su
 
 Use the project glossary in `CONTEXT.md` for test names, issue names, and domain language. Respect ADRs in `docs/adr/` before introducing architectural changes.
 
-Before changing app runtime layers, service seams, or module ownership, read `docs/architecture/layers-and-services.md`. It records what Vesta borrows from `pingdotgg/t3code` and what we intentionally do not copy.
+Before changing app runtime layers, service seams, or module ownership, read `docs/architecture/layers-and-services.md`. It records what Nudge borrows from `pingdotgg/t3code` and what we intentionally do not copy.
 
 Before implementing framework/tooling-specific code, check the relevant opencode reference and follow its current conventions:
 

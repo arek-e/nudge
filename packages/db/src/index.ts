@@ -27,7 +27,7 @@ import {
   users,
 } from "./schema";
 
-export type DatabaseProvider = "memory" | "d1" | "planetscale" | "turso" | "postgres";
+export type DatabaseProvider = "memory" | "d1" | "convex" | "planetscale" | "turso" | "postgres";
 
 export const createD1DrizzleDatabase = (database: D1Database) => drizzle(database, { schema });
 
@@ -1119,7 +1119,7 @@ const toMemoryRetrievalEventRecord = (row: typeof memoryRetrievalEvents.$inferSe
   createdAt: row.createdAt,
 });
 
-export class Db extends Context.Service<Db, DbService>()("vesta/db/Db") {
+export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
   static readonly layerMemory = Layer.effect(
     Db,
     Effect.sync(() => {

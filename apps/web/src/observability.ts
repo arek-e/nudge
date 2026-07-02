@@ -10,13 +10,18 @@ import {
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
+  parseTraceparent,
   persistTraceCacheEvent,
   persistTraceCacheSpan,
   pruneTraceCache,
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
   safeErrorFields,
-} from "@vesta/observability";
+  safeExceptionAttributes,
+  traceparentHeader,
+  type RuntimeTraceContext,
+  withRuntimeTraceContext,
+} from "@nudge/observability";
 import type { Env } from "./env";
 import {
   ensureBraintrustTracing,
@@ -33,23 +38,16 @@ type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;
 
 initLogger({
   drain: () => {},
-  env: { service: "vesta-web" },
+  env: { service: "nudge-web" },
   redact: true,
   silent: true,
 });
 
 declare module "hono" {
   interface ContextVariableMap {
-    traceContext?: RequestTraceContext;
+    traceContext?: RuntimeTraceContext;
     wideEvent?: Record<string, unknown>;
   }
-}
-
-interface RequestTraceContext {
-  readonly cacheable: boolean;
-  readonly parentSpanId: string | null;
-  readonly rootSpanId: string;
-  readonly traceId: string;
 }
 
 interface RequestSpanInput {
@@ -68,12 +66,6 @@ const now = () => {
 
 const requestId = (request: Request) => {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
-};
-
-const parseTraceparent = (value: string | null) => {
-  const match = value?.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/);
-  if (!match) return null;
-  return { flags: match[3], parentSpanId: match[2], traceId: match[1] };
 };
 
 const isTraceCacheRoute = (path: string) => path.startsWith("/api/traces");
@@ -122,21 +114,30 @@ export const requestObservability = (): AppMiddleware => {
     const incomingTrace = parseTraceparent(c.req.header("traceparent") ?? null);
     const traceId = incomingTrace?.traceId ?? createTraceId();
     const spanId = createSpanId();
+    const flags = incomingTrace?.flags ?? "01";
     const path = new URL(c.req.url).pathname;
     const cacheable = !isTraceCacheRoute(path);
 
     c.header("x-request-id", id);
-    c.header("traceparent", `00-${traceId}-${spanId}-${incomingTrace?.flags ?? "01"}`);
+    c.header("traceparent", traceparentHeader({ flags, spanId, traceId }));
     c.set("traceContext", {
       cacheable,
-      parentSpanId: incomingTrace?.parentSpanId ?? null,
+      environment: c.env.ENVIRONMENT ?? "unknown",
+      flags,
+      method: c.req.method,
+      parentSpanId: spanId,
+      path,
+      recordSpan: (row) => runBackgroundEffect(c, persistTraceSpanRow(c, row)),
+      requestId: id,
       rootSpanId: spanId,
+      service: "nudge-web",
       traceId,
+      version: c.env.APP_VERSION ?? "0.0.0",
     });
     c.set("wideEvent", {
       event: "http_request_completed",
       logKind: "wide_event",
-      service: "vesta-web",
+      service: "nudge-web",
       environment: c.env.ENVIRONMENT ?? "unknown",
       version: c.env.APP_VERSION ?? "0.0.0",
       requestId: id,
@@ -155,9 +156,9 @@ export const requestObservability = (): AppMiddleware => {
         {
           attributes: {
             "http.request.method": c.req.method,
-            "vesta.environment": c.env.ENVIRONMENT ?? "unknown",
-            "vesta.request_id": id,
-            "vesta.version": c.env.APP_VERSION ?? "0.0.0",
+            "nudge.environment": c.env.ENVIRONMENT ?? "unknown",
+            "nudge.request_id": id,
+            "nudge.version": c.env.APP_VERSION ?? "0.0.0",
             "url.path": path,
           },
           name: `${c.req.method} ${path}`,
@@ -170,6 +171,7 @@ export const requestObservability = (): AppMiddleware => {
         status: 500,
         outcome: "error",
         ...safeErrorFields(cause),
+        ...(cause instanceof Error && cause.stack ? { errorStack: cause.stack } : {}),
       });
       c.get("log").error(cause instanceof Error ? cause : new Error(String(cause)));
       c.res = Response.json({ error: "Internal Server Error" }, { status: 500 });
@@ -217,7 +219,7 @@ export const requestObservability = (): AppMiddleware => {
                     JSON.stringify({
                       event: "trace_cache_prune_failed",
                       logKind: "wide_event",
-                      service: "vesta-web",
+                      service: "nudge-web",
                       requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
                       ...safeErrorFields(cause),
                     }),
@@ -243,11 +245,12 @@ export const runWithRequestSpan = async <A>(
   input: RequestSpanInput,
   task: () => Promise<A>,
 ) => {
-  const traceContext = c.get("traceContext");
+  const traceContext = requestRuntimeTraceContext(c);
   const startedAt = now();
   const startedAtIso = new Date().toISOString();
   const spanId = createSpanId();
   let spanStatus: "ok" | "error" = "ok";
+  let failureAttributes: Readonly<Record<string, unknown>> = {};
 
   try {
     return await runBraintrustSpan(
@@ -262,12 +265,13 @@ export const runWithRequestSpan = async <A>(
     );
   } catch (cause) {
     spanStatus = "error";
+    failureAttributes = safeExceptionAttributes(cause);
     throw cause;
   } finally {
     if (traceContext?.cacheable && typeof c.env.DB?.prepare === "function") {
       const event = c.get("wideEvent") ?? {};
       const row = buildTraceSpanRow({
-        attributes: input.attributes ?? {},
+        attributes: { ...(input.attributes ?? {}), ...failureAttributes },
         durationMs: Number((now() - startedAt).toFixed(2)),
         endedAt: new Date().toISOString(),
         environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
@@ -280,7 +284,7 @@ export const runWithRequestSpan = async <A>(
         path: nullableStringField(event, "path"),
         requestId: nullableStringField(event, "requestId"),
         routeName: nullableStringField(event, "routeName"),
-        service: stringField(event, "service", "vesta-web"),
+        service: stringField(event, "service", "nudge-web"),
         spanId,
         startedAt: startedAtIso,
         status: spanStatus,
@@ -291,6 +295,25 @@ export const runWithRequestSpan = async <A>(
       runBackgroundEffect(c, persistTraceSpanRow(c, row));
     }
   }
+};
+
+export const withRequestTraceContext = <A, E, R>(c: AppContext, effect: Effect.Effect<A, E, R>) => {
+  const traceContext = requestRuntimeTraceContext(c);
+  return traceContext ? withRuntimeTraceContext(effect, traceContext) : effect;
+};
+
+export const requestTraceHeaders = (c: AppContext) => {
+  const traceContext = requestRuntimeTraceContext(c);
+  if (!traceContext) return {};
+
+  return {
+    traceparent: traceparentHeader({
+      flags: traceContext.flags,
+      spanId: traceContext.rootSpanId,
+      traceId: traceContext.traceId,
+    }),
+    ...(traceContext.requestId ? { "x-request-id": traceContext.requestId } : {}),
+  };
 };
 
 export const serverTiming = () => {
@@ -315,6 +338,24 @@ const numberField = (event: Record<string, unknown>, key: string) => {
   return typeof value === "number" ? value : null;
 };
 
+const requestRuntimeTraceContext = (c: AppContext): RuntimeTraceContext | null => {
+  const traceContext = c.get("traceContext");
+  if (!traceContext) return null;
+  const event = c.get("wideEvent") ?? {};
+
+  return {
+    ...traceContext,
+    environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
+    method: nullableStringField(event, "method"),
+    path: nullableStringField(event, "path"),
+    recordSpan: (row) => runBackgroundEffect(c, persistTraceSpanRow(c, row)),
+    requestId: nullableStringField(event, "requestId"),
+    routeName: nullableStringField(event, "routeName"),
+    service: stringField(event, "service", "nudge-web"),
+    version: stringField(event, "version", c.env.APP_VERSION ?? "0.0.0"),
+  };
+};
+
 const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
   if (typeof c.env.DB?.prepare !== "function") return Effect.void;
 
@@ -329,7 +370,7 @@ const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
           JSON.stringify({
             event: "trace_event_persist_failed",
             logKind: "wide_event",
-            service: "vesta-web",
+            service: "nudge-web",
             requestId: nullableStringField(event, "requestId"),
             ...safeErrorFields(cause),
           }),
@@ -367,7 +408,7 @@ const persistTraceSpanRow = (
           JSON.stringify({
             event: "trace_span_persist_failed",
             logKind: "wide_event",
-            service: "vesta-web",
+            service: "nudge-web",
             requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
             ...safeErrorFields(cause),
           }),
@@ -401,7 +442,7 @@ const runBackgroundPromise = (c: AppContext, promise: Promise<unknown>, failureE
       JSON.stringify({
         event: failureEvent,
         logKind: "wide_event",
-        service: "vesta-web",
+        service: "nudge-web",
         requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
         ...safeErrorFields(cause),
       }),

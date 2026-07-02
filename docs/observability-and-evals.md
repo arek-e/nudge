@@ -1,6 +1,6 @@
 # Observability and Evals
 
-Vesta currently emits one structured wide event per HTTP request through Worker `console.log`. In local development these logs appear in `wrangler dev`; in the deployed Worker they are readable live with `wrangler tail`.
+Nudge currently emits one structured wide event per HTTP request through Worker `console.log`. In local development these logs appear in `wrangler dev`; in the deployed Worker they are readable live with `wrangler tail`.
 
 Useful commands:
 
@@ -18,7 +18,7 @@ Trace/event persistence uses Wrangler-managed infrastructure:
 - D1 table `trace_spans` stores recent OpenTelemetry-shaped request spans for `/api/traces/recent`.
 - D1 tables `agent_runs`, `eval_runs`, and `eval_case_results` are provisioned for upcoming agent/eval loops.
 - D1 tables `daily_agent_runs` and `daily_agent_run_outputs` track note-analysis runs and generated outputs.
-- R2 bucket `vesta-trace-artifacts` is bound as `TRACE_ARTIFACTS` for larger redacted artifacts.
+- R2 bucket `nudge-trace-artifacts` is bound as `TRACE_ARTIFACTS` for larger redacted artifacts.
 
 Current limitations:
 

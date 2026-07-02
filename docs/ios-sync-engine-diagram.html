@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Vesta iOS Sync Engine Diagram</title>
+    <title>Nudge iOS Sync Engine Diagram</title>
     <script>
       (function () {
-        const saved = localStorage.getItem("vesta-ios-sync-diagram-theme");
+        const saved = localStorage.getItem("nudge-ios-sync-diagram-theme");
         const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
         document.documentElement.classList.toggle("dark", dark);
       })();
@@ -474,7 +474,7 @@
   <body>
     <div class="bar">
       <div class="title">
-        <h1>Vesta iOS sync engine</h1>
+        <h1>Nudge iOS sync engine</h1>
         <div class="sub">local commands up, canonical Engine facts down</div>
       </div>
       <div class="spacer"></div>
@@ -494,7 +494,7 @@
         viewBox="0 0 1560 980"
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Vesta iOS sync architecture diagram"
+        aria-label="Nudge iOS sync architecture diagram"
       >
         <defs>
           <marker
@@ -535,7 +535,7 @@
         </g>
         <g class="zone" id="zone-engine">
           <rect x="878" y="118" width="402" height="684" />
-          <text class="ztitle" x="902" y="150">Vesta Engine</text>
+          <text class="ztitle" x="902" y="150">Nudge Engine</text>
           <text class="zsub" x="902" y="170">
             owns behavior, review boundaries, and AI workflow state
           </text>
@@ -669,7 +669,7 @@
       </svg>
 
       <div class="src">
-        Vesta notes sync plan - GRDB, outbox, SyncCoordinator actor, Engine change feed
+        Nudge notes sync plan - GRDB, outbox, SyncCoordinator actor, Engine change feed
       </div>
 
       <div class="card" id="flowcap">
@@ -728,7 +728,7 @@
         mutations: {
           title: "Mutation endpoint",
           meta: "Engine command boundary",
-          body: "The Engine validates commands, ensures the user, writes canonical records, queues AI work if needed, and returns accepted mutation ids. This is where Vesta behavior stays.",
+          body: "The Engine validates commands, ensures the user, writes canonical records, queues AI work if needed, and returns accepted mutation ids. This is where Nudge behavior stays.",
         },
         d1: {
           title: "D1 canonical state",
@@ -862,7 +862,7 @@
       document.getElementById("themeToggle").addEventListener("click", () => {
         const dark = !document.documentElement.classList.contains("dark");
         document.documentElement.classList.toggle("dark", dark);
-        localStorage.setItem("vesta-ios-sync-diagram-theme", dark ? "dark" : "light");
+        localStorage.setItem("nudge-ios-sync-diagram-theme", dark ? "dark" : "light");
       });
     </script>
   </body>

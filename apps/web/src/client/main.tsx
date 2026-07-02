@@ -31,12 +31,12 @@ import {
   plainTextToRichTextDocument,
   type RichTextDocument,
   Surface,
-  VestaAppShell,
-  VestaChat,
-  type VestaChatAttachment,
-  type VestaChatMessage,
+  NudgeAppShell,
+  NudgeChat,
+  type NudgeChatAttachment,
+  type NudgeChatMessage,
   WritingDrawer,
-} from "@vesta/ui";
+} from "@nudge/ui";
 import { api } from "../../../../convex/_generated/api";
 import { apiClient, setSessionTokenResolver, streamConversationMessage } from "./api-client";
 import { dailyNoteDrawerText } from "./daily-note-drawer";
@@ -49,7 +49,7 @@ const convexUrl =
 const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = requiredClerkPublishableKey();
 const logoLongSrc =
-  import.meta.env.VITE_VESTA_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
+  import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
 
 type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
@@ -78,7 +78,7 @@ const noteTextFromPayload = (payload: unknown) => {
 function requiredClerkPublishableKey() {
   const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
   if (typeof value === "string" && value.startsWith("pk_")) return value;
-  throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Vesta");
+  throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
 }
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -133,7 +133,7 @@ declare module "@tanstack/react-router" {
 function AppShell() {
   const auth = useAuth();
   if (!auth.isLoaded) {
-    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Nudge" />;
   }
   if (!auth.isSignedIn) return <ClerkSignInScreen />;
   return <AuthenticatedAppShell />;
@@ -209,7 +209,7 @@ function AuthenticatedAppShell() {
   });
 
   if (!session.data) {
-    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Nudge" />;
   }
 
   return (
@@ -289,8 +289,8 @@ const chatMessageId = () => crypto.randomUUID();
 
 function ChatScreen() {
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<ReadonlyArray<VestaChatAttachment>>([]);
-  const [messages, setMessages] = useState<ReadonlyArray<VestaChatMessage>>([]);
+  const [attachments, setAttachments] = useState<ReadonlyArray<NudgeChatAttachment>>([]);
+  const [messages, setMessages] = useState<ReadonlyArray<NudgeChatMessage>>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -329,7 +329,7 @@ function ChatScreen() {
         queryClient.invalidateQueries({ queryKey: ["summaries"] }),
       ]);
     } catch {
-      setError("Could not reach Vesta. Try again.");
+      setError("Could not reach Nudge. Try again.");
       setMessages((current) => current.filter((item) => item.id !== assistantId));
     } finally {
       setSending(false);
@@ -337,7 +337,7 @@ function ChatScreen() {
   };
 
   return (
-    <VestaChat
+    <NudgeChat
       attachments={attachments}
       error={error}
       input={input}
@@ -402,7 +402,7 @@ function ActionsScreen() {
   });
 
   return (
-    <VestaAppShell>
+    <NudgeAppShell>
       <Surface eyebrow="AI" title="Actions" primary>
         <div className="mt-4 grid gap-3">
           {latestRun ? (
@@ -484,7 +484,7 @@ function ActionsScreen() {
           ))}
         </div>
       </Surface>
-    </VestaAppShell>
+    </NudgeAppShell>
   );
 }
 
@@ -499,7 +499,7 @@ function SettingsScreen() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `vesta-export-${new Date().toISOString()}.json`;
+      link.download = `nudge-export-${new Date().toISOString()}.json`;
       link.click();
       URL.revokeObjectURL(url);
     },
@@ -511,7 +511,7 @@ function SettingsScreen() {
     },
   });
   return (
-    <VestaAppShell>
+    <NudgeAppShell>
       <Surface eyebrow="Workspace" title={workspace?.label ?? "Workspace"}>
         <p className="summary">{sessionUser ? sessionUser.displayName : "Loading..."}</p>
       </Surface>
@@ -538,7 +538,7 @@ function SettingsScreen() {
           </button>
         </div>
       </Surface>
-    </VestaAppShell>
+    </NudgeAppShell>
   );
 }
 
@@ -566,7 +566,7 @@ function TodayScreen() {
   });
 
   return (
-    <VestaAppShell>
+    <NudgeAppShell>
       <HomeDashboard
         eventCount={events.data?.events.length ?? 0}
         hasJournalEntry={(convexDailyNote?.document?.bodyText.trim().length ?? 0) > 0}
@@ -597,7 +597,7 @@ function TodayScreen() {
           )}
         </div>
       </Surface>
-    </VestaAppShell>
+    </NudgeAppShell>
   );
 }
 
@@ -746,11 +746,11 @@ function JourneyScreen() {
   const groups = events.data ? deriveJourneyDayGroups(events.data.events) : undefined;
 
   return (
-    <VestaAppShell>
+    <NudgeAppShell>
       <Surface id="events-title" eyebrow="Loop history" title="Journey timeline">
         <JourneyTimeline groups={groups} loading={events.isLoading} error={events.isError} />
       </Surface>
-    </VestaAppShell>
+    </NudgeAppShell>
   );
 }
 
@@ -758,7 +758,7 @@ function InsightsScreen() {
   const summaries = useSummaries();
 
   return (
-    <VestaAppShell>
+    <NudgeAppShell>
       <Surface id="insights-title" eyebrow="Archive" title="Summaries">
         <div className="mt-4 grid gap-3">
           {(summaries.data?.summaries ?? []).map((summary) => (
@@ -772,7 +772,7 @@ function InsightsScreen() {
           ))}
         </div>
       </Surface>
-    </VestaAppShell>
+    </NudgeAppShell>
   );
 }
 
@@ -812,7 +812,7 @@ function useSession() {
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Missing #root element");
 
-function VestaConvexProvider(props: { readonly children: ReactNode }) {
+function NudgeConvexProvider(props: { readonly children: ReactNode }) {
   return (
     <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
       <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
@@ -847,7 +847,7 @@ function ClerkTokenBridge(props: { readonly children: ReactNode }) {
   }, [auth.getToken, auth.isLoaded, auth.isSignedIn]);
 
   if (!auth.isLoaded || readyState !== expectedState) {
-    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Vesta" />;
+    return <main className="min-h-dvh bg-[#111]" aria-label="Loading Nudge" />;
   }
 
   return <>{props.children}</>;
@@ -868,10 +868,10 @@ function ConvexUserMaterializer(props: { readonly children: ReactNode }) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <VestaConvexProvider>
+    <NudgeConvexProvider>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
-    </VestaConvexProvider>
+    </NudgeConvexProvider>
   </StrictMode>,
 );

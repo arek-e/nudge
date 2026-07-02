@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Db } from "@vesta/db";
-import { readHttpTelemetrySnapshot } from "@vesta/observability";
+import { Db } from "@nudge/db";
+import { readHttpTelemetrySnapshot } from "@nudge/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
@@ -11,7 +11,7 @@ const testWorkflow = {
 } as Workflow;
 const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
 const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
-const anonymousHeaders = { "x-vesta-anonymous-user-id": anonymousUserId };
+const anonymousHeaders = { "x-nudge-anonymous-user-id": anonymousUserId };
 const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
 const anonymousMcpHeaders = {
   ...anonymousJsonHeaders,
@@ -26,6 +26,8 @@ const env = {
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
   LOG_HTTP_REQUESTS: "false",
+  CONVEX_RUNTIME_SECRET: "test-runtime-secret",
+  CONVEX_URL: "https://grandiose-hamster-855.eu-west-1.convex.cloud",
   AI: testAi,
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
@@ -48,7 +50,7 @@ const createTraceDb = () => {
 };
 
 describe("web app", () => {
-  test("GET / serves the Vesta Daily Operating Loop app", async () => {
+  test("GET / serves the Nudge Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
     const body = await response.text();
@@ -57,8 +59,8 @@ describe("web app", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
     expect(body).toContain('rel="manifest"');
-    expect(body).toContain('href="/favicon.ico"');
-    expect(body).toContain('href="/favicon.svg"');
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('rel="apple-touch-icon"');
     expect(body).toContain('name="theme-color"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style"');
@@ -75,17 +77,18 @@ describe("web app", () => {
   });
 
   test("GET /health reports service and binding availability", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
       ok: true,
-      service: "vesta-web",
+      service: "nudge-web",
       environment: "test",
       version: "test-version",
       bindings: {
+        convex: true,
         d1: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
@@ -93,8 +96,24 @@ describe("web app", () => {
     });
   });
 
+  test("GET /health fails when Convex runtime store is not configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const { CONVEX_RUNTIME_SECRET: omittedRuntimeSecret, ...unwiredEnv } = env;
+    void omittedRuntimeSecret;
+    const response = await app.request("/health", {}, unwiredEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      ok: false,
+      bindings: {
+        convex: false,
+      },
+    });
+  });
+
   test("GET /manifest.webmanifest exposes PWA install metadata", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/manifest.webmanifest", {}, env);
 
     expect(response.status).toBe(200);
@@ -104,17 +123,17 @@ describe("web app", () => {
       display_override: ["standalone", "minimal-ui"],
       theme_color: "#1a2735",
       icons: [
-        expect.objectContaining({ sizes: "192x192", src: "/icons/icon-192.png" }),
-        expect.objectContaining({ sizes: "512x512", src: "/icons/icon-512.png" }),
-        expect.objectContaining({ src: "/icons/icon.svg" }),
+        expect.objectContaining({ sizes: "192x192", src: "/icons/nudge-app-icon-192.png" }),
+        expect.objectContaining({ sizes: "512x512", src: "/icons/nudge-app-icon-512.png" }),
+        expect.objectContaining({ src: "/icons/nudge-app-icon.svg" }),
       ],
       shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
   });
 
-  test("GET /icons/icon.svg serves the Nudge app icon", async () => {
-    const app = createApp();
-    const response = await app.request("/icons/icon.svg", {}, env);
+  test("GET /icons/nudge-app-icon.svg serves the Nudge app icon", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/icons/nudge-app-icon.svg", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -124,15 +143,15 @@ describe("web app", () => {
   });
 
   test("GET /offline.html serves a PWA offline fallback", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/offline.html", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("You are offline");
-    expect(body).toContain('href="/favicon.ico"');
-    expect(body).toContain('href="/favicon.svg"');
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
@@ -164,7 +183,7 @@ describe("web app", () => {
   });
 
   test("GET /health exposes request observability headers", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", { headers: { "cf-ray": "test-ray" } }, env);
 
     expect(response.status).toBe(200);
@@ -176,7 +195,7 @@ describe("web app", () => {
   test("GET /health continues valid incoming trace context", async () => {
     const incomingTraceId = "0af7651916cd43dd8448eb211c80319c";
     const incomingSpanId = "b7ad6b7169203331";
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/health",
@@ -191,7 +210,7 @@ describe("web app", () => {
   });
 
   test("GET /health records request telemetry meters", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const before = await readHttpTelemetrySnapshot();
 
     await app.request("/health", {}, env);
@@ -204,7 +223,7 @@ describe("web app", () => {
   });
 
   test("GET /health emits a wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -223,7 +242,7 @@ describe("web app", () => {
       expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
-        service: "vesta-web",
+        service: "nudge-web",
         environment: "test",
         version: "test-version",
         requestId: "test-ray",
@@ -244,7 +263,7 @@ describe("web app", () => {
   });
 
   test("GET /health persists a safe trace event", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const traceDb = createTraceDb();
 
     const response = await app.request(
@@ -260,7 +279,7 @@ describe("web app", () => {
       expect.any(String),
       "http_request_completed",
       "wide_event",
-      "vesta-web",
+      "nudge-web",
       "test",
       "test-version",
       "persisted-ray",
@@ -289,7 +308,7 @@ describe("web app", () => {
         }),
       }),
     } as D1Database;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/health",
@@ -309,7 +328,7 @@ describe("web app", () => {
       expect.any(String),
       expect.any(String),
       expect.any(Number),
-      "vesta-web",
+      "nudge-web",
       "test",
       "test-version",
       "span-ray",
@@ -376,7 +395,7 @@ describe("web app", () => {
         }),
       }),
     } as D1Database;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/traces/recent",
@@ -400,7 +419,7 @@ describe("web app", () => {
         }),
       }),
     } as D1Database;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
 
@@ -409,7 +428,7 @@ describe("web app", () => {
   });
 
   test("request errors still emit one wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -442,7 +461,7 @@ describe("web app", () => {
   });
 
   test("transient pressure errors return retry-after instead of generic failure", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -473,25 +492,25 @@ describe("web app", () => {
   });
 
   test("GET /api/version reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "vesta-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
 
   test("GET /api/version/ reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version/", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "vesta-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
@@ -516,7 +535,7 @@ describe("web app", () => {
     const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
-    expect(body.spokenResponse).toBe("Understood. I logged it to Vesta.");
+    expect(body.spokenResponse).toBe("Understood. I logged it to Nudge.");
     expect(body.route).toBe("capture_only");
     expect(body.capture).toMatchObject({
       idempotencyKey: "siri-log-1",
@@ -562,7 +581,7 @@ describe("web app", () => {
         };
       },
     } as D1Database;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/traces/recent",
@@ -623,7 +642,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -644,7 +663,7 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(loggedEvent).toMatchObject({
       agentTool: "listRecentSignals",
       routeName: "api.conversations",
@@ -694,7 +713,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -721,8 +740,8 @@ describe("web app", () => {
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
-    expect(forwardedRequests[0]!.headers.get("x-vesta-internal-signature")).toMatch(
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
     expect(loggedEvent).toMatchObject({
@@ -770,7 +789,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus",
@@ -782,7 +801,7 @@ describe("web app", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       userId: anonymousUserId,
@@ -817,7 +836,7 @@ describe("web app", () => {
                 id: "signal-1",
                 userId: anonymousUserId,
                 type: "manual_check_in_submitted",
-                source: "vesta_agent_intake",
+                source: "nudge_agent_intake",
                 occurredAt: "2026-06-12T10:00:00.000Z",
                 schemaVersion: 1,
                 payload: { note: "What should I do next?" },
@@ -857,7 +876,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages",
@@ -873,9 +892,9 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-display-name")).toBe("Anonymous User");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-display-name")).toBe("Anonymous User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
@@ -884,7 +903,7 @@ describe("web app", () => {
           id: "signal-1",
           userId: anonymousUserId,
           type: "manual_check_in_submitted",
-          source: "vesta_agent_intake",
+          source: "nudge_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
           schemaVersion: 1,
           payload: { note: "What should I do next?" },
@@ -941,7 +960,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages/stream",
@@ -957,8 +976,8 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
   });
@@ -1089,7 +1108,7 @@ describe("web app", () => {
       "/api/session",
       {
         headers: {
-          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       env,
@@ -1125,7 +1144,7 @@ describe("web app", () => {
       "/api/signals?limit=10",
       {
         headers: {
-          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       env,
@@ -1233,7 +1252,7 @@ describe("web app", () => {
     expect(calls).toHaveLength(1);
     const [url, init] = calls[0]!;
     expect(String(url)).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
     );
     expect(String(url)).not.toContain(anonymousUserId);
     expect(init?.method).toBe("DELETE");
@@ -1394,7 +1413,7 @@ describe("web app", () => {
           ...anonymousJsonHeaders,
           "cf-ray": "journal-ray",
           "content-type": "application/json",
-          "user-agent": "Vesta/1",
+          "user-agent": "Nudge/1",
         },
         body: JSON.stringify({
           bodyText: "I need to work on the guest list",
@@ -1425,14 +1444,14 @@ describe("web app", () => {
       "http.route": "api.journal",
       "http.response.status_code": 200,
       "url.path": "/api/journal",
-      "user_agent.original": "Vesta/1",
-      "service.name": "vesta-web",
+      "user_agent.original": "Nudge/1",
+      "service.name": "nudge-web",
       "deployment.environment.name": "test",
-      "vesta.debug_kind": "ai",
-      "vesta.ai.system": "cloudflare-think",
-      "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "vesta.ai.run_id": saved.analysisRun.id,
-      "vesta.ai.error_code": null,
+      "nudge.debug_kind": "ai",
+      "nudge.ai.system": "cloudflare-think",
+      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "nudge.ai.run_id": saved.analysisRun.id,
+      "nudge.ai.error_code": null,
     });
   });
 
@@ -2076,7 +2095,7 @@ describe("web app", () => {
     ).json();
 
     expect(response.status).toBe(200);
-    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Vesta.");
+    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Nudge.");
     expect(voiceLog.route).toBe("reasoning_candidate");
     expect(voiceLog.capture).toEqual(
       expect.objectContaining({
@@ -2435,7 +2454,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(spec.info).toEqual({
-      title: "Vesta API",
+      title: "Nudge API",
       version: "0.1.0",
     });
     expect(spec.paths["/events"].get).toMatchObject({
@@ -2479,6 +2498,6 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(body).toContain("Vesta API");
+    expect(body).toContain("Nudge API");
   });
 });

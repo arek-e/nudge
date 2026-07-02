@@ -13,7 +13,7 @@ export function setSessionTokenResolver(resolver: SessionTokenResolver | null) {
   sessionTokenResolver = resolver;
 }
 
-async function vestaRequestHeaders(input: HeadersInit = {}) {
+async function nudgeRequestHeaders(input: HeadersInit = {}) {
   const headers = new Headers(input);
   if (sessionTokenResolver) {
     const token = await sessionTokenResolver();
@@ -24,14 +24,14 @@ async function vestaRequestHeaders(input: HeadersInit = {}) {
   }
 
   const identityHeaders = anonymousIdentityHeaders();
-  headers.set("x-vesta-anonymous-user-id", identityHeaders["x-vesta-anonymous-user-id"]);
-  headers.set("x-vesta-client", identityHeaders["x-vesta-client"]);
+  headers.set("x-nudge-anonymous-user-id", identityHeaders["x-nudge-anonymous-user-id"]);
+  headers.set("x-nudge-client", identityHeaders["x-nudge-client"]);
   return headers;
 }
 
 const link = new OpenAPILink(apiContract, {
   fetch: async (request, init) => {
-    const headers = await vestaRequestHeaders(request.headers);
+    const headers = await nudgeRequestHeaders(request.headers);
     return fetch(new Request(request, { headers }), init);
   },
   url: () => `${window.location.origin}/api`,
@@ -44,7 +44,7 @@ export async function streamConversationMessage(input: {
   readonly conversationId: string;
   readonly message: string;
 }) {
-  const headers = await vestaRequestHeaders({ "content-type": "application/json" });
+  const headers = await nudgeRequestHeaders({ "content-type": "application/json" });
   const response = await fetch(
     `/api/conversations/${encodeURIComponent(input.conversationId)}/messages/stream`,
     {

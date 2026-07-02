@@ -16,6 +16,8 @@ export interface Env {
   CLERK_AUTHORIZED_PARTIES?: string;
   CLERK_PUBLISHABLE_KEY?: string;
   CLERK_SECRET_KEY?: string;
+  CONVEX_RUNTIME_SECRET?: string;
+  CONVEX_URL?: string;
   AI: Ai;
   EXTRACTION_MODEL?: string;
   THINK_MODEL: string;

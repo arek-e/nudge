@@ -19,7 +19,7 @@
       },
     },
     "apps/web": {
-      "name": "@vesta/web",
+      "name": "@nudge/web",
       "dependencies": {
         "@clerk/backend": "catalog:",
         "@clerk/react": "catalog:",
@@ -34,12 +34,13 @@
         "@orpc/zod": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@tanstack/react-router": "catalog:",
-        "@vesta/db": "workspace:*",
-        "@vesta/domain": "workspace:*",
-        "@vesta/effect-services": "workspace:*",
-        "@vesta/evals": "workspace:*",
-        "@vesta/observability": "workspace:*",
-        "@vesta/ui": "workspace:*",
+        "@nudge/db": "workspace:*",
+        "@nudge/db-convex": "workspace:*",
+        "@nudge/domain": "workspace:*",
+        "@nudge/effect-services": "workspace:*",
+        "@nudge/evals": "workspace:*",
+        "@nudge/observability": "workspace:*",
+        "@nudge/ui": "workspace:*",
         "agents": "catalog:",
         "ai": "catalog:",
         "braintrust": "3.20.0",
@@ -65,33 +66,42 @@
       },
     },
     "packages/db": {
-      "name": "@vesta/db",
+      "name": "@nudge/db",
       "dependencies": {
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
       },
     },
+    "packages/db-convex": {
+      "name": "@nudge/db-convex",
+      "dependencies": {
+        "@nudge/db": "workspace:*",
+        "@nudge/observability": "workspace:*",
+        "convex": "catalog:",
+        "effect": "catalog:",
+      },
+    },
     "packages/domain": {
-      "name": "@vesta/domain",
+      "name": "@nudge/domain",
     },
     "packages/effect-services": {
-      "name": "@vesta/effect-services",
+      "name": "@nudge/effect-services",
       "dependencies": {
-        "@vesta/db": "workspace:*",
-        "@vesta/domain": "workspace:*",
+        "@nudge/db": "workspace:*",
+        "@nudge/domain": "workspace:*",
         "effect": "catalog:",
       },
     },
     "packages/evals": {
-      "name": "@vesta/evals",
+      "name": "@nudge/evals",
       "dependencies": {
-        "@vesta/db": "workspace:*",
-        "@vesta/effect-services": "workspace:*",
+        "@nudge/db": "workspace:*",
+        "@nudge/effect-services": "workspace:*",
         "effect": "catalog:",
       },
     },
     "packages/observability": {
-      "name": "@vesta/observability",
+      "name": "@nudge/observability",
       "dependencies": {
         "braintrust": "3.20.0",
         "effect": "catalog:",
@@ -99,7 +109,7 @@
       },
     },
     "packages/ui": {
-      "name": "@vesta/ui",
+      "name": "@nudge/ui",
       "dependencies": {
         "@base-ui/react": "catalog:",
         "@platejs/basic-nodes": "catalog:",
@@ -950,19 +960,21 @@
 
     "@vercel/oidc": ["@vercel/oidc@3.2.0", "", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
 
-    "@vesta/db": ["@vesta/db@workspace:packages/db"],
+    "@nudge/db": ["@nudge/db@workspace:packages/db"],
 
-    "@vesta/domain": ["@vesta/domain@workspace:packages/domain"],
+    "@nudge/db-convex": ["@nudge/db-convex@workspace:packages/db-convex"],
 
-    "@vesta/effect-services": ["@vesta/effect-services@workspace:packages/effect-services"],
+    "@nudge/domain": ["@nudge/domain@workspace:packages/domain"],
 
-    "@vesta/evals": ["@vesta/evals@workspace:packages/evals"],
+    "@nudge/effect-services": ["@nudge/effect-services@workspace:packages/effect-services"],
 
-    "@vesta/observability": ["@vesta/observability@workspace:packages/observability"],
+    "@nudge/evals": ["@nudge/evals@workspace:packages/evals"],
 
-    "@vesta/ui": ["@vesta/ui@workspace:packages/ui"],
+    "@nudge/observability": ["@nudge/observability@workspace:packages/observability"],
 
-    "@vesta/web": ["@vesta/web@workspace:apps/web"],
+    "@nudge/ui": ["@nudge/ui@workspace:packages/ui"],
+
+    "@nudge/web": ["@nudge/web@workspace:apps/web"],
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 

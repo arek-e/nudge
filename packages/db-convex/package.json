@@ -1,0 +1,14 @@
+{
+  "name": "@nudge/db-convex",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@nudge/db": "workspace:*",
+    "@nudge/observability": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:"
+  }
+}
