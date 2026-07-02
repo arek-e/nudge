@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import HorizonCalendar
 import SwiftUI
 import UIKit
@@ -11,17 +12,22 @@ private enum CalendarStatsScope: String, CaseIterable, Identifiable {
 }
 
 struct TodayCalendarScreen: View {
-    @ObservedObject var model: VestaCaptureViewModel
+    let store: StoreOf<VestaCaptureFeature>
     @State private var scope = CalendarStatsScope.day
     @State private var selectedDate: String
 
-    init(model: VestaCaptureViewModel) {
-        self.model = model
-        _selectedDate = State(initialValue: model.todayLocalDate)
+    init(store: StoreOf<VestaCaptureFeature>) {
+        self.store = store
+        _selectedDate = State(initialValue: store.todayLocalDate)
     }
 
     var body: some View {
-        let snapshot = model.calendarStats(selectedDate: selectedDate)
+        let snapshot = CalendarStatsBuilder.makeDayStats(
+            days: store.calendarDays,
+            currentJournalDate: store.journal?.localDate,
+            dailyStreak: store.dailyStreak,
+            selectedDate: selectedDate
+        )
 
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
@@ -47,7 +53,7 @@ struct TodayCalendarScreen: View {
                         VestaActivityCalendar(
                             snapshot: snapshot,
                             selectedDate: $selectedDate,
-                            today: model.todayLocalDate
+                            today: store.todayLocalDate
                         )
                         .frame(height: 410)
                     case .week:
@@ -56,7 +62,7 @@ struct TodayCalendarScreen: View {
                         DailyCalendarTimelineView(
                             snapshot: snapshot,
                             selectedDate: $selectedDate,
-                            today: model.todayLocalDate
+                            today: store.todayLocalDate
                         )
                     }
                 }
@@ -68,7 +74,7 @@ struct TodayCalendarScreen: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
-        .task { await model.refreshContext() }
+        .task { await store.send(.refreshContext).finish() }
         .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle("Calendar")
         .navigationBarTitleDisplayMode(.inline)
@@ -79,17 +85,22 @@ struct TodayCalendarScreen: View {
 }
 
 struct StreakCalendarSheet: View {
-    @ObservedObject var model: VestaCaptureViewModel
+    let store: StoreOf<VestaCaptureFeature>
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDate: String
 
-    init(model: VestaCaptureViewModel) {
-        self.model = model
-        _selectedDate = State(initialValue: model.todayLocalDate)
+    init(store: StoreOf<VestaCaptureFeature>) {
+        self.store = store
+        _selectedDate = State(initialValue: store.todayLocalDate)
     }
 
     var body: some View {
-        let snapshot = model.calendarStats(selectedDate: selectedDate)
+        let snapshot = CalendarStatsBuilder.makeDayStats(
+            days: store.calendarDays,
+            currentJournalDate: store.journal?.localDate,
+            dailyStreak: store.dailyStreak,
+            selectedDate: selectedDate
+        )
 
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
@@ -106,7 +117,7 @@ struct StreakCalendarSheet: View {
                 VestaActivityCalendar(
                     snapshot: snapshot,
                     selectedDate: $selectedDate,
-                    today: model.todayLocalDate
+                    today: store.todayLocalDate
                 )
                 .frame(height: 390)
 
@@ -116,7 +127,7 @@ struct StreakCalendarSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
-        .task { await model.refreshContext() }
+        .task { await store.send(.refreshContext).finish() }
         .background(Color.appBackground.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }

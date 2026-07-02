@@ -1,4 +1,5 @@
 import AVFoundation
+import ComposableArchitecture
 import PencilKit
 import SwiftUI
 import UIKit
@@ -45,21 +46,21 @@ enum CaptureImagePickerSource: String, Identifiable {
 }
 
 struct CaptureCanvas: View {
-    @ObservedObject var model: VestaCaptureViewModel
+    @Bindable var store: StoreOf<VestaCaptureFeature>
     var focused: FocusState<CaptureFocusTarget?>.Binding
 
     var body: some View {
         let layout = CaptureWritingLayoutPolicy.evaluate(
-            hasAttachments: !model.attachments.isEmpty,
-            hasDraftText: !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            hasPendingResult: model.hasPendingResult,
-            stage: model.stage
+            hasAttachments: !store.attachments.isEmpty,
+            hasDraftText: !store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            hasPendingResult: store.hasPendingResult,
+            stage: store.stage
         )
 
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
-                    ForEach(model.retainedRows) { row in
+                    ForEach(store.retainedRows) { row in
                         RetainedCaptureRowView(row: row)
                     }
 
@@ -73,11 +74,11 @@ struct CaptureCanvas: View {
                         .id(CaptureScrollID.leadingDraft)
                     }
 
-                    if !model.attachments.isEmpty {
+                    if !store.attachments.isEmpty {
                         AttachmentPreviewRail(
-                            attachments: model.attachments,
-                            open: { model.openAttachment($0) },
-                            remove: { model.removeAttachment($0) }
+                            attachments: store.attachments,
+                            open: { store.send(.openAttachment($0)) },
+                            remove: { store.send(.removeAttachment($0)) }
                         )
                     }
 
@@ -91,8 +92,8 @@ struct CaptureCanvas: View {
                         .id(CaptureScrollID.continuationDraft)
                     }
 
-                    if !model.errorMessage.isEmpty {
-                        Text(model.errorMessage)
+                    if !store.errorMessage.isEmpty {
+                        Text(store.errorMessage)
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(Color.feedbackCritical)
                             .padding(.horizontal, 2)
@@ -105,16 +106,16 @@ struct CaptureCanvas: View {
             .onChange(of: focused.wrappedValue) { _, _ in
                 scrollToActiveField(proxy, layout: layout)
             }
-            .onChange(of: model.draft) { _, _ in
+            .onChange(of: store.draft) { _, _ in
                 scrollToActiveField(proxy, layout: layout)
             }
-            .onChange(of: model.trailingDraft) { _, _ in
+            .onChange(of: store.trailingDraft) { _, _ in
                 scrollToActiveField(proxy, layout: layout)
             }
-            .onChange(of: model.retainedRows.count) { _, _ in
+            .onChange(of: store.retainedRows.count) { _, _ in
                 scrollToActiveField(proxy, layout: layout)
             }
-            .onChange(of: model.stage) { _, _ in
+            .onChange(of: store.stage) { _, _ in
                 scrollToActiveField(proxy, layout: layout)
             }
         }
@@ -159,8 +160,8 @@ struct CaptureCanvas: View {
                 .submitLabel(target == .trailingDraft ? .return : .done)
                 .onSubmit {
                     Task {
-                        await model.submit()
-                        if model.shouldFocusContinuationDraft {
+                        await store.send(.submit).finish()
+                        if store.shouldFocusContinuationDraft {
                             focused.wrappedValue = .trailingDraft
                         }
                     }
@@ -181,15 +182,15 @@ struct CaptureCanvas: View {
 
     private var draftText: Binding<String> {
         Binding(
-            get: { model.draft },
-            set: { model.updateDraft($0) }
+            get: { store.draft },
+            set: { store.send(.draftChanged($0)) }
         )
     }
 
     private var trailingDraftText: Binding<String> {
         Binding(
-            get: { model.trailingDraft },
-            set: { model.updateTrailingDraft($0) }
+            get: { store.trailingDraft },
+            set: { store.send(.trailingDraftChanged($0)) }
         )
     }
 }
