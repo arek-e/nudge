@@ -63,7 +63,45 @@ const secondaryButtonClass =
 const eyebrowClass = "mb-2 text-[0.75rem] font-medium uppercase tracking-[0.12em] text-neutral-400";
 const summaryClass = "mt-4 text-[0.875rem] leading-[1.55] text-neutral-300";
 const cx = (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(" ");
-const vestaLogoSrc = "/icons/vesta-logo-dark.svg";
+
+export const nudgeLogoAssets = {
+  appIcon: "/icons/nudge-app-icon.svg",
+  appIconPng: "/icons/nudge-app-icon.png",
+  appIconTransparent: "/icons/nudge-app-icon-transparent.svg",
+  appIconTransparentPng: "/icons/nudge-app-icon-transparent-512.png",
+  lockup: "/icons/nudge-logo-lockup-blobby-n.svg",
+  lockupPng: "/icons/nudge-logo-lockup-blobby-n.png",
+  lockupTransparent: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+  lockupTransparentPng: "/icons/nudge-logo-lockup-blobby-n-transparent.png",
+} satisfies Record<string, string>;
+
+interface NudgeLogoImageProps {
+  readonly alt?: string;
+  readonly className?: string;
+  readonly decorative?: boolean;
+}
+
+export function NudgeLogoMark(props: NudgeLogoImageProps) {
+  return (
+    <img
+      className={props.className}
+      src={nudgeLogoAssets.appIconTransparent}
+      alt={props.decorative ? "" : (props.alt ?? "Nudge")}
+      aria-hidden={props.decorative ? true : undefined}
+    />
+  );
+}
+
+export function NudgeLogoLockup(props: NudgeLogoImageProps) {
+  return (
+    <img
+      className={props.className}
+      src={nudgeLogoAssets.lockupTransparent}
+      alt={props.decorative ? "" : (props.alt ?? "Nudge")}
+      aria-hidden={props.decorative ? true : undefined}
+    />
+  );
+}
 
 export interface EventListItem {
   readonly id: string;
@@ -347,9 +385,9 @@ export function DashboardHeader(props: { readonly title?: string }) {
     <header className="sticky top-0 z-2 flex items-center justify-between bg-gradient-to-b from-[#191919] to-[#19191900] py-3">
       <div>
         <div className="mb-2 flex items-center gap-2">
-          <img className="size-5" src={vestaLogoSrc} alt="" aria-hidden="true" />
+          <NudgeLogoMark className="size-5" decorative />
           <p className="m-0 text-[0.75rem] font-medium tracking-[0.12em] text-neutral-400 uppercase">
-            Vesta
+            Nudge
           </p>
         </div>
         <h1 className="m-0 max-w-[14ch] text-2xl leading-[1.04] font-medium tracking-[-0.035em] text-balance">
@@ -400,7 +438,7 @@ export function HomeDashboard(props: {
     >
       <div className="grid grid-cols-[2.25rem_1fr_2.25rem] items-center gap-3">
         <span className="grid size-8 place-content-center rounded-full" aria-hidden="true">
-          <img className="size-7" src={vestaLogoSrc} alt="" />
+          <NudgeLogoMark className="size-7" decorative />
         </span>
         <h1 className="m-0 max-w-none text-center text-base font-semibold tracking-[-0.03em] text-white lowercase">
           good afternoon.
@@ -1288,12 +1326,12 @@ export function VestaChat(props: {
         props.className,
       )}
     >
-      <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Vesta chat">
+      <section className="grid min-h-0 grid-rows-[auto_1fr_auto]" aria-label="Nudge chat">
         <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
           <div className="mb-1.5 flex items-center gap-2">
-            <img className="size-5" src={vestaLogoSrc} alt="" aria-hidden="true" />
+            <NudgeLogoMark className="size-5" decorative />
             <p className="m-0 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
-              Vesta
+              Nudge
             </p>
           </div>
           <h1 className="m-0 text-xl leading-tight font-semibold text-balance text-white">Chat</h1>
@@ -1403,7 +1441,7 @@ export function VestaChat(props: {
 
         <form
           className="bg-[#1a2735]/96 px-5 pt-3 pb-[max(0.85rem,env(safe-area-inset-bottom))] backdrop-blur-xl"
-          aria-label="Message Vesta"
+          aria-label="Message Nudge"
           onSubmit={(event) => {
             event.preventDefault();
             if (canSend) props.onSubmit();
@@ -1487,7 +1525,7 @@ export function VestaChat(props: {
               <textarea
                 className="max-h-40 min-h-18 resize-none border-0 bg-transparent p-0 text-[1rem] leading-6 text-white outline-none placeholder:text-neutral-500"
                 aria-label="Message"
-                placeholder="Message Vesta"
+                placeholder="Message Nudge"
                 rows={2}
                 value={props.input}
                 onChange={(event) => props.onInputChange(event.currentTarget.value)}

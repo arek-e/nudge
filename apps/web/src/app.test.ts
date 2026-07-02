@@ -99,7 +99,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      name: "Vesta",
+      name: "Nudge",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
       theme_color: "#1a2735",
@@ -112,15 +112,15 @@ describe("web app", () => {
     });
   });
 
-  test("GET /icons/icon.svg serves the Vesta app icon", async () => {
+  test("GET /icons/icon.svg serves the Nudge app icon", async () => {
     const app = createApp();
     const response = await app.request("/icons/icon.svg", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("image/svg+xml");
-    expect(body).toContain("Vesta app icon");
-    expect(body).toContain("#ec5c29");
+    expect(body).toContain("Nudge app icon");
+    expect(body).toContain("#f14f23");
   });
 
   test("GET /offline.html serves a PWA offline fallback", async () => {

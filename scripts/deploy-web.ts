@@ -60,7 +60,7 @@ const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = 
   staging: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
     VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
-    VITE_VESTA_LOGO_LONG_SRC: "/icons/vesta-logo-long-beta.svg",
+    VITE_VESTA_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
   },
 };
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];

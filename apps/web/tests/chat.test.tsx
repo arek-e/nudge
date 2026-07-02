@@ -27,7 +27,7 @@ describe("VestaChat", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Vesta chat"');
+    expect(html).toContain('aria-label="Nudge chat"');
     expect(html).toContain('data-slot="message-scroller"');
     expect(html).toContain("What should I do next?");
     expect(html).toContain("I drafted a reviewable next step.");
@@ -81,7 +81,7 @@ describe("VestaChat", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Message Vesta"');
+    expect(html).toContain('aria-label="Message Nudge"');
     expect(html).not.toContain("shadow-[0_-1px_0_rgba");
   });
 
@@ -97,7 +97,7 @@ describe("VestaChat", () => {
     );
 
     expect(html).toContain('data-slot="chat-composer-surface"');
-    expect(html).toContain('placeholder="Message Vesta"');
+    expect(html).toContain('placeholder="Message Nudge"');
     expect(html).toContain("bg-[#1d1d1d]");
     expect(html).toContain("text-white");
     expect(html).toContain('aria-label="Send message"');
