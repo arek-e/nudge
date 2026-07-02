@@ -11,21 +11,21 @@ function anonymousUserIdFrom(headers: Headers) {
 
 export async function resolveCurrentUser(input: {
   readonly app: VestaAppService;
-  readonly headers: Headers;
+  readonly request: Request;
 }): Promise<RequestSession> {
-  const session = await input.app.resolveSession({ env: input.app.env, headers: input.headers });
+  const session = await input.app.resolveSession({ env: input.app.env, request: input.request });
   if (session) {
     const user = {
       displayName: session.user.name ?? session.user.email ?? "Vesta User",
       id: session.user.id,
     };
     return {
-      authMode: "better-auth",
+      authMode: "clerk",
       user,
     };
   }
 
-  const anonymousUserId = anonymousUserIdFrom(input.headers);
+  const anonymousUserId = anonymousUserIdFrom(input.request.headers);
   if (anonymousUserId) {
     return {
       authMode: "anonymous",

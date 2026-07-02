@@ -1,7 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import {
   findAvailablePort,
-  localDevUrl,
   preferredDevPort,
   preferredInspectorPort,
   wranglerPersistTo,
@@ -17,8 +16,10 @@ const inspectorPort =
     ? undefined
     : await findAvailablePort({ preferredPort: preferredInspectorPort(devPort) });
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${devPort}`;
-const authUrl =
-  devPort === undefined ? undefined : (process.env.BETTER_AUTH_URL ?? localDevUrl(devPort));
+const clerkPublishableKey =
+  process.env.CLERK_PUBLISHABLE_KEY ??
+  process.env.VITE_CLERK_PUBLISHABLE_KEY ??
+  "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
 const persistTo = wranglerPersistTo(repoRoot);
 
 process.env.PLAYWRIGHT_BASE_URL = baseURL;
@@ -29,14 +30,14 @@ export default defineConfig({
   webServer: shouldStartWebServer
     ? {
         command: [
-          "bun run build",
+          `CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} VITE_CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} bun run build`,
           `wrangler d1 migrations apply DB --local --persist-to ${shellQuote(persistTo)}`,
           [
             "wrangler dev",
             `--port ${devPort}`,
             `--inspector-port ${inspectorPort}`,
             `--persist-to ${shellQuote(persistTo)}`,
-            `--var ${shellQuote(`BETTER_AUTH_URL:${authUrl}`)}`,
+            `--var ${shellQuote(`CLERK_PUBLISHABLE_KEY:${clerkPublishableKey}`)}`,
           ].join(" "),
         ].join(" && "),
         reuseExistingServer: false,

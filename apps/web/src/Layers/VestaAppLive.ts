@@ -23,7 +23,7 @@ export function makeVestaAppLayer(input: MakeVestaAppLayerInput) {
     Effect.gen(function* () {
       const db = yield* Db;
       const env = input.env;
-      const agentInternalSecret = env.AGENT_INTERNAL_SECRET ?? env.BETTER_AUTH_SECRET;
+      const agentInternalSecret = env.AGENT_INTERNAL_SECRET;
 
       return VestaApp.of({
         agentSessions: env.USER_AGENT_SESSION,
@@ -32,7 +32,6 @@ export function makeVestaAppLayer(input: MakeVestaAppLayerInput) {
         dailyAnalysisWorkflow: env.DAILY_DIGEST_WORKFLOW,
         db,
         env,
-        googleAuthConfigured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
         ...(env.MEDIA_FILES ? { mediaFiles: env.MEDIA_FILES } : {}),
         okfSandboxFor: async (user) => input.okfSandboxFactory({ env, user }),
         resolveSession: input.resolveSession,

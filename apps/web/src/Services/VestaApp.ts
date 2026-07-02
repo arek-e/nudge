@@ -27,7 +27,6 @@ export interface VestaAppService {
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
   readonly env: Env;
-  readonly googleAuthConfigured: boolean;
   readonly mediaFiles?: R2Bucket;
   readonly okfSandboxFor: (user: VestaUser) => Promise<OkfSandbox | null>;
   readonly resolveSession: AuthSessionResolver;

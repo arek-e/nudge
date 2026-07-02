@@ -5,7 +5,6 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
     await route.fulfill({
       contentType: "application/json",
       json: {
-        authMethods: { emailOtp: true, google: false, passkey: true },
         authMode: "unauthenticated",
         user: null,
         workspace: null,
@@ -33,14 +32,12 @@ test("today avatar opens account actions", async ({ page }) => {
       contentType: "application/json",
       json: signedOut
         ? {
-            authMethods: { emailOtp: true, google: false, passkey: true },
             authMode: "unauthenticated",
             user: null,
             workspace: null,
           }
         : {
-            authMethods: { emailOtp: true, google: false, passkey: true },
-            authMode: "better-auth",
+            authMode: "clerk",
             user: { displayName: "Lana", id: "auth-user-1" },
             workspace: { id: "auth-user-1", label: "Lana's workspace" },
           },
@@ -62,7 +59,7 @@ test("today avatar opens account actions", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Settings" }).tap();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByText("Lana's workspace")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add passkey" })).toBeVisible();
+  await expect(page.getByText("Clerk account")).toBeVisible();
 
   await page.goto("/");
   await page.getByRole("button", { name: "Account" }).tap();

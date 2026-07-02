@@ -213,7 +213,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     user: VestaUserRef,
     conversationId: string,
   ) {
-    const secret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+    const secret = this.env.AGENT_INTERNAL_SECRET;
     if (!secret) return true;
     const providedSignature = request.headers.get("x-vesta-internal-signature");
     if (!providedSignature) return false;
@@ -785,7 +785,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
         async () => {
           const agentId = this.env.USER_AGENT_SESSION.idFromName(`${input.userId}:journal`);
           const agent = this.env.USER_AGENT_SESSION.get(agentId);
-          const internalSecret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+          const internalSecret = this.env.AGENT_INTERNAL_SECRET;
           const internalSignature = internalSecret
             ? await signAgentRequest(internalSecret, input.userId, "journal")
             : undefined;

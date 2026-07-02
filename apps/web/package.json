@@ -21,8 +21,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "catalog:",
-    "@better-auth/passkey": "catalog:",
+    "@clerk/backend": "catalog:",
     "@clerk/react": "catalog:",
     "@cloudflare/sandbox": "catalog:",
     "@cloudflare/think": "catalog:",
@@ -43,7 +42,6 @@
     "@vesta/ui": "workspace:*",
     "agents": "catalog:",
     "ai": "catalog:",
-    "better-auth": "catalog:",
     "braintrust": "3.20.0",
     "convex": "catalog:",
     "drizzle-orm": "catalog:",

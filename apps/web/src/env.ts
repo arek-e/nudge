@@ -12,14 +12,10 @@ export interface Env {
   APP_VERSION?: string;
   LOG_HTTP_REQUESTS?: string;
   BRAINTRUST_API_KEY?: string;
-  BETTER_AUTH_SECRET?: string;
   AGENT_INTERNAL_SECRET?: string;
-  BETTER_AUTH_URL?: string;
-  BETTER_AUTH_ALLOW_SIGN_UP?: string;
-  AUTH_SEED_SECRET?: string;
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  SEND_EMAIL?: SendEmail;
+  CLERK_AUTHORIZED_PARTIES?: string;
+  CLERK_PUBLISHABLE_KEY?: string;
+  CLERK_SECRET_KEY?: string;
   AI: Ai;
   EXTRACTION_MODEL?: string;
   THINK_MODEL: string;

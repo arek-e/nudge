@@ -76,7 +76,7 @@ What is live now:
 - Durable `UserAgentSession` conversations with memory retrieval and reviewable loop drafts.
 - Memory indexing through the local memory index or Turbopuffer when configured.
 - Proposal review flows that become Commitments and close with Outcomes.
-- Better Auth sign-in in configured environments, including passkeys and optional Google.
+- Clerk sign-in for authenticated environments.
 - User data export and deletion.
 - OpenAPI and MCP surfaces for custom integrations and agent tools.
 - Safe wide events and trace spans for debugging and evals.
@@ -196,7 +196,7 @@ app shell.
 ```
 
 - **`apps/ios`**: native SwiftUI app, Siri App Intents, capture UI, calendar views, and local device docs.
-- **`apps/web`**: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Better Auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
+- **`apps/web`**: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Clerk auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
 - **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
 - **`packages/ui`**: shared React UI components and design tokens.
@@ -211,7 +211,7 @@ app shell.
 - Hono for Worker routing and middleware.
 - oRPC/OpenAPI for public API contracts and typed frontend clients.
 - React, TanStack Router, TanStack Query, TanStack Table, Motion.
-- Better Auth for email, passkey, and optional Google authentication.
+- Clerk for user authentication across the web app and Convex sync.
 - Effect v4 for services and dependency injection.
 - Drizzle over D1 behind an Effect `Db` port.
 - Bun, Mise, Oxfmt, Oxlint, Lefthook.

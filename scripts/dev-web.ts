@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import {
   findAvailablePort,
-  localDevUrl,
   preferredDevPort,
   preferredInspectorPort,
   wranglerPersistTo,
@@ -16,8 +15,8 @@ const port = await findAvailablePort({ preferredPort: preferredDevPort() });
 const inspectorPort = await findAvailablePort({ preferredPort: preferredInspectorPort(port) });
 const ip = "0.0.0.0";
 const url = `http://${ip}:${port}`;
-const authUrl = process.env.BETTER_AUTH_URL ?? localDevUrl(port);
 const persistTo = wranglerPersistTo(repoRoot);
+const clerkVarArgs = wranglerClerkVarArgs();
 const braintrustEnvFile = `${repoRoot}.env.braintrust`;
 const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
   ? ["--env-file", braintrustEnvFile]
@@ -26,7 +25,9 @@ const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
 await mkdir(logDir, { recursive: true });
 
 console.log(`Vesta dev server: ${url}`);
-console.log(`Vesta local auth URL: ${authUrl}`);
+console.log(
+  `Vesta Clerk publishable key: ${process.env.CLERK_PUBLISHABLE_KEY ? "configured" : "missing"}`,
+);
 console.log(`Vesta Wrangler state: ${persistTo}`);
 console.log(`Vesta local logs: ${logDir}`);
 
@@ -60,8 +61,7 @@ await run(
     String(inspectorPort),
     "--persist-to",
     persistTo,
-    "--var",
-    `BETTER_AUTH_URL:${authUrl}`,
+    ...clerkVarArgs,
     ...braintrustEnvArgs,
     ...process.argv.slice(2),
   ],
@@ -85,6 +85,16 @@ async function run(command: readonly string[], logName: string) {
   ]);
   log.end();
   if (exitCode !== 0) process.exit(exitCode);
+}
+
+function wranglerClerkVarArgs() {
+  const entries = [
+    ["CLERK_AUTHORIZED_PARTIES", process.env.CLERK_AUTHORIZED_PARTIES],
+    ["CLERK_PUBLISHABLE_KEY", process.env.CLERK_PUBLISHABLE_KEY],
+    ["CLERK_SECRET_KEY", process.env.CLERK_SECRET_KEY],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
 }
 
 async function tee(

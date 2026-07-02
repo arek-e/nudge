@@ -7,7 +7,7 @@ modules still earn that split case by case.
 ## What We Keep
 
 - `apps/web/src/app.ts` owns Hono app composition, middleware installation, runtime caching, and request context construction.
-- `apps/web/src/routes/` owns HTTP route registration by surface: static/PWA routes, Better Auth routes, and authenticated API middleware.
+- `apps/web/src/routes/` owns HTTP route registration by surface: static/PWA routes and authenticated API middleware.
 - `apps/web/src/api-router.ts` owns the oRPC/OpenAPI handler implementations. It is intentionally separate from Worker composition.
 - `apps/web/src/Services/VestaApp.ts` owns the `VestaApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
 - `apps/web/src/Layers/VestaAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
