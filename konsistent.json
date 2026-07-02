@@ -1,0 +1,113 @@
+{
+  "$schema": "node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "workspace-packages-have-basics",
+      "description": "Every workspace package keeps the common manifest, TypeScript config, and public source directory shape.",
+      "paths": "packages/{packageName}",
+      "must": {
+        "haveType": "directory",
+        "haveFiles": ["package.json", "tsconfig.json", "src"]
+      }
+    },
+    {
+      "name": "ts-packages-have-index",
+      "description": "Non-React packages expose their public package boundary from src/index.ts.",
+      "paths": ["packages/{packageName}", "!packages/ui"],
+      "must": {
+        "haveFiles": ["src/index.ts"]
+      }
+    },
+    {
+      "name": "ui-package-has-tsx-index",
+      "description": "The UI package exposes its React boundary from src/index.tsx and keeps its component registry.",
+      "paths": "packages/ui",
+      "must": {
+        "haveFiles": ["src/index.tsx", "components.json"]
+      }
+    },
+    {
+      "name": "package-source-avoids-parent-imports",
+      "description": "Package runtime source should depend through local siblings or package boundaries instead of parent-relative imports.",
+      "severity": "warning",
+      "paths": [
+        "packages/*/src/**/*.{ts,tsx}",
+        "!packages/*/src/**/*.test.ts",
+        "!packages/*/src/**/*.test.tsx",
+        "!packages/*/src/**/*.d.ts"
+      ],
+      "must": {
+        "importFromParents": false,
+        "importTypesFromParents": false
+      }
+    },
+    {
+      "name": "domain-runtime-stays-pure",
+      "description": "The domain package stays runtime-pure until a deliberate dependency boundary is chosen.",
+      "severity": "warning",
+      "paths": ["packages/domain/src/**/*.ts", "!packages/domain/src/**/*.test.ts"],
+      "must": {
+        "importFromExternals": false
+      }
+    },
+    {
+      "name": "web-route-registration",
+      "description": "Each web route module exports a registration function named after the route file.",
+      "paths": "apps/web/src/routes/{routeName}.ts",
+      "must": {
+        "exportFunctions": ["register${routeName.toPascalCase()}Routes"]
+      }
+    },
+    {
+      "name": "vesta-app-service",
+      "description": "The Worker runtime service seam keeps its public service, service shape, and runtime type exports.",
+      "paths": "apps/web/src/Services/VestaApp.ts",
+      "must": {
+        "exportClasses": ["VestaApp"],
+        "exportInterfaces": ["VestaAppService"],
+        "exportTypes": ["VestaAppRuntime"]
+      }
+    },
+    {
+      "name": "vesta-app-live-layer",
+      "description": "The live Worker layer keeps named composition functions instead of anonymous route setup.",
+      "paths": "apps/web/src/Layers/VestaAppLive.ts",
+      "must": {
+        "exportFunctions": [
+          "makeVestaAppLayer",
+          "makeVestaAppRuntime",
+          "resolveVestaApp",
+          "runVestaAppDbEffect"
+        ],
+        "exportTypes": ["VestaAppDbLayer"]
+      }
+    },
+    {
+      "name": "web-app-entry",
+      "description": "The Hono composition module keeps createApp as the public app factory.",
+      "paths": "apps/web/src/app.ts",
+      "must": {
+        "exportFunctions": ["createApp"]
+      }
+    },
+    {
+      "name": "db-service-anchor",
+      "description": "The persistence package keeps its Effect service and D1 factory as public anchors.",
+      "paths": "packages/db/src/index.ts",
+      "must": {
+        "exportClasses": ["Db"],
+        "exportConstants": ["createD1DrizzleDatabase"],
+        "exportInterfaces": ["DbService"]
+      }
+    },
+    {
+      "name": "memory-index-service-anchor",
+      "description": "The primitive services package keeps MemoryIndex as an explicit Effect service.",
+      "paths": "packages/effect-services/src/index.ts",
+      "must": {
+        "exportClasses": ["MemoryIndex"]
+      }
+    }
+  ]
+}
