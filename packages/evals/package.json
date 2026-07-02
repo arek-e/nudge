@@ -1,5 +1,5 @@
 {
-  "name": "@vesta/evals",
+  "name": "@nudge/evals",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,8 +9,8 @@
     "eval": "bun src/run.ts"
   },
   "dependencies": {
-    "@vesta/db": "workspace:*",
-    "@vesta/effect-services": "workspace:*",
+    "@nudge/db": "workspace:*",
+    "@nudge/effect-services": "workspace:*",
     "effect": "catalog:"
   }
 }

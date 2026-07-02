@@ -6,7 +6,7 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db, type AgentRunOutputRecord } from "@vesta/db";
+import { Db, type AgentRunOutputRecord } from "@nudge/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
@@ -14,7 +14,17 @@ import {
   PrimitiveWorkflows,
   workflowStepName,
   type WorkflowVersion,
-} from "@vesta/effect-services";
+} from "@nudge/effect-services";
+import {
+  createSpanId,
+  createTraceId,
+  parseTraceparent,
+  persistTraceCacheSpan,
+  traceparentHeader,
+  type RuntimeTraceContext,
+  type SqlInsertRow,
+  withRuntimeTraceContext,
+} from "@nudge/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
@@ -30,12 +40,94 @@ import {
   dailyNoteAnalysisHttpStatus,
   dailyNoteAnalysisResponseError,
 } from "./daily-note-analysis";
+import { resolveDbLayerForEnv } from "./db-layer";
 
 const app = createApp();
 const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText });
 const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
 
 export default app;
+
+const safeRecordSpan = (env: Env) => (row: SqlInsertRow) => {
+  if (typeof env.DB?.prepare !== "function") return;
+  const persistence = persistTraceCacheSpan(env.DB, row).pipe(Effect.catch(() => Effect.void));
+  void Effect.runPromise(persistence);
+};
+
+const runtimeTraceContextFromRequest = (
+  env: Env,
+  request: Request,
+  service: string,
+  routeName: string,
+): RuntimeTraceContext => {
+  const incomingTrace = parseTraceparent(request.headers.get("traceparent"));
+  const traceId = incomingTrace?.traceId ?? createTraceId();
+  const rootSpanId = createSpanId();
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const path = new URL(request.url).pathname;
+
+  return {
+    cacheable: true,
+    environment: env.ENVIRONMENT ?? "unknown",
+    flags: incomingTrace?.flags ?? "01",
+    method: request.method,
+    parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
+    path,
+    recordSpan: safeRecordSpan(env),
+    requestId,
+    rootSpanId,
+    routeName,
+    service,
+    traceId,
+    version: env.APP_VERSION ?? "0.0.0",
+  };
+};
+
+const runtimeTraceContextFromWorkflow = (
+  env: Env,
+  input: NudgeWorkflowParams,
+  routeName: string,
+): RuntimeTraceContext => {
+  const incomingTrace =
+    input.kind === "daily-note-analysis" ? parseTraceparent(input.traceparent ?? null) : null;
+  const traceId = incomingTrace?.traceId ?? createTraceId();
+  const rootSpanId = createSpanId();
+
+  return {
+    cacheable: true,
+    environment: env.ENVIRONMENT ?? "unknown",
+    flags: incomingTrace?.flags ?? "01",
+    method: "WORKFLOW",
+    parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
+    path: routeName,
+    recordSpan: safeRecordSpan(env),
+    requestId: input.kind === "daily-note-analysis" ? (input.requestId ?? null) : null,
+    rootSpanId,
+    routeName,
+    service: "nudge-workflow",
+    traceId,
+    version: env.APP_VERSION ?? "0.0.0",
+  };
+};
+
+const runRuntimeDbEffect = <A, E>(
+  env: Env,
+  traceContext: RuntimeTraceContext | undefined,
+  effect: Effect.Effect<A, E, Db>,
+) => {
+  const provided = Effect.provide(effect, resolveDbLayerForEnv(env));
+  if (traceContext) return Effect.runPromise(withRuntimeTraceContext(provided, traceContext));
+  return Effect.runPromise(provided);
+};
+
+const traceHeadersFromContext = (traceContext: RuntimeTraceContext) => ({
+  traceparent: traceparentHeader({
+    flags: traceContext.flags,
+    spanId: traceContext.rootSpanId,
+    traceId: traceContext.traceId,
+  }),
+  ...(traceContext.requestId ? { "x-request-id": traceContext.requestId } : {}),
+});
 
 interface UserAgentSessionState {
   readonly conversationId: string | null;
@@ -56,7 +148,7 @@ const recentToolEvent = (event: RecentToolEvent) => event;
 
 const agentRunOutput = (output: Pick<AgentRunOutputRecord, "outputId" | "outputType">) => output;
 
-interface VestaUserRef {
+interface NudgeUserRef {
   readonly displayName: string;
   readonly id: string;
 }
@@ -71,7 +163,8 @@ interface LoopIntakeDraftInput {
     readonly text: string;
   }>;
   readonly message: string;
-  readonly user: VestaUserRef;
+  readonly traceContext?: RuntimeTraceContext;
+  readonly user: NudgeUserRef;
 }
 
 interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
@@ -200,22 +293,22 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private resolveUser(request: Request) {
-    const id = request.headers.get("x-vesta-user-id");
+    const id = request.headers.get("x-nudge-user-id");
     if (!id) return null;
     return {
-      displayName: request.headers.get("x-vesta-user-display-name") ?? "Vesta User",
+      displayName: request.headers.get("x-nudge-user-display-name") ?? "Nudge User",
       id,
     };
   }
 
   private async verifyInternalRequest(
     request: Request,
-    user: VestaUserRef,
+    user: NudgeUserRef,
     conversationId: string,
   ) {
     const secret = this.env.AGENT_INTERNAL_SECRET;
     if (!secret) return true;
-    const providedSignature = request.headers.get("x-vesta-internal-signature");
+    const providedSignature = request.headers.get("x-nudge-internal-signature");
     if (!providedSignature) return false;
     const expectedSignature = await signAgentRequest(secret, user.id, conversationId);
     return providedSignature === expectedSignature;
@@ -231,7 +324,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async metadata(request: Request) {
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -254,21 +347,26 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async listRecentSignals(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.list_recent_signals",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 50);
-    const signals = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.listSignals({
-          user,
-          limit,
-        }),
-        Db.layerD1(this.env.DB),
-      ),
+    const signals = await runRuntimeDbEffect(
+      this.env,
+      traceContext,
+      PrimitiveWorkflows.listSignals({
+        user,
+        limit,
+      }),
     );
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -302,7 +400,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async retrieveMemory(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.retrieve_memory",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -326,11 +430,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
           region: this.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
         })
       : MemoryIndex.layerMemory;
-    const retrieved = await Effect.runPromise(
+    const retrieved = await runRuntimeDbEffect(
+      this.env,
+      traceContext,
       Effect.gen(function* () {
         const memoryIndex = yield* MemoryIndex;
         return yield* memoryIndex.retrieve({ limit, query, user });
-      }).pipe(Effect.provide(memoryIndexLayer), Effect.provide(Db.layerD1(this.env.DB))),
+      }).pipe(Effect.provide(memoryIndexLayer)),
     );
     const timestamp = now.toISOString();
 
@@ -358,7 +464,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async prepareReply(request: Request) {
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.reply",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -370,10 +482,16 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const now = new Date();
     const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
     const memoryResults = recentMemoryRetrievalsAt
-      ? await this.retrieveMemoryResults(user, message, 5)
+      ? await this.retrieveMemoryResults(user, message, 5, traceContext)
       : [];
     const intake = await this.subAgent(LoopIntakeThinkAgent, "current-state");
-    const draft = await intake.draftFromMessage({ conversationId, memoryResults, message, user });
+    const draft = await intake.draftFromMessage({
+      conversationId,
+      memoryResults,
+      message,
+      traceContext,
+      user,
+    });
     const timestamp = now.toISOString();
 
     this.setState({
@@ -458,10 +576,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         extraction = await runBraintrustSpan(
           {
             attributes: {
-              "vesta.ai.changed_text_chars": changedText.length,
-              "vesta.ai.local_date": localDate,
-              "vesta.ai.revision_id": String(body.revisionId ?? ""),
-              "vesta.ai.system": "cloudflare-think",
+              "nudge.ai.changed_text_chars": changedText.length,
+              "nudge.ai.local_date": localDate,
+              "nudge.ai.revision_id": String(body.revisionId ?? ""),
+              "nudge.ai.system": "cloudflare-think",
             },
             name: "journal.interpret.extract_daily_note",
             type: "task",
@@ -512,7 +630,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json(extraction);
   }
 
-  private async retrieveMemoryResults(user: VestaUserRef, query: string, limit: number) {
+  private async retrieveMemoryResults(
+    user: NudgeUserRef,
+    query: string,
+    limit: number,
+    traceContext?: RuntimeTraceContext,
+  ) {
     if (query.trim().length === 0) return [];
     try {
       const memoryIndexLayer = this.env.TURBOPUFFER_API_KEY
@@ -521,11 +644,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
             region: this.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
           })
         : MemoryIndex.layerMemory;
-      const retrieved = await Effect.runPromise(
+      const retrieved = await runRuntimeDbEffect(
+        this.env,
+        traceContext,
         Effect.gen(function* () {
           const memoryIndex = yield* MemoryIndex;
           return yield* memoryIndex.retrieve({ limit, query, user });
-        }).pipe(Effect.provide(memoryIndexLayer), Effect.provide(Db.layerD1(this.env.DB))),
+        }).pipe(Effect.provide(memoryIndexLayer)),
       );
       return [...retrieved.results];
     } catch (error) {
@@ -601,7 +726,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return result.toTextStreamResponse({
       headers: {
         "cache-control": "no-cache",
-        "x-vesta-conversation-id": input.conversationId,
+        "x-nudge-conversation-id": input.conversationId,
       },
     });
   }
@@ -627,31 +752,28 @@ export class LoopIntakeThinkAgent extends Think<Env> {
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
     const occurredAt = new Date().toISOString();
-    const signal = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.appendSignal({
-          idempotencyKey: `agent:${input.conversationId}:${input.message}`,
-          occurredAt,
-          payload: { note: input.message },
-          schemaVersion: 1,
-          source: "vesta_agent_intake",
-          type: "manual_check_in_submitted",
-          user: input.user,
-        }),
-        Db.layerD1(this.env.DB),
-      ),
+    const signal = await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.appendSignal({
+        idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+        occurredAt,
+        payload: { note: input.message },
+        schemaVersion: 1,
+        source: "nudge_agent_intake",
+        type: "manual_check_in_submitted",
+        user: input.user,
+      }),
     );
-    await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
-        Db.layerD1(this.env.DB),
-      ),
+    await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
     );
-    const proposals = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
-        Db.layerD1(this.env.DB),
-      ),
+    const proposals = await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
     );
     const proposal = proposals[0];
 
@@ -722,18 +844,20 @@ export interface DailyNoteAnalysisWorkflowParams {
   kind: "daily-note-analysis";
   localDate: string;
   noteId: string;
+  requestId?: string;
   revisionId: string;
   runId: string;
   title: string;
+  traceparent?: string;
   userDisplayName: string;
   userId: string;
   workflowVersion?: WorkflowVersion;
 }
 
-type VestaWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
+type NudgeWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
 
-export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowParams> {
-  async run(event: WorkflowEvent<VestaWorkflowParams>, step: WorkflowStep) {
+export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowParams> {
+  async run(event: WorkflowEvent<NudgeWorkflowParams>, step: WorkflowStep) {
     const input = event.payload;
     const workflowVersion = input.workflowVersion ?? currentWorkflowVersion;
 
@@ -759,21 +883,25 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
     workflowVersion: WorkflowVersion,
     step: WorkflowStep,
   ) {
+    const traceContext = runtimeTraceContextFromWorkflow(
+      this.env,
+      input,
+      "workflow.daily_note_analysis",
+    );
     await step.do(
       workflowStepName(workflowVersion, "daily-note-analysis-mark-running"),
       durableWorkflowStepConfig,
       async () => {
-        await Effect.runPromise(
-          Effect.provide(
-            Effect.gen(function* () {
-              const database = yield* Db;
-              yield* database.markAgentRunRunning({
-                runId: input.runId,
-                userId: input.userId,
-              });
-            }),
-            Db.layerD1(this.env.DB),
-          ),
+        await runRuntimeDbEffect(
+          this.env,
+          traceContext,
+          Effect.gen(function* () {
+            const database = yield* Db;
+            yield* database.markAgentRunRunning({
+              runId: input.runId,
+              userId: input.userId,
+            });
+          }),
         );
       },
     );
@@ -790,7 +918,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
             ? await signAgentRequest(internalSecret, input.userId, "journal")
             : undefined;
           const response = await agent.fetch(
-            new Request("https://vesta.local/journal/interpret", {
+            new Request("https://nudge.local/journal/interpret", {
               body: JSON.stringify({
                 changedText: input.changedText,
                 documentId: input.documentId,
@@ -799,10 +927,11 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
               }),
               headers: {
                 "content-type": "application/json",
-                "x-vesta-conversation-id": "journal",
-                ...(internalSignature ? { "x-vesta-internal-signature": internalSignature } : {}),
-                "x-vesta-user-display-name": input.userDisplayName,
-                "x-vesta-user-id": input.userId,
+                ...traceHeadersFromContext(traceContext),
+                "x-nudge-conversation-id": "journal",
+                ...(internalSignature ? { "x-nudge-internal-signature": internalSignature } : {}),
+                "x-nudge-user-display-name": input.userDisplayName,
+                "x-nudge-user-id": input.userId,
               },
               method: "POST",
             }),
@@ -827,114 +956,107 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
         workflowStepName(workflowVersion, "daily-note-analysis-persist-results"),
         durableWorkflowStepConfig,
         async () => {
-          const layer = Db.layerD1(this.env.DB);
           const extractedItems = await Promise.all(
             extraction.items.map(async (extracted) =>
-              Effect.runPromise(
-                Effect.provide(
-                  Effect.gen(function* () {
-                    const database = yield* Db;
-                    const item = yield* database.upsertExtractedItem({
-                      body: extracted.body,
-                      confidence: extracted.confidence ?? 0.74,
-                      dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
-                      ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
-                      ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
-                      ...(extracted.eventStartsAt
-                        ? { eventStartsAt: extracted.eventStartsAt }
-                        : {}),
-                      kind: extracted.kind,
-                      metadata: { extractor: "cloudflare-think" },
-                      ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
-                      sourceNoteId: input.noteId,
-                      sourceRevisionId: input.revisionId,
-                      status: "proposed",
-                      title: extracted.title,
-                      userId: input.userId,
-                    });
-                    yield* database.recordItemEvent({
-                      eventType: "created",
-                      itemId: item.id,
-                      payload: { sourceRevisionId: input.revisionId },
-                      userId: input.userId,
-                    });
-                    yield* database.upsertMemoryDocument({
-                      bodyText: `${item.title}\n${item.body}`,
-                      localDate: input.localDate,
-                      sourceId: item.id,
-                      sourceType: "extracted_item",
-                      title: item.title,
-                      userId: input.userId,
-                    });
-                    return item;
-                  }),
-                  layer,
-                ),
+              runRuntimeDbEffect(
+                this.env,
+                traceContext,
+                Effect.gen(function* () {
+                  const database = yield* Db;
+                  const item = yield* database.upsertExtractedItem({
+                    body: extracted.body,
+                    confidence: extracted.confidence ?? 0.74,
+                    dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
+                    ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
+                    ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
+                    ...(extracted.eventStartsAt ? { eventStartsAt: extracted.eventStartsAt } : {}),
+                    kind: extracted.kind,
+                    metadata: { extractor: "cloudflare-think" },
+                    ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
+                    sourceNoteId: input.noteId,
+                    sourceRevisionId: input.revisionId,
+                    status: "proposed",
+                    title: extracted.title,
+                    userId: input.userId,
+                  });
+                  yield* database.recordItemEvent({
+                    eventType: "created",
+                    itemId: item.id,
+                    payload: { sourceRevisionId: input.revisionId },
+                    userId: input.userId,
+                  });
+                  yield* database.upsertMemoryDocument({
+                    bodyText: `${item.title}\n${item.body}`,
+                    localDate: input.localDate,
+                    sourceId: item.id,
+                    sourceType: "extracted_item",
+                    title: item.title,
+                    userId: input.userId,
+                  });
+                  return item;
+                }),
               ),
             ),
           );
-          const dailySummary = await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                return yield* database.upsertSummaryDocument({
-                  body:
-                    extraction.dailySummary ??
-                    dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
-                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                  periodEnd: input.localDate,
-                  periodStart: input.localDate,
-                  periodType: "day",
-                  sourceItemIds: extractedItems.map((item) => item.id),
-                  sourceNoteIds: [input.noteId],
-                  status: "ready",
-                  title: `${input.localDate} summary`,
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
+          const dailySummary = await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            Effect.gen(function* () {
+              const database = yield* Db;
+              return yield* database.upsertSummaryDocument({
+                body:
+                  extraction.dailySummary ??
+                  dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
+                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
+                periodEnd: input.localDate,
+                periodStart: input.localDate,
+                periodType: "day",
+                sourceItemIds: extractedItems.map((item) => item.id),
+                sourceNoteIds: [input.noteId],
+                status: "ready",
+                title: `${input.localDate} summary`,
+                userId: input.userId,
+              });
+            }),
           );
           const week = weekRangeFor(input.localDate);
-          const weeklySummary = await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                return yield* database.upsertSummaryDocument({
-                  body: `Week so far: ${dailySummary.body}`,
-                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                  periodEnd: week.end,
-                  periodStart: week.start,
-                  periodType: "week",
-                  sourceItemIds: extractedItems.map((item) => item.id),
-                  sourceNoteIds: [input.noteId],
-                  status: "ready",
-                  title: `${week.start} week summary`,
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
+          const weeklySummary = await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            Effect.gen(function* () {
+              const database = yield* Db;
+              return yield* database.upsertSummaryDocument({
+                body: `Week so far: ${dailySummary.body}`,
+                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
+                periodEnd: week.end,
+                periodStart: week.start,
+                periodType: "week",
+                sourceItemIds: extractedItems.map((item) => item.id),
+                sourceNoteIds: [input.noteId],
+                status: "ready",
+                title: `${week.start} week summary`,
+                userId: input.userId,
+              });
+            }),
           );
-          await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                yield* database.completeAgentRun({
-                  outputs: [
-                    ...extractedItems.map((item) =>
-                      agentRunOutput({ outputId: item.id, outputType: "extracted_item" }),
-                    ),
-                    agentRunOutput({ outputId: dailySummary.id, outputType: "summary" }),
-                    agentRunOutput({ outputId: weeklySummary.id, outputType: "summary" }),
-                  ],
-                  runId: input.runId,
-                  status: "completed",
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
+          await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            Effect.gen(function* () {
+              const database = yield* Db;
+              yield* database.completeAgentRun({
+                outputs: [
+                  ...extractedItems.map((item) =>
+                    agentRunOutput({ outputId: item.id, outputType: "extracted_item" }),
+                  ),
+                  agentRunOutput({ outputId: dailySummary.id, outputType: "summary" }),
+                  agentRunOutput({ outputId: weeklySummary.id, outputType: "summary" }),
+                ],
+                runId: input.runId,
+                status: "completed",
+                userId: input.userId,
+              });
+            }),
           );
           console.info(
             JSON.stringify({
@@ -955,19 +1077,18 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, VestaWorkflowPa
         workflowStepName(workflowVersion, "daily-note-analysis-mark-failed"),
         durableWorkflowStepConfig,
         async () => {
-          await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                yield* database.completeAgentRun({
-                  errorCode,
-                  runId: input.runId,
-                  status: "failed",
-                  userId: input.userId,
-                });
-              }),
-              Db.layerD1(this.env.DB),
-            ),
+          await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            Effect.gen(function* () {
+              const database = yield* Db;
+              yield* database.completeAgentRun({
+                errorCode,
+                runId: input.runId,
+                status: "failed",
+                userId: input.userId,
+              });
+            }),
           );
           console.warn(
             JSON.stringify({

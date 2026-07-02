@@ -1,5 +1,5 @@
 {
-  "name": "@vesta/db",
+  "name": "@nudge/db",
   "private": true,
   "type": "module",
   "exports": {

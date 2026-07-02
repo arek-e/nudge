@@ -1,4 +1,4 @@
-const anonymousUserStorageKey = "vesta.anonymousUserID";
+const anonymousUserStorageKey = "nudge.anonymousUserID";
 
 export function generatedAnonymousUserId(randomUUID: () => string = crypto.randomUUID) {
   return `anon_${randomUUID().toLowerCase()}`;
@@ -16,7 +16,7 @@ export function anonymousUserId() {
 
 export function anonymousIdentityHeaders() {
   return {
-    "x-vesta-anonymous-user-id": anonymousUserId(),
-    "x-vesta-client": "web",
+    "x-nudge-anonymous-user-id": anonymousUserId(),
+    "x-nudge-client": "web",
   };
 }

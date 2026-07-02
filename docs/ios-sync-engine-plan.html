@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Vesta iOS Sync Engine Plan</title>
+    <title>Nudge iOS Sync Engine Plan</title>
     <script>
       (function () {
-        const saved = localStorage.getItem("vesta-ios-sync-plan-theme");
+        const saved = localStorage.getItem("nudge-ios-sync-plan-theme");
         const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
         document.documentElement.classList.toggle("dark", dark);
       })();
@@ -788,7 +788,7 @@
   <body>
     <div class="topbar">
       <div class="brand">
-        <strong>Vesta iOS Sync</strong>
+        <strong>Nudge iOS Sync</strong>
         <span>Convex spike + durable GRDB offline writes</span>
       </div>
       <div class="spacer"></div>
@@ -811,8 +811,8 @@
         <div class="eyebrow">Implementation plan</div>
         <h1>Validate Convex before building our own iOS sync engine.</h1>
         <p class="lead">
-          Your note is safe immediately on this device. Vesta syncs it when possible. AI starts only
-          after the backend receives it. Because Vesta is still early, first run a Convex spike to
+          Your note is safe immediately on this device. Nudge syncs it when possible. AI starts only
+          after the backend receives it. Because Nudge is still early, first run a Convex spike to
           see whether Convex can own canonical notes, typed mutations, subscriptions, storage, and
           AI job state while GRDB preserves durable offline writes on iOS.
         </p>
@@ -893,7 +893,7 @@
                 <dt>Copy</dt>
                 <dd>
                   <code>Saved on this device</code>, <code>Pending sync</code>,
-                  <code>Synced to Vesta</code>, <code>Needs retry</code>
+                  <code>Synced to Nudge</code>, <code>Needs retry</code>
                 </dd>
               </div>
             </dl>
@@ -913,7 +913,7 @@
               <div>
                 <dt>Copy</dt>
                 <dd>
-                  <code>Not reviewed yet</code>, <code>Vesta is reviewing this</code>,
+                  <code>Not reviewed yet</code>, <code>Nudge is reviewing this</code>,
                   <code>Review ready</code>, <code>Analysis failed</code>
                 </dd>
               </div>
@@ -930,7 +930,7 @@
         <p class="sec-intro">
           Treat Convex as a candidate source-of-truth platform, not just an iOS helper. The spike
           should prove whether Convex can replace most of the custom sync contract while GRDB still
-          gives Vesta the hard offline guarantee: edits survive app restart before the network
+          gives Nudge the hard offline guarantee: edits survive app restart before the network
           returns.
         </p>
 
@@ -962,7 +962,7 @@
               <li>Can Convex mutations cleanly apply, rebase, or reject note patches?</li>
               <li>Can AI job state fit naturally in Convex without splitting ownership badly?</li>
               <li>
-                Does this reduce Vesta Engine complexity instead of creating a second backend brain?
+                Does this reduce Nudge Engine complexity instead of creating a second backend brain?
               </li>
             </ul>
           </div>
@@ -1068,7 +1068,7 @@
             <div class="control-cell"><strong>Reconnect mutation drain</strong></div>
             <div class="control-cell">
               Reconnecting sends the pending patch to Convex once and marks the local row
-              <code>Synced to Vesta</code>.
+              <code>Synced to Nudge</code>.
             </div>
             <div class="control-cell">Convex mutations can be the remote command target.</div>
             <div class="control-cell">
@@ -1105,7 +1105,7 @@
             <div class="control-cell"><strong>AI state</strong></div>
             <div class="control-cell">
               Server schedules or records an AI review, then iOS sees
-              <code>Vesta is reviewing this</code> and <code>Review ready</code>.
+              <code>Nudge is reviewing this</code> and <code>Review ready</code>.
             </div>
             <div class="control-cell">
               Convex can own at least note-adjacent AI lifecycle state.
@@ -1147,7 +1147,7 @@
             </div>
             <div class="control-cell">
               Build <code>sync_changes</code>, command receipts, patch merge, and AI feed seam in
-              Vesta Engine.
+              Nudge Engine.
             </div>
           </div>
           <div class="control-row">
@@ -1156,7 +1156,7 @@
               Convex is strong for notes but AI/memory must stay in Cloudflare for clear reasons.
             </div>
             <div class="control-cell">
-              Convex owns canonical note state; Vesta Engine consumes note events and owns derived
+              Convex owns canonical note state; Nudge Engine consumes note events and owns derived
               AI/memory state.
             </div>
             <div class="control-cell">
@@ -1189,7 +1189,7 @@
           <div class="control-row">
             <div class="control-cell"><strong>Split-brain backend</strong></div>
             <div class="control-cell">
-              Vesta could end up with note truth in Convex and AI truth in Cloudflare without a
+              Nudge could end up with note truth in Convex and AI truth in Cloudflare without a
               clear boundary.
             </div>
             <div class="control-cell">
@@ -1233,7 +1233,7 @@
             <div class="control-cell">Domain</div>
             <div class="control-cell">Best fit</div>
             <div class="control-cell">Why</div>
-            <div class="control-cell">Vesta use cases</div>
+            <div class="control-cell">Nudge use cases</div>
           </div>
           <div class="control-row">
             <div class="control-cell"><strong>Local offline edits</strong></div>
@@ -1272,7 +1272,7 @@
             <div class="control-cell"><strong>AI orchestration</strong></div>
             <div class="control-cell">Cloudflare Workers / Agents / Workflows</div>
             <div class="control-cell">
-              Vesta already has agent sessions, durable workflows, Think, tool boundaries, OKF, MCP,
+              Nudge already has agent sessions, durable workflows, Think, tool boundaries, OKF, MCP,
               and observability here.
             </div>
             <div class="control-cell">
@@ -1304,7 +1304,7 @@
           </div>
         </div>
 
-        <div class="control-table" aria-label="Realtime Vesta use cases">
+        <div class="control-table" aria-label="Realtime Nudge use cases">
           <div class="control-row risk-head">
             <div class="control-cell">Realtime use case</div>
             <div class="control-cell">Why Convex is interesting</div>
@@ -1412,9 +1412,9 @@
         <div class="control-table" aria-label="Convex-style target model">
           <div class="control-row risk-head">
             <div class="control-cell">Reference model</div>
-            <div class="control-cell">What Vesta copies</div>
-            <div class="control-cell">What Vesta adds</div>
-            <div class="control-cell">What Vesta avoids</div>
+            <div class="control-cell">What Nudge copies</div>
+            <div class="control-cell">What Nudge adds</div>
+            <div class="control-cell">What Nudge avoids</div>
           </div>
           <div class="control-row">
             <div class="control-cell"><strong>Convex-like</strong></div>
@@ -1437,7 +1437,7 @@
               projections.
             </div>
             <div class="control-cell">
-              Vesta-specific command semantics, AI lifecycle changes, and review boundaries.
+              Nudge-specific command semantics, AI lifecycle changes, and review boundaries.
             </div>
             <div class="control-cell">
               Generic bidirectional table replication for sensitive derived AI state.
@@ -1647,7 +1647,7 @@ create table attachment_uploads (
             </div>
           </div>
           <div class="lane">
-            <div class="head">Vesta Engine</div>
+            <div class="head">Nudge Engine</div>
             <div class="body">
               <div class="step gold">Upsert journal and daily note.</div>
               <div class="step gold">Create note revision and queue agent run.</div>
@@ -2140,13 +2140,13 @@ create table attachment_uploads (
             <strong>Per note or capture</strong>
             <p>
               Show <code>Saved on this device</code>, <code>Pending sync</code>,
-              <code>Synced to Vesta</code>, or <code>Needs retry</code>.
+              <code>Synced to Nudge</code>, or <code>Needs retry</code>.
             </p>
           </div>
           <div class="callout">
             <strong>AI processing state</strong>
             <p>
-              Show <code>Not reviewed yet</code>, <code>Vesta is reviewing this</code>,
+              Show <code>Not reviewed yet</code>, <code>Nudge is reviewing this</code>,
               <code>Review ready</code>, or <code>Analysis failed</code>.
             </p>
           </div>
@@ -2248,7 +2248,7 @@ create table attachment_uploads (
               pulled.
             </div>
             <div class="control-cell">
-              Show <code>Not reviewed yet</code> or <code>Vesta is reviewing this</code> until
+              Show <code>Not reviewed yet</code> or <code>Nudge is reviewing this</code> until
               completion.
             </div>
           </div>
@@ -2311,7 +2311,7 @@ create table attachment_uploads (
       document.getElementById("themeToggle").addEventListener("click", () => {
         const dark = !document.documentElement.classList.contains("dark");
         document.documentElement.classList.toggle("dark", dark);
-        localStorage.setItem("vesta-ios-sync-plan-theme", dark ? "dark" : "light");
+        localStorage.setItem("nudge-ios-sync-plan-theme", dark ? "dark" : "light");
       });
     </script>
   </body>

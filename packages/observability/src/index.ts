@@ -1,4 +1,4 @@
-import { Effect, Metric } from "effect";
+import { Context, Effect, Metric, Option } from "effect";
 
 export interface WideEvent {
   readonly [key: string]: unknown;
@@ -41,6 +41,28 @@ export interface RootServerSpanInput {
   readonly spanId: string;
   readonly startedAt: string;
   readonly traceId: string;
+}
+
+export interface Traceparent {
+  readonly flags: string;
+  readonly parentSpanId: string;
+  readonly traceId: string;
+}
+
+export interface RuntimeTraceContext {
+  readonly cacheable: boolean;
+  readonly environment: string;
+  readonly flags: string;
+  readonly method?: string | null;
+  readonly parentSpanId: string | null;
+  readonly path?: string | null;
+  readonly recordSpan?: (row: SqlInsertRow) => void;
+  readonly requestId?: string | null;
+  readonly rootSpanId: string;
+  readonly routeName?: string | null;
+  readonly service: string;
+  readonly traceId: string;
+  readonly version: string;
 }
 
 export interface TraceSpanRowInput {
@@ -87,6 +109,33 @@ const randomHex = (bytes: number) => {
 export const createTraceId = () => randomHex(16);
 export const createSpanId = () => randomHex(8);
 
+export class RuntimeTrace extends Context.Service<RuntimeTrace, RuntimeTraceContext>()(
+  "nudge/observability/RuntimeTrace",
+) {}
+
+export const currentRuntimeTraceContext = Effect.context<never>().pipe(
+  Effect.map((context) => Option.getOrNull(Context.getOption(context, RuntimeTrace))),
+);
+
+export const withRuntimeTraceContext = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  context: RuntimeTraceContext,
+) => Effect.provideService(effect, RuntimeTrace, RuntimeTrace.of(context));
+
+export const parseTraceparent = (value: string | null): Traceparent | null => {
+  const match = value?.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/);
+  if (!match) return null;
+  const [, traceId, parentSpanId, flags] = match;
+  if (!traceId || !parentSpanId || !flags) return null;
+  return { flags, parentSpanId, traceId };
+};
+
+export const traceparentHeader = (input: {
+  readonly flags?: string | null;
+  readonly spanId: string;
+  readonly traceId: string;
+}) => `00-${input.traceId}-${input.spanId}-${input.flags ?? "01"}`;
+
 export const statusGroup = (status: number) => `${Math.floor(status / 100)}xx`;
 
 export const safeErrorFields = (cause: unknown) => {
@@ -101,6 +150,15 @@ export const safeErrorFields = (cause: unknown) => {
     errorType: typeof cause,
     errorMessage: String(cause),
   };
+};
+
+export const safeExceptionAttributes = (cause: unknown) => {
+  const safe = safeErrorFields(cause);
+  return {
+    "exception.type": safe.errorType,
+    "exception.message": safe.errorMessage,
+    ...(cause instanceof Error && cause.stack ? { "exception.stacktrace": cause.stack } : {}),
+  } satisfies WideEvent;
 };
 
 export const isTransientBackpressureError = (cause: unknown) => {
@@ -174,24 +232,25 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "http.route": routeName,
     "url.path": path,
     "user_agent.original": nullableStringField(event, "userAgent"),
-    "service.name": stringField(event, "service", "vesta-web"),
+    "service.name": stringField(event, "service", "nudge-web"),
     "service.version": stringField(event, "version", "0.0.0"),
     "deployment.environment.name": stringField(event, "environment", "unknown"),
-    "vesta.request_id": nullableStringField(event, "requestId"),
-    "vesta.outcome": nullableStringField(event, "outcome"),
-    "vesta.duration_ms": numberField(event, "durationMs"),
-    "vesta.sample_reason": nullableStringField(event, "sampleReason"),
-    "vesta.debug_kind": path?.startsWith("/api/agent-runs/")
+    "nudge.request_id": nullableStringField(event, "requestId"),
+    "nudge.outcome": nullableStringField(event, "outcome"),
+    "nudge.duration_ms": numberField(event, "durationMs"),
+    "nudge.sample_reason": nullableStringField(event, "sampleReason"),
+    "nudge.debug_kind": path?.startsWith("/api/agent-runs/")
       ? "agent_run_poll"
       : aiSystem
         ? "ai"
         : "http",
-    "vesta.ai.system": aiSystem,
-    "vesta.ai.model": aiModel,
-    "vesta.ai.run_id": nullableStringField(event, "aiRunId"),
-    "vesta.ai.error_code": nullableStringField(event, "aiErrorCode"),
+    "nudge.ai.system": aiSystem,
+    "nudge.ai.model": aiModel,
+    "nudge.ai.run_id": nullableStringField(event, "aiRunId"),
+    "nudge.ai.error_code": nullableStringField(event, "aiErrorCode"),
     "exception.type": errorType,
     "exception.message": nullableStringField(event, "errorMessage"),
+    "exception.stacktrace": nullableStringField(event, "errorStack"),
   } satisfies WideEvent;
 };
 
@@ -222,7 +281,7 @@ export const buildTraceEventRow = (input: TraceEventRowInput): SqlInsertRow => {
       stringField(input.event, "timestamp", input.now),
       stringField(input.event, "event", "unknown"),
       stringField(input.event, "logKind", "wide_event"),
-      stringField(input.event, "service", "vesta-web"),
+      stringField(input.event, "service", "nudge-web"),
       stringField(input.event, "environment", "unknown"),
       stringField(input.event, "version", "0.0.0"),
       nullableStringField(input.event, "requestId"),
@@ -249,7 +308,7 @@ export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow =>
   return buildTraceSpanRow({
     attributes: {
       ...buildDebugWideEventFields({ event: input.event }),
-      "vesta.sampled": input.event.sampled === true,
+      "nudge.sampled": input.event.sampled === true,
     },
     durationMs: input.durationMs,
     endedAt: input.endedAt,
@@ -263,7 +322,7 @@ export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow =>
     path: nullableStringField(input.event, "path"),
     requestId: nullableStringField(input.event, "requestId"),
     routeName,
-    service: stringField(input.event, "service", "vesta-web"),
+    service: stringField(input.event, "service", "nudge-web"),
     spanId: input.spanId,
     startedAt: input.startedAt,
     status: status && status >= 500 ? "error" : "ok",

@@ -60,7 +60,7 @@ const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = 
   staging: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
     VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
-    VITE_VESTA_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+    VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
   },
 };
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
@@ -69,11 +69,13 @@ if (!clientEnvironment) {
   process.exit(1);
 }
 const deployTargetArgs = [`--env ${deployEnvironment}`];
+const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
 const deployArgs = [
   ...deployTargetArgs,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
+  `--var CONVEX_URL:${serverConvexUrl}`,
   `--tag ${version}`,
   `--message ${JSON.stringify(`Deploy ${version}`)}`,
 ]
@@ -84,5 +86,5 @@ run("mise exec -- bun run build", { cwd: web, env: clientEnvironment });
 run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 
 console.log(
-  `${dryRun ? "Dry-run verified" : "Deployed"} vesta-web ${deployEnvironment} at ${version}`,
+  `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,
 );

@@ -1,5 +1,5 @@
 {
-  "name": "@vesta/observability",
+  "name": "@nudge/observability",
   "private": true,
   "type": "module",
   "exports": {

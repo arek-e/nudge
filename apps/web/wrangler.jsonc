@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "vesta-web",
+  "name": "nudge-web",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-12",
   "compatibility_flags": ["nodejs_compat"],
@@ -32,8 +32,9 @@
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
-    "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://vesta-web.teampitch.workers.dev",
+    "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://nudge-web.teampitch.workers.dev",
     "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    "CONVEX_URL": "https://grandiose-hamster-855.eu-west-1.convex.cloud",
     "LOG_HTTP_REQUESTS": "true",
     "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
@@ -46,22 +47,22 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "vesta-local",
+      "database_name": "nudge-local",
       "migrations_dir": "../../packages/db/migrations",
     },
   ],
   "r2_buckets": [
     {
       "binding": "MEDIA_FILES",
-      "bucket_name": "vesta-local-media",
+      "bucket_name": "nudge-local-media",
     },
     {
       "binding": "OKF_FILES",
-      "bucket_name": "vesta-local-okf-files",
+      "bucket_name": "nudge-local-okf-files",
     },
     {
       "binding": "TRACE_ARTIFACTS",
-      "bucket_name": "vesta-local-trace-artifacts",
+      "bucket_name": "nudge-local-trace-artifacts",
     },
   ],
   "durable_objects": {
@@ -103,12 +104,13 @@
   ],
   "env": {
     "staging": {
-      "name": "vesta-web-staging",
+      "name": "nudge-web-staging",
       "vars": {
         "ENVIRONMENT": "staging",
         "APP_VERSION": "0.0.0",
-        "CLERK_AUTHORIZED_PARTIES": "https://vesta-web-staging.teampitch.workers.dev",
+        "CLERK_AUTHORIZED_PARTIES": "https://nudge-web-staging.teampitch.workers.dev",
         "CLERK_PUBLISHABLE_KEY": "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "CONVEX_URL": "https://abundant-retriever-130.eu-west-1.convex.cloud",
         "LOG_HTTP_REQUESTS": "true",
         "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
         "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
@@ -121,22 +123,22 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "vesta-staging",
+          "database_name": "nudge-staging",
           "migrations_dir": "../../packages/db/migrations",
         },
       ],
       "r2_buckets": [
         {
           "binding": "MEDIA_FILES",
-          "bucket_name": "vesta-staging-media",
+          "bucket_name": "nudge-staging-media",
         },
         {
           "binding": "OKF_FILES",
-          "bucket_name": "vesta-staging-okf-files",
+          "bucket_name": "nudge-staging-okf-files",
         },
         {
           "binding": "TRACE_ARTIFACTS",
-          "bucket_name": "vesta-staging-trace-artifacts",
+          "bucket_name": "nudge-staging-trace-artifacts",
         },
       ],
       "containers": [
@@ -172,12 +174,13 @@
       ],
     },
     "production": {
-      "name": "vesta-web",
+      "name": "nudge-web",
       "vars": {
         "ENVIRONMENT": "production",
         "APP_VERSION": "0.0.0",
-        "CLERK_AUTHORIZED_PARTIES": "https://vesta-web.teampitch.workers.dev",
+        "CLERK_AUTHORIZED_PARTIES": "https://nudge-web.teampitch.workers.dev",
         "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "CONVEX_URL": "https://friendly-lion-904.eu-west-1.convex.cloud",
         "LOG_HTTP_REQUESTS": "true",
         "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
         "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
@@ -190,7 +193,7 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "vesta-production",
+          "database_name": "nudge-production",
           "database_id": "f64cce82-7370-4cfa-8570-617f5c5484ca",
           "migrations_dir": "../../packages/db/migrations",
         },
@@ -198,15 +201,15 @@
       "r2_buckets": [
         {
           "binding": "MEDIA_FILES",
-          "bucket_name": "vesta-media",
+          "bucket_name": "nudge-media",
         },
         {
           "binding": "OKF_FILES",
-          "bucket_name": "vesta-okf-files",
+          "bucket_name": "nudge-okf-files",
         },
         {
           "binding": "TRACE_ARTIFACTS",
-          "bucket_name": "vesta-trace-artifacts",
+          "bucket_name": "nudge-trace-artifacts",
         },
       ],
       "containers": [

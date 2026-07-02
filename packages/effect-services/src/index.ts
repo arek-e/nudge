@@ -1,10 +1,10 @@
 import { Context, Effect, Layer } from "effect";
-import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@vesta/db";
+import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@nudge/db";
 import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
   defaultFrame,
-} from "@vesta/domain";
+} from "@nudge/domain";
 
 export * from "./okf";
 export * from "./agent-prompts";
@@ -63,7 +63,7 @@ const sha256Hex = (value: string) =>
   });
 
 const memoryNamespaceForUser = (userId: string) =>
-  Effect.map(sha256Hex(userId), (hash) => `vesta-user-${hash.slice(0, 48)}`);
+  Effect.map(sha256Hex(userId), (hash) => `nudge-user-${hash.slice(0, 48)}`);
 
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
@@ -186,7 +186,7 @@ export class MemoryIndex extends Context.Service<
     }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
     readonly deleteUserNamespace: (input: { readonly user: DbUser }) => Effect.Effect<void, Error>;
   }
->()("vesta/MemoryIndex") {
+>()("nudge/MemoryIndex") {
   static readonly layerMemory = Layer.succeed(MemoryIndex)({
     deleteUserNamespace: () => Effect.void,
     indexPending: (input) =>
