@@ -1,6 +1,6 @@
 {
-  "name": "Vesta",
-  "short_name": "Vesta",
+  "name": "Nudge",
+  "short_name": "Nudge",
   "description": "A private daily operating loop for personal context and follow-through.",
   "start_url": "/",
   "scope": "/",

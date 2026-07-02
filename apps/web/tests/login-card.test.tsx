@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { LoginCard } from "@vesta/ui";
 
 describe("LoginCard", () => {
-  test("renders the shadcn login-03 shell with Vesta auth methods", () => {
+  test("renders the shadcn login-03 shell with Nudge auth methods", () => {
     const html = renderToStaticMarkup(
       <LoginCard
         email="alex@example.com"
@@ -23,7 +23,9 @@ describe("LoginCard", () => {
       />,
     );
 
-    expect(html).toContain("Vesta");
+    expect(html).toContain("Nudge");
+    expect(html).toContain('src="/icons/nudge-logo-lockup-blobby-n-transparent.svg"');
+    expect(html).not.toContain("/icons/vesta-logo");
     expect(html).toContain("Welcome back");
     expect(html).toContain("Sign in with a passkey, Google, or an email code.");
     expect(html).toContain("Continue with passkey");

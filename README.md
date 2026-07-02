@@ -1,11 +1,8 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/icons/vesta-logo-long-dark.svg">
-  <img src="apps/web/public/icons/vesta-logo-long-light.svg" alt="Vesta" width="220">
-</picture>
+<img src="apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.svg" alt="Nudge" width="220">
 
-# Vesta
+# Nudge
 
 **A native iOS journal and Siri capture app for private context**
 
@@ -156,16 +153,17 @@ See [`apps/ios/Vesta/README.md`](apps/ios/Vesta/README.md) for Siri phrases and 
 
 ## Brand Assets
 
-Use the SVG assets directly when possible. The light variants are tuned for
-white or warm surfaces; the dark variants are tuned for the current dark Vesta
-app shell.
+Use the SVG assets directly when possible. The canonical PWA filenames stay
+stable for browser install surfaces, while the `nudge-*` files are the explicit
+brand assets for app UI and documentation.
 
-| Asset         | Light                                                                          | Dark                                                                         |
-| ------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Short mark    | [`vesta-logo-light.svg`](apps/web/public/icons/vesta-logo-light.svg)           | [`vesta-logo-dark.svg`](apps/web/public/icons/vesta-logo-dark.svg)           |
-| Long lockup   | [`vesta-logo-long-light.svg`](apps/web/public/icons/vesta-logo-long-light.svg) | [`vesta-logo-long-dark.svg`](apps/web/public/icons/vesta-logo-long-dark.svg) |
-| App icon      | [`vesta-app-icon-light.svg`](apps/web/public/icons/vesta-app-icon-light.svg)   | [`vesta-app-icon.svg`](apps/web/public/icons/vesta-app-icon.svg)             |
-| Animated mark | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)     | [`vesta-logo-animated.svg`](apps/web/public/icons/vesta-logo-animated.svg)   |
+| Asset                | Path                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Logo lockup          | [`nudge-logo-lockup-blobby-n-transparent.svg`](apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.svg) |
+| Logo lockup PNG      | [`nudge-logo-lockup-blobby-n-transparent.png`](apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.png) |
+| App icon SVG         | [`nudge-app-icon.svg`](apps/web/public/icons/nudge-app-icon.svg)                                                 |
+| App icon PNG         | [`nudge-app-icon.png`](apps/web/public/icons/nudge-app-icon.png)                                                 |
+| Transparent app icon | [`nudge-app-icon-transparent.svg`](apps/web/public/icons/nudge-app-icon-transparent.svg)                         |
 
 ## Architecture
 
