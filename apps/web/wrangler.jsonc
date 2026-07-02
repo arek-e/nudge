@@ -47,22 +47,21 @@
     {
       "binding": "DB",
       "database_name": "vesta-local",
-      "database_id": "f64cce82-7370-4cfa-8570-617f5c5484ca",
       "migrations_dir": "../../packages/db/migrations",
     },
   ],
   "r2_buckets": [
     {
       "binding": "MEDIA_FILES",
-      "bucket_name": "vesta-media",
+      "bucket_name": "vesta-local-media",
     },
     {
       "binding": "OKF_FILES",
-      "bucket_name": "vesta-okf-files",
+      "bucket_name": "vesta-local-okf-files",
     },
     {
       "binding": "TRACE_ARTIFACTS",
-      "bucket_name": "vesta-trace-artifacts",
+      "bucket_name": "vesta-local-trace-artifacts",
     },
   ],
   "durable_objects": {
@@ -102,4 +101,145 @@
       "new_sqlite_classes": ["Sandbox"],
     },
   ],
+  "env": {
+    "staging": {
+      "name": "vesta-web-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "APP_VERSION": "0.0.0",
+        "CLERK_AUTHORIZED_PARTIES": "https://vesta-web-staging.teampitch.workers.dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "LOG_HTTP_REQUESTS": "true",
+        "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
+        "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
+        "TURBOPUFFER_REGION": "aws-eu-west-1",
+      },
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vesta-staging",
+          "migrations_dir": "../../packages/db/migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_FILES",
+          "bucket_name": "vesta-staging-media",
+        },
+        {
+          "binding": "OKF_FILES",
+          "bucket_name": "vesta-staging-okf-files",
+        },
+        {
+          "binding": "TRACE_ARTIFACTS",
+          "bucket_name": "vesta-staging-trace-artifacts",
+        },
+      ],
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "./Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 1,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_AGENT_SESSION",
+            "class_name": "UserAgentSession",
+          },
+          {
+            "name": "LoopIntakeThinkAgent",
+            "class_name": "LoopIntakeThinkAgent",
+          },
+          {
+            "name": "OKF_SANDBOX",
+            "class_name": "Sandbox",
+          },
+        ],
+      },
+      "workflows": [
+        {
+          "name": "daily-digest-workflow-staging",
+          "binding": "DAILY_DIGEST_WORKFLOW",
+          "class_name": "DailyDigestWorkflow",
+        },
+      ],
+    },
+    "production": {
+      "name": "vesta-web",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "APP_VERSION": "0.0.0",
+        "CLERK_AUTHORIZED_PARTIES": "https://vesta-web.teampitch.workers.dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "LOG_HTTP_REQUESTS": "true",
+        "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
+        "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
+        "TURBOPUFFER_REGION": "aws-eu-west-1",
+      },
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vesta-production",
+          "database_id": "f64cce82-7370-4cfa-8570-617f5c5484ca",
+          "migrations_dir": "../../packages/db/migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_FILES",
+          "bucket_name": "vesta-media",
+        },
+        {
+          "binding": "OKF_FILES",
+          "bucket_name": "vesta-okf-files",
+        },
+        {
+          "binding": "TRACE_ARTIFACTS",
+          "bucket_name": "vesta-trace-artifacts",
+        },
+      ],
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "./Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 1,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_AGENT_SESSION",
+            "class_name": "UserAgentSession",
+          },
+          {
+            "name": "LoopIntakeThinkAgent",
+            "class_name": "LoopIntakeThinkAgent",
+          },
+          {
+            "name": "OKF_SANDBOX",
+            "class_name": "Sandbox",
+          },
+        ],
+      },
+      "workflows": [
+        {
+          "name": "daily-digest-workflow",
+          "binding": "DAILY_DIGEST_WORKFLOW",
+          "class_name": "DailyDigestWorkflow",
+        },
+      ],
+    },
+  },
 }

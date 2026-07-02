@@ -52,8 +52,25 @@ if (status && !allowDirty) {
 const commit = output("git rev-parse --short HEAD");
 const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit);
 const deployEnvironment = env ?? "production";
+const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
+  production: {
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
+  },
+  staging: {
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
+    VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
+    VITE_VESTA_LOGO_LONG_SRC: "/icons/vesta-logo-long-beta.svg",
+  },
+};
+const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
+if (!clientEnvironment) {
+  console.error(`Unknown deploy environment: ${deployEnvironment}`);
+  process.exit(1);
+}
+const deployTargetArgs = [`--env ${deployEnvironment}`];
 const deployArgs = [
-  env ? `--env ${env}` : "",
+  ...deployTargetArgs,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
@@ -63,7 +80,9 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run build", { cwd: web });
+run("mise exec -- bun run build", { cwd: web, env: clientEnvironment });
 run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
 
-console.log(`${dryRun ? "Dry-run verified" : "Deployed"} vesta-web at ${version}`);
+console.log(
+  `${dryRun ? "Dry-run verified" : "Deployed"} vesta-web ${deployEnvironment} at ${version}`,
+);

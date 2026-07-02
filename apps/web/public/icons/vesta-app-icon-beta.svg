@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="vesta-app-icon-beta-title vesta-app-icon-beta-desc">
+  <title id="vesta-app-icon-beta-title">Vesta beta app icon</title>
+  <desc id="vesta-app-icon-beta-desc">A square Vesta BETA lockup icon for staging builds.</desc>
+  <rect width="1024" height="1024" rx="184" fill="#f7f3ec" />
+  <image
+    id="vesta-logo-long-beta-source"
+    href="vesta-logo-long-beta.svg"
+    x="112"
+    y="317"
+    width="800"
+    height="390"
+    preserveAspectRatio="xMidYMid meet"
+  />
+</svg>

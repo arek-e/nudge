@@ -9,6 +9,31 @@ enum CaptureDraftResetSelftest {
         defaults.set("http://127.0.0.1:53900", forKey: VestaAPI.engineURLKey)
         assert(VestaAPI.configuredEngineURL == VestaAPI.defaultEngineURL)
         assert(defaults.string(forKey: VestaAPI.engineURLKey) == VestaAPI.defaultEngineURL)
+        let stagingEnvironment = VestaEnvironmentConfig.evaluate(
+            environmentName: "staging",
+            displayName: nil,
+            engineURL: nil,
+            convexDeploymentURL: nil
+        )
+        assert(stagingEnvironment.displayName == "Vesta Staging")
+        assert(stagingEnvironment.engineURL == "https://vesta-web-staging.teampitch.workers.dev")
+        assert(stagingEnvironment.convexDeploymentURL == "https://abundant-retriever-130.eu-west-1.convex.cloud")
+        let localEnvironment = VestaEnvironmentConfig.evaluate(
+            environmentName: "local",
+            displayName: nil,
+            engineURL: nil,
+            convexDeploymentURL: nil
+        )
+        assert(localEnvironment.engineURL == "http://localhost:8787")
+        assert(localEnvironment.convexDeploymentURL == "https://grandiose-hamster-855.eu-west-1.convex.cloud")
+        let productionEnvironment = VestaEnvironmentConfig.evaluate(
+            environmentName: "production",
+            displayName: nil,
+            engineURL: nil,
+            convexDeploymentURL: nil
+        )
+        assert(productionEnvironment.engineURL == "https://vesta-web.teampitch.workers.dev")
+        assert(productionEnvironment.convexDeploymentURL == "https://friendly-lion-904.eu-west-1.convex.cloud")
         defaults.set("anon_550e8400-e29b-41d4-a716-446655440000", forKey: VestaInstallIdentity.userIDKey)
         assert(VestaInstallIdentity.currentUserID(defaults: defaults) == "anon_550e8400-e29b-41d4-a716-446655440000")
         assert(

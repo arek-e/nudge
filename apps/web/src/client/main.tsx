@@ -48,6 +48,7 @@ const convexUrl =
   import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
 const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = requiredClerkPublishableKey();
+const logoLongSrc = import.meta.env.VITE_VESTA_LOGO_LONG_SRC ?? "/icons/vesta-logo-long-dark.svg";
 
 type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
@@ -139,7 +140,8 @@ function AppShell() {
 
 function ClerkSignInScreen() {
   return (
-    <main className="grid min-h-dvh place-items-center bg-[#111] px-4 py-8">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Vesta" />
       <SignIn routing="hash" />
     </main>
   );
