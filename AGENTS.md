@@ -2,7 +2,9 @@
 
 ## Development Workflow
 
-Use the `tdd` skill for implementation work.
+Use the `tdd` skill for new product feature implementation. For bug fixes,
+setup repairs, documentation, refactors, and small maintenance changes, use
+engineering judgment about whether a test-first loop is warranted.
 
 Development should follow red-green-refactor:
 
@@ -52,7 +54,7 @@ Before implementing framework/tooling-specific code, check the relevant opencode
 
 ### TDD
 
-Use `tdd` for all product implementation and bug fixes. Follow red-green-refactor and keep each cycle focused on one observable behavior.
+Use `tdd` for new product features. Follow red-green-refactor and keep each cycle focused on one observable behavior.
 
 ### Architecture
 
