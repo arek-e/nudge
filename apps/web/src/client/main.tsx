@@ -49,8 +49,7 @@ const convexUrl =
 const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = requiredClerkPublishableKey();
 const logoLongSrc =
-  import.meta.env.VITE_VESTA_LOGO_LONG_SRC ??
-  "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
+  import.meta.env.VITE_VESTA_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
 
 type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
