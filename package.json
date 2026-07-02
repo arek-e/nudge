@@ -64,6 +64,7 @@
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run style:check && bun run test",
     "db:migrations:apply:local": "bun run --cwd apps/web db:migrations:apply:local",
     "db:migrations:apply:remote": "bun run --cwd apps/web db:migrations:apply:remote",
+    "db:migrations:apply:staging": "bun run --cwd apps/web db:migrations:apply:staging",
     "deploy": "bun scripts/deploy-web.ts",
     "deploy:dirty": "bun scripts/deploy-web.ts --allow-dirty",
     "deploy:dry-run": "bun scripts/deploy-web.ts --dry-run",

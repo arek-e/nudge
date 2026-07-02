@@ -36,4 +36,28 @@ describe("LoginCard", () => {
     expect(html).toContain('fill="#4285f4"');
     expect(html).not.toContain("Continue with Google");
   });
+
+  test("can render the staging beta lockup", () => {
+    const html = renderToStaticMarkup(
+      <LoginCard
+        email="alex@example.com"
+        emailOtpEnabled
+        error=""
+        googleEnabled={false}
+        logoLongSrc="/icons/vesta-logo-long-beta.svg"
+        passkeyEnabled
+        pendingEmail={false}
+        pendingPasskey={false}
+        sentTo=""
+        otp=""
+        onEmailChange={() => {}}
+        onGoogle={() => {}}
+        onOtpChange={() => {}}
+        onPasskey={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+
+    expect(html).toContain('src="/icons/vesta-logo-long-beta.svg"');
+  });
 });

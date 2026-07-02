@@ -20,6 +20,36 @@ bun run deploy
 
 `bun run deploy` refuses to deploy when the working tree has uncommitted changes. It runs the full check suite, mobile Playwright smoke test, web build, and `wrangler deploy`.
 
+`bun run deploy` targets the `production` Wrangler environment. Use the explicit scripts when checking environment-specific behavior:
+
+```bash
+bun run db:migrations:apply:staging
+bun run deploy:staging
+bun run db:migrations:apply:remote
+bun run deploy:production
+```
+
+The staging Worker is `vesta-web-staging` at `https://vesta-web-staging.teampitch.workers.dev`. The production Worker remains `vesta-web` at `https://vesta-web.teampitch.workers.dev`.
+
+The web deploy script injects client-side Convex and Clerk settings before the Vite build:
+
+- Staging Convex: `https://abundant-retriever-130.eu-west-1.convex.cloud`
+- Production Convex: `https://friendly-lion-904.eu-west-1.convex.cloud`
+- Local/dev Convex: `https://grandiose-hamster-855.eu-west-1.convex.cloud`
+- Staging Clerk app: `Vesta Staging`
+- Production Clerk app: `Vesta`
+- Staging web lockup: `/icons/vesta-logo-long-beta.svg`
+
+Before the first staging deploy, provision the staging Cloudflare resources named in `apps/web/wrangler.jsonc` or let Wrangler resolve/create supported resources where available:
+
+- D1: `vesta-staging`
+- R2: `vesta-staging-media`, `vesta-staging-okf-files`, `vesta-staging-trace-artifacts`
+- Workflow: `daily-digest-workflow-staging`
+
+The iOS app has matching shared Xcode schemes: `Vesta Local`, `Vesta Staging`, and `Vesta Production`. The local scheme installs as `app.vesta.ios.local` and points at the local Worker plus the dev Convex deployment. The staging scheme installs as `app.vesta.ios.staging`, uses the `AppIconStaging` beta icon, and points at the staging Worker, staging Clerk app, and staging Convex deployment. The production scheme installs as `app.vesta.ios`, uses the normal `AppIcon`, and points at the production Worker and production Convex deployment.
+
+Production Clerk still uses the existing Clerk development instance. Run `clerk deploy` from an interactive terminal to create the production Clerk instance; it requires a production domain, DNS access, and Apple/Google OAuth credentials.
+
 ## Version Stamping
 
 Deploys set `APP_VERSION` to the short Git SHA with Wrangler `--var`. Wide request logs and `/api/version` expose this value, so an agent can connect production behavior back to the deployed commit.

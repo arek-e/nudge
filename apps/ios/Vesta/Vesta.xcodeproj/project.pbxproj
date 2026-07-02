@@ -28,6 +28,7 @@
 		1A0000142C00000000000001 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0A2C00000000000001 /* ClerkKit */; };
 		1A0000152C00000000000001 /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0B2C00000000000001 /* ClerkKitUI */; };
 		1A0000162C00000000000001 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001122C00000000000001 /* SettingsScreen.swift */; };
+		1A0000172C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0001132C00000000000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		1A0001102C00000000000001 /* ConvexNoteSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvexNoteSync.swift; sourceTree = "<group>"; };
 		1A0001112C00000000000001 /* VestaAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VestaAuth.swift; sourceTree = "<group>"; };
 		1A0001122C00000000000001 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		1A0001132C00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +96,7 @@
 				1A00010B2C00000000000001 /* TopChrome.swift */,
 				1A0001092C00000000000001 /* VestaTheme.swift */,
 				1A0001052C00000000000001 /* Info.plist */,
+				1A0001132C00000000000001 /* Assets.xcassets */,
 			);
 			path = Vesta;
 			sourceTree = "<group>";
@@ -179,6 +182,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000172C00000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -318,6 +322,7 @@
 		1A0009032C00000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
 				CURRENT_PROJECT_VERSION = 1;
@@ -332,19 +337,110 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.vesta.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = app.vesta.ios.local;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VESTA_CONVEX_DEPLOYMENT_URL = "https://grandiose-hamster-855.eu-west-1.convex.cloud";
+				VESTA_DISPLAY_NAME = "Vesta Local";
+				VESTA_ENGINE_URL = "http://localhost:8787";
+				VESTA_ENVIRONMENT_NAME = local;
 			};
 			name = Debug;
+		};
+		1A0009052C00000000000001 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Staging;
+		};
+		1A0009062C00000000000001 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconStaging;
+				CODE_SIGN_STYLE = Automatic;
+				CLERK_PUBLISHABLE_KEY = "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
+				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Vesta/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.vesta.ios.staging;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+				VESTA_CONVEX_DEPLOYMENT_URL = "https://abundant-retriever-130.eu-west-1.convex.cloud";
+				VESTA_DISPLAY_NAME = "Vesta Staging";
+				VESTA_ENGINE_URL = "https://vesta-web-staging.teampitch.workers.dev";
+				VESTA_ENVIRONMENT_NAME = staging;
+			};
+			name = Staging;
 		};
 		1A0009042C00000000000001 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
 				CURRENT_PROJECT_VERSION = 1;
@@ -367,6 +463,10 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
+				VESTA_CONVEX_DEPLOYMENT_URL = "https://friendly-lion-904.eu-west-1.convex.cloud";
+				VESTA_DISPLAY_NAME = Vesta;
+				VESTA_ENGINE_URL = "https://vesta-web.teampitch.workers.dev";
+				VESTA_ENVIRONMENT_NAME = production;
 			};
 			name = Release;
 		};
@@ -377,6 +477,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1A0009012C00000000000001 /* Debug */,
+				1A0009052C00000000000001 /* Staging */,
 				1A0009022C00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -386,6 +487,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1A0009032C00000000000001 /* Debug */,
+				1A0009062C00000000000001 /* Staging */,
 				1A0009042C00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;

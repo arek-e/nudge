@@ -55,6 +55,7 @@ const convexUrl =
   import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
 const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = configuredClerkPublishableKey();
+const logoLongSrc = import.meta.env.VITE_VESTA_LOGO_LONG_SRC ?? "/icons/vesta-logo-long-dark.svg";
 
 type ConvexDailyNoteState = FunctionReturnType<typeof api.documents.getDailyNote>;
 
@@ -440,6 +441,7 @@ function LoginScreen(props: {
       emailOtpEnabled={props.authMethods.emailOtp}
       error={error}
       googleEnabled={props.authMethods.google}
+      logoLongSrc={logoLongSrc}
       passkeyEnabled={props.authMethods.passkey}
       pendingEmail={continueWithEmail.isPending}
       pendingPasskey={continueWithPasskey.isPending}

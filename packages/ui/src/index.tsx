@@ -349,6 +349,7 @@ export function LoginCard(props: {
   readonly emailOtpEnabled: boolean;
   readonly error: string;
   readonly googleEnabled: boolean;
+  readonly logoLongSrc?: string;
   readonly passkeyEnabled: boolean;
   readonly pendingEmail: boolean;
   readonly pendingPasskey: boolean;
@@ -361,6 +362,7 @@ export function LoginCard(props: {
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const hasProvider = props.passkeyEnabled || props.googleEnabled;
+  const logoLongSrc = props.logoLongSrc ?? vestaLogoLongSrc;
   const emailButtonLabel = props.pendingEmail
     ? props.sentTo
       ? "Verifying code..."
@@ -376,7 +378,7 @@ export function LoginCard(props: {
           className="flex items-center self-center text-sm font-medium text-white no-underline"
           href="/"
         >
-          <img className="h-8 w-auto" src={vestaLogoLongSrc} alt="Vesta" />
+          <img className="h-8 w-auto" src={logoLongSrc} alt="Vesta" />
         </a>
         <section className="rounded-2xl border border-white/8 bg-[#1f1f1f] p-6 shadow-[0_18px_42px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.03)]">
           <header className="text-center">

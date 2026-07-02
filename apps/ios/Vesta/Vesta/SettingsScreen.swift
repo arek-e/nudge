@@ -83,6 +83,20 @@ struct SettingsScreen: View {
 
                 SettingsSection(title: "Sync") {
                     SettingsRow(
+                        icon: "server.rack",
+                        title: "Environment",
+                        value: VestaEnvironmentConfig.current.displayName,
+                        tint: .accentInsight
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        icon: "network",
+                        title: "Engine",
+                        value: VestaAPI.configuredEngineURL,
+                        tint: .accentReference
+                    )
+                    SettingsDivider()
+                    SettingsRow(
                         icon: model.isOnline ? "wifi" : "wifi.slash",
                         title: "Connection",
                         value: model.isOnline ? "Online" : "Offline",
