@@ -13,6 +13,7 @@ export interface Env {
   AGENT_INTERNAL_SECRET?: string;
   CLERK_AUTHORIZED_PARTIES?: string;
   CLERK_PUBLISHABLE_KEY?: string;
+  CLERK_PROXY_URL?: string;
   CLERK_SECRET_KEY?: string;
   CONVEX_RUNTIME_SECRET?: string;
   CONVEX_URL?: string;

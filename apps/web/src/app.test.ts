@@ -149,6 +149,68 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
+  test("GET /__clerk proxies Clerk Frontend API requests through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+        { headers: { "CF-Connecting-IP": "203.0.113.10" } },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("clerk-js");
+      expect(proxiedRequests).toHaveLength(1);
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+      );
+      expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
+        "https://app.explorenudge.com/__clerk",
+      );
+      expect(proxiedRequest.headers.get("Clerk-Secret-Key")).toBe("sk_test_proxy");
+      expect(proxiedRequest.headers.get("X-Forwarded-For")).toBe("203.0.113.10");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk fails closed when the Clerk secret is missing", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+        {},
+        env,
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "CLERK_SECRET_KEY is required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(
