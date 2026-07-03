@@ -12,7 +12,7 @@ import {
 } from "@tanstack/react-router";
 import { ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { type ReactNode, StrictMode, useEffect, useState } from "react";
+import { type ReactNode, StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   buildStickyNoteCreateInput,
@@ -122,6 +122,7 @@ function ClerkSignInScreen(props: { readonly forceRedirectUrl?: string }) {
 
 function DesktopSignInScreen() {
   const [status, setStatus] = useState<"idle" | "opening" | "opened" | "error">("idle");
+  const didOpenBrowserSignIn = useRef(false);
 
   const openBrowserSignIn = async () => {
     if (status === "opening") return;
@@ -141,6 +142,12 @@ function DesktopSignInScreen() {
     }
   };
 
+  useEffect(() => {
+    if (didOpenBrowserSignIn.current) return;
+    didOpenBrowserSignIn.current = true;
+    void openBrowserSignIn();
+  }, []);
+
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
@@ -148,7 +155,7 @@ function DesktopSignInScreen() {
         <div className="grid gap-2 text-center">
           <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign in to Nudge</h1>
           <p className="m-0 text-sm leading-6 text-white/70">
-            Continue in your browser to use your existing Apple or Google login.
+            We will open your default browser so you can use your existing Apple or Google login.
           </p>
         </div>
         <button
@@ -157,7 +164,7 @@ function DesktopSignInScreen() {
           type="button"
           onClick={openBrowserSignIn}
         >
-          {status === "opening" ? "Opening browser..." : "Continue in browser"}
+          {status === "opening" ? "Opening browser..." : "Open browser"}
         </button>
         {status === "opened" ? (
           <p className="m-0 text-center text-sm leading-6 text-white/70">
@@ -169,14 +176,6 @@ function DesktopSignInScreen() {
             Browser sign-in could not be opened.
           </p>
         ) : null}
-        <details className="grid gap-4 border-t border-white/10 pt-4">
-          <summary className="cursor-pointer text-center text-sm font-semibold text-white/75">
-            Use embedded sign in
-          </summary>
-          <div className="mt-4 flex justify-center">
-            <SignIn routing="hash" />
-          </div>
-        </details>
       </section>
     </main>
   );

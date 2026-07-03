@@ -18,7 +18,7 @@ const root = import.meta.dir.replace(/\/src$/, "");
 
 describe("Desktop app", () => {
   test("mounts the shared Nudge web app by default and allows local override", () => {
-    expect(defaultNudgeWebAppUrl).toBe("https://nudge-web.teampitch.workers.dev");
+    expect(defaultNudgeWebAppUrl).toBe("https://app.explorenudge.com/");
     expect(resolveNudgeWebAppUrl({})).toBe(defaultNudgeWebAppUrl);
     expect(resolveNudgeWebAppUrl({ NUDGE_WEB_APP_URL: " http://localhost:8787 " })).toBe(
       "http://localhost:8787",
@@ -26,7 +26,7 @@ describe("Desktop app", () => {
   });
 
   test("only hands web URLs to the operating system", () => {
-    expect(canOpenExternalUrl("https://nudge-web.teampitch.workers.dev")).toBe(true);
+    expect(canOpenExternalUrl("https://app.explorenudge.com/")).toBe(true);
     expect(canOpenExternalUrl("http://localhost:8787")).toBe(true);
     expect(canOpenExternalUrl("javascript:alert(1)")).toBe(false);
     expect(canOpenExternalUrl("not a url")).toBe(false);

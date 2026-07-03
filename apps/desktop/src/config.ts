@@ -1,4 +1,4 @@
-export const defaultNudgeWebAppUrl = "https://nudge-web.teampitch.workers.dev";
+export const defaultNudgeWebAppUrl = "https://app.explorenudge.com/";
 export const desktopProtocol = "nudge";
 export const desktopAuthCallbackUrl = `${desktopProtocol}://auth/callback`;
 
