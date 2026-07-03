@@ -172,11 +172,14 @@ describe("web app", () => {
         },
       );
       const proxiedRequest = proxiedRequests[0];
+      const fetchCall = fetchMock.mock.calls[0];
       if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+      if (!fetchCall) throw new Error("Expected Clerk fetch call");
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe("clerk-js");
       expect(proxiedRequests).toHaveLength(1);
+      expect(fetchCall[1]).toMatchObject({ redirect: "follow" });
       expect(proxiedRequest.url).toBe(
         "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
       );

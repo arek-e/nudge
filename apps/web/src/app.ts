@@ -95,7 +95,7 @@ export function createApp(options: CreateAppOptions = {}) {
     proxyRequest.headers.set("Clerk-Secret-Key", secretKey);
     proxyRequest.headers.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
 
-    return fetch(proxyRequest);
+    return fetch(proxyRequest, { redirect: "follow" });
   });
 
   registerStaticRoutes(app);
