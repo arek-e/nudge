@@ -15,6 +15,7 @@ describe("Nudge Worker environments", () => {
     expect(wrangler).toContain('"name": "nudge-web"');
     expect(wrangler).toContain('"pattern": "app.staging.explorenudge.com"');
     expect(wrangler).toContain('"custom_domain": true');
+    expect(wrangler).toContain('"/__clerk/*"');
     expect(wrangler).toContain('"ENVIRONMENT": "staging"');
     expect(wrangler).toContain('"ENVIRONMENT": "production"');
     expect(wrangler).toContain(
@@ -84,6 +85,7 @@ describe("Nudge Worker environments", () => {
     expect(devScript).toContain('args.includes("--remote")');
     expect(localWrangler).not.toContain('"containers"');
     expect(localWrangler).not.toContain('"OKF_SANDBOX"');
+    expect(localWrangler).toContain('"/__clerk/*"');
     expect(localWrangler).toContain('"USER_AGENT_SESSION"');
     expect(localWrangler).toContain('"DAILY_DIGEST_WORKFLOW"');
   });
