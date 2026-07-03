@@ -1,5 +1,14 @@
 import type { FunctionReturnType } from "convex/server";
-import { ClerkProvider, SignIn, UserButton, useAuth, useClerk } from "@clerk/react";
+import {
+  ClerkFailed,
+  ClerkLoaded,
+  ClerkLoading,
+  ClerkProvider,
+  SignIn,
+  UserButton,
+  useAuth,
+  useClerk,
+} from "@clerk/react";
 import { useSignIn } from "@clerk/react/legacy";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -116,6 +125,28 @@ function ClerkSignInScreen(props: { readonly forceRedirectUrl?: string }) {
       ) : (
         <SignIn routing="hash" />
       )}
+    </main>
+  );
+}
+
+function ClerkUnavailableScreen() {
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="grid w-full max-w-md gap-4 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign-in unavailable</h1>
+        <p className="m-0 text-sm leading-6 text-white/70">
+          Nudge could not reach the authentication service. Check the Clerk production DNS setup and
+          try again.
+        </p>
+        <button
+          className="min-h-12 rounded-md bg-white px-4 text-sm font-semibold text-[#111] shadow-sm"
+          type="button"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
+      </section>
     </main>
   );
 }
@@ -1629,11 +1660,19 @@ if (!rootElement) throw new Error("Missing #root element");
 function NudgeConvexProvider(props: { readonly children: ReactNode }) {
   return (
     <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
-      <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
-        <ClerkTokenBridge>
-          <ConvexUserMaterializer>{props.children}</ConvexUserMaterializer>
-        </ClerkTokenBridge>
-      </ConvexProviderWithClerk>
+      <ClerkLoading>
+        <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />
+      </ClerkLoading>
+      <ClerkFailed>
+        <ClerkUnavailableScreen />
+      </ClerkFailed>
+      <ClerkLoaded>
+        <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
+          <ClerkTokenBridge>
+            <ConvexUserMaterializer>{props.children}</ConvexUserMaterializer>
+          </ClerkTokenBridge>
+        </ConvexProviderWithClerk>
+      </ClerkLoaded>
     </ClerkProvider>
   );
 }

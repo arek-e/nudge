@@ -14,4 +14,13 @@ describe("desktop auth UI", () => {
     expect(source).toContain("Finish sign-in in your browser");
     expect(source).not.toContain("Use embedded sign in");
   });
+
+  test("renders a visible failure state when Clerk cannot load", async () => {
+    const source = await readFile(clientMainUrl, "utf8");
+
+    expect(source).toContain("ClerkFailed");
+    expect(source).toContain("function ClerkUnavailableScreen()");
+    expect(source).toContain("Sign-in unavailable");
+    expect(source).toContain("Nudge could not reach the authentication service");
+  });
 });
