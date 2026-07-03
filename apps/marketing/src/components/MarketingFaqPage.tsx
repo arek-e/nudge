@@ -1,23 +1,5 @@
 import { MarketingActionLink, MarketingBrandMark, MarketingFaqList } from "@nudge/ui/marketing";
-
-const appHref = "https://app.explorenudge.com";
-
-const faqItems = [
-  {
-    question: "What does nudge keep track of?",
-    answer: "Notes, people, promises, follow-ups, and the context that explains why they matter.",
-  },
-  {
-    question: "Does nudge act without me?",
-    answer:
-      "No. nudge drafts source-linked proposals and waits for your review before anything becomes a commitment.",
-  },
-  {
-    question: "How is this different from a task manager?",
-    answer:
-      "Task managers hold lists. nudge keeps the surrounding context with the next thing worth returning to.",
-  },
-];
+import { faqItems, marketingSite } from "../marketing-content";
 
 export function MarketingFaqPage() {
   return (
@@ -34,7 +16,7 @@ export function MarketingFaqPage() {
           <MarketingActionLink href="/" variant="nav">
             Home
           </MarketingActionLink>
-          <MarketingActionLink href={appHref} variant="header">
+          <MarketingActionLink href={marketingSite.appHref} variant="header">
             Open nudge
           </MarketingActionLink>
         </nav>
