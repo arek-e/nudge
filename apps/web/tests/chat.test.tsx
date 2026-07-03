@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { VestaChat } from "@vesta/ui";
+import { NudgeChat } from "@nudge/ui";
 
-describe("VestaChat", () => {
+describe("NudgeChat", () => {
   test("renders a shadcn-style conversation with draft context and composer controls", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         messages={[
           {
             content: "What should I do next?",
@@ -43,7 +43,7 @@ describe("VestaChat", () => {
 
   test("keeps the transcript chrome quiet when there is no memory context", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         messages={[
           {
             content: "test",
@@ -72,7 +72,7 @@ describe("VestaChat", () => {
 
   test("renders the composer without a top divider", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         messages={[]}
         input=""
         sending={false}
@@ -87,7 +87,7 @@ describe("VestaChat", () => {
 
   test("renders only supported composer controls", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         messages={[]}
         input=""
         sending={false}
@@ -111,7 +111,7 @@ describe("VestaChat", () => {
 
   test("renders attachment picker, pending files, and dropzone", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         attachments={[
           { id: "image-1", name: "diagram.png", size: 2048, type: "image/png" },
           { id: "doc-1", name: "brief.pdf", size: 4096, type: "application/pdf" },
@@ -141,7 +141,7 @@ describe("VestaChat", () => {
 
   test("uses a sequenced dot-matrix loader for active thinking state", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         messages={[
           {
             content: "What should I do next?",
@@ -175,7 +175,7 @@ describe("VestaChat", () => {
 
   test("keeps dot-matrix loaders out of streaming message text", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         activities={[{ id: "tool-1", kind: "tool", label: "Searching memory" }]}
         messages={[
           {
@@ -205,7 +205,7 @@ describe("VestaChat", () => {
 
   test("groups active tool work into one collapsible step rail", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         activities={[
           { id: "tool-1", kind: "tool", label: "Searching memory" },
           { id: "tool-2", kind: "tool", label: "Drafting proposal" },
@@ -230,7 +230,7 @@ describe("VestaChat", () => {
 
   test("keeps pre-response work ordered and minimized once assistant content follows", () => {
     const html = renderToStaticMarkup(
-      <VestaChat
+      <NudgeChat
         events={[
           { content: "What should I do next?", id: "user-1", role: "user", type: "message" },
           {

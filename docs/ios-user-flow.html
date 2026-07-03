@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Vesta iOS User Flow</title>
+    <title>Nudge iOS User Flow</title>
     <script>
       (function () {
-        const saved = localStorage.getItem("vesta-flow-theme");
+        const saved = localStorage.getItem("nudge-flow-theme");
         const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
         document.documentElement.classList.toggle("dark", dark);
       })();
@@ -425,7 +425,7 @@
   <body>
     <header class="bar">
       <div>
-        <h1>Vesta iOS user flow</h1>
+        <h1>Nudge iOS user flow</h1>
         <div class="sub">root screens · pushed views · sheets · engine sync</div>
       </div>
       <div class="spacer"></div>
@@ -445,7 +445,7 @@
         viewBox="0 0 1600 950"
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Vesta iOS user interaction flow"
+        aria-label="Nudge iOS user interaction flow"
       >
         <defs>
           <marker
@@ -565,7 +565,7 @@
         >
           <rect x="118" y="154" width="240" height="74" rx="18"></rect>
           <text class="kind" x="138" y="181">entry</text>
-          <text class="title" x="138" y="204">Open Vesta</text>
+          <text class="title" x="138" y="204">Open Nudge</text>
         </g>
 
         <g
@@ -862,7 +862,7 @@
       document.getElementById("themeToggle").addEventListener("click", () => {
         const dark = !document.documentElement.classList.contains("dark");
         document.documentElement.classList.toggle("dark", dark);
-        localStorage.setItem("vesta-flow-theme", dark ? "dark" : "light");
+        localStorage.setItem("nudge-flow-theme", dark ? "dark" : "light");
       });
     </script>
   </body>

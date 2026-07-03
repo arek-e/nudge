@@ -24,12 +24,12 @@ const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
 
 await mkdir(logDir, { recursive: true });
 
-console.log(`Vesta dev server: ${url}`);
+console.log(`Nudge dev server: ${url}`);
 console.log(
-  `Vesta Clerk publishable key: ${process.env.CLERK_PUBLISHABLE_KEY ? "configured" : "missing"}`,
+  `Nudge Clerk publishable key: ${process.env.CLERK_PUBLISHABLE_KEY ? "configured" : "missing"}`,
 );
-console.log(`Vesta Wrangler state: ${persistTo}`);
-console.log(`Vesta local logs: ${logDir}`);
+console.log(`Nudge Wrangler state: ${persistTo}`);
+console.log(`Nudge local logs: ${logDir}`);
 
 await run(["bun", "run", "--cwd", "apps/web", "build"], "build.log");
 await run(

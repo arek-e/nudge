@@ -1,25 +1,27 @@
 import { z } from "zod";
-import type { VestaUser } from "./Services/VestaApp";
+import type { NudgeUser } from "./Services/NudgeApp";
 
 export async function proxyConversationRequest<Schema extends z.ZodType>(
   agentSessions: DurableObjectNamespace,
   internalSecret: string | undefined,
-  user: VestaUser,
+  user: NudgeUser,
   conversationId: string,
   pathOrUrl: string | URL,
   schema: Schema,
   init: { readonly body?: BodyInit; readonly method?: string } = {},
+  traceHeaders: Readonly<Record<string, string>> = {},
 ): Promise<z.infer<Schema>> {
   const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
   const agent = agentSessions.get(agentId);
   const url =
-    typeof pathOrUrl === "string" ? new URL(`https://vesta.local${pathOrUrl}`) : pathOrUrl;
+    typeof pathOrUrl === "string" ? new URL(`https://nudge.local${pathOrUrl}`) : pathOrUrl;
   const internalSignature = internalSecret
     ? await signAgentRequest(internalSecret, user.id, conversationId)
     : undefined;
   const requestInit = {
     headers: {
       "content-type": "application/json",
+      ...traceHeaders,
       "x-vesta-conversation-id": conversationId,
       "x-vesta-user-display-name": user.displayName,
       "x-vesta-user-id": user.id,
@@ -47,9 +49,10 @@ export function conversationStreamPath(path: string) {
 export async function proxyConversationStream(
   agentSessions: DurableObjectNamespace,
   internalSecret: string | undefined,
-  user: VestaUser,
+  user: NudgeUser,
   conversationId: string,
   message: string,
+  traceHeaders: Readonly<Record<string, string>> = {},
 ): Promise<Response> {
   const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
   const agent = agentSessions.get(agentId);
@@ -57,10 +60,11 @@ export async function proxyConversationStream(
     ? await signAgentRequest(internalSecret, user.id, conversationId)
     : undefined;
   const response = await agent.fetch(
-    new Request("https://vesta.local/messages/stream", {
+    new Request("https://nudge.local/messages/stream", {
       body: JSON.stringify({ message }),
       headers: {
         "content-type": "application/json",
+        ...traceHeaders,
         "x-vesta-conversation-id": conversationId,
         "x-vesta-user-display-name": user.displayName,
         "x-vesta-user-id": user.id,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { UserDataExport } from "@vesta/db";
+import type { UserDataExport } from "@nudge/db";
 import { buildOkfProjection, listOkfDirectory, readOkfFile, searchOkfFiles } from "./okf";
 
 const exportedUserData = {
@@ -10,7 +10,7 @@ const exportedUserData = {
       userId: "user-1",
       localDate: "2026-06-29",
       title: "June 29",
-      bodyText: "Look into OKF as the filesystem shape for Vesta agent memory.",
+      bodyText: "Look into OKF as the filesystem shape for Nudge agent memory.",
       createdAt: "2026-06-29T08:00:00.000Z",
       updatedAt: "2026-06-29T09:00:00.000Z",
     },
@@ -114,20 +114,20 @@ describe("OKF projection", () => {
       );
       expect(metadata.type, path).toBeString();
       expect(metadata.type, path).not.toBe('""');
-      expect(metadata.resource, path).toMatch(/^"vesta:\/\/[^"]+"$/);
+      expect(metadata.resource, path).toMatch(/^"nudge:\/\/[^"]+"$/);
     }
 
     expect(readOkfFile(projection, "/daily/2026-06-29.md")).toContain(
-      'resource: "vesta://daily/2026-06-29"',
+      'resource: "nudge://daily/2026-06-29"',
     );
     expect(readOkfFile(projection, "/items/item-1.md")).toContain(
-      'resource: "vesta://items/item-1"',
+      'resource: "nudge://items/item-1"',
     );
     expect(readOkfFile(projection, "/memory/daily_note/memory-1.md")).toContain(
-      'resource: "vesta://memory/daily_note/memory-1"',
+      'resource: "nudge://memory/daily_note/memory-1"',
     );
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
-      'resource: "vesta://summaries/day/2026-06-29"',
+      'resource: "nudge://summaries/day/2026-06-29"',
     );
   });
 

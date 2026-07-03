@@ -1,12 +1,14 @@
 {
-  "name": "@vesta/ui",
+  "name": "@nudge/ui",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.tsx"
+    ".": "./src/index.tsx",
+    "./marketing": "./src/marketing.tsx"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
+    "@paper-design/shaders-react": "catalog:",
     "@platejs/basic-nodes": "catalog:",
     "@tanstack/react-table": "catalog:",
     "lucide-react": "catalog:",
@@ -16,6 +18,7 @@
     "recharts": "catalog:"
   },
   "devDependencies": {
-    "@types/react": "catalog:"
+    "@types/react": "catalog:",
+    "react-dom": "catalog:"
   }
 }

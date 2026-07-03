@@ -9,7 +9,7 @@ import {
   type DbService,
   type EventRecord,
   type JournalDocumentRecord,
-} from "@vesta/db";
+} from "@nudge/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
@@ -17,9 +17,9 @@ import {
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
-} from "@vesta/effect-services";
+} from "@nudge/effect-services";
 import type { RequestSession } from "./request-context";
-import type { RunEffect } from "./Services/VestaApp";
+import type { RunEffect } from "./Services/NudgeApp";
 import {
   apiContract,
   conversationMessageResponseSchema,
@@ -124,7 +124,7 @@ export interface ApiContext {
     task: () => Promise<A>,
   ) => Promise<A>;
   readonly runEffect: RunEffect;
-  readonly traceDb?: D1Database;
+  readonly traceHeaders?: Readonly<Record<string, string>>;
   readonly turbopuffer?: {
     readonly apiKey: string;
     readonly region: string;
@@ -239,7 +239,7 @@ export const apiRouter = api.router({
       );
     }),
     listRecentSignals: api.conversations.listRecentSignals.handler(async ({ context, input }) => {
-      const url = new URL("https://vesta.local/tools/list-recent-signals");
+      const url = new URL("https://nudge.local/tools/list-recent-signals");
       url.searchParams.set("limit", String(input.limit ?? 10));
       return proxyConversationRequest(
         context.agentSessions,
@@ -251,7 +251,7 @@ export const apiRouter = api.router({
       );
     }),
     retrieveMemory: api.conversations.retrieveMemory.handler(async ({ context, input }) => {
-      const url = new URL("https://vesta.local/tools/retrieve-memory");
+      const url = new URL("https://nudge.local/tools/retrieve-memory");
       url.searchParams.set("query", input.query);
       url.searchParams.set("limit", String(input.limit ?? 5));
       return proxyConversationRequest(
@@ -473,7 +473,9 @@ export const apiRouter = api.router({
                       noteId: noteResult.note.id,
                       revisionId: noteResult.revision.id,
                       runId: queuedRun.id,
+                      requestId: context.traceHeaders?.["x-request-id"],
                       title: result.document.title,
+                      traceparent: context.traceHeaders?.traceparent,
                       userDisplayName: context.user.displayName,
                       userId: context.user.id,
                       workflowVersion: 1,
@@ -710,21 +712,13 @@ export const apiRouter = api.router({
       );
     }),
   },
-  traces: {
-    recent: api.traces.recent.handler(async ({ context, input }) => {
-      const rows = await context.runEffect(
-        listRecentTraceSpans(context.traceDb, input.limit ?? 20),
-      );
-      return { spans: rows.map(toTraceSpanSummary) };
-    }),
-  },
   voice: {
     log: api.voice.log.handler(async ({ context, input }) => {
       const route = classifyVoiceLogRoute(input.spokenText);
       const spokenResponse =
         route === "reasoning_candidate"
-          ? "Understood. I'm processing it in Vesta."
-          : "Understood. I logged it to Vesta.";
+          ? "Understood. I'm processing it in Nudge."
+          : "Understood. I logged it to Nudge.";
       const capture = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.appendSignal({
@@ -742,72 +736,6 @@ export const apiRouter = api.router({
     }),
   },
 });
-
-interface TraceSpanRow {
-  readonly id: string;
-  readonly trace_id: string;
-  readonly parent_span_id: string | null;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly started_at: string;
-  readonly ended_at: string | null;
-  readonly duration_ms: number | null;
-  readonly route_name: string | null;
-  readonly method: string | null;
-  readonly path: string | null;
-}
-
-function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
-  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
-
-  return Effect.tryPromise({
-    try: async () => {
-      const result = await traceDb
-        .prepare(
-          `SELECT
-            span_id AS id,
-            trace_id,
-            parent_span_id,
-            name,
-            kind,
-            status,
-            started_at,
-            ended_at,
-            duration_ms,
-            route_name,
-            method,
-            path
-          FROM trace_spans
-          WHERE route_name IS NULL OR route_name != 'api.traces'
-          ORDER BY started_at DESC
-          LIMIT ?`,
-        )
-        .bind(limit)
-        .all<TraceSpanRow>();
-
-      return result.results ?? [];
-    },
-    catch: (cause) => cause,
-  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
-}
-
-function toTraceSpanSummary(row: TraceSpanRow) {
-  return {
-    id: row.id,
-    traceId: row.trace_id,
-    parentSpanId: row.parent_span_id,
-    name: row.name,
-    kind: row.kind,
-    status: row.status,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    durationMs: row.duration_ms,
-    routeName: row.route_name,
-    method: row.method,
-    path: row.path,
-  };
-}
 
 function toSynthesisResponse(synthesis: {
   readonly id: string;
@@ -885,7 +813,7 @@ export function makeApiHandler() {
           JSON.stringify({
             event: "api_handler_error",
             logKind: "wide_event",
-            service: "vesta-web",
+            service: "nudge-web",
             errorType: safeError.name,
             errorMessage: safeError.message,
           }),
@@ -898,7 +826,7 @@ export function makeApiHandler() {
         docsProvider: "scalar",
         specGenerateOptions: {
           info: {
-            title: "Vesta API",
+            title: "Nudge API",
             version: "0.1.0",
           },
         },

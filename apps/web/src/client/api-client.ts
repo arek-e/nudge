@@ -24,8 +24,8 @@ async function vestaRequestHeaders(input: HeadersInit = {}) {
   }
 
   const identityHeaders = anonymousIdentityHeaders();
-  headers.set("x-vesta-anonymous-user-id", identityHeaders["x-vesta-anonymous-user-id"]);
-  headers.set("x-vesta-client", identityHeaders["x-vesta-client"]);
+  headers.set("x-nudge-anonymous-user-id", identityHeaders["x-nudge-anonymous-user-id"]);
+  headers.set("x-nudge-client", identityHeaders["x-nudge-client"]);
   return headers;
 }
 

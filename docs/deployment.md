@@ -1,6 +1,6 @@
 # Deployment
 
-Vesta deploys should be tied to Git commits so Cloudflare Worker versions, trace logs, and rollback decisions can be mapped back to source code.
+Nudge deploys should be tied to Git commits so Cloudflare Worker versions, trace logs, and rollback decisions can be mapped back to source code.
 
 ## Normal Flow
 
@@ -23,27 +23,24 @@ bun run deploy
 `bun run deploy` targets the `production` Wrangler environment. Use the explicit scripts when checking environment-specific behavior:
 
 ```bash
-bun run db:migrations:apply:staging
 bun run deploy:staging
-bun run db:migrations:apply:remote
 bun run deploy:production
 ```
 
-The staging Worker is `vesta-web-staging` at `https://vesta-web-staging.teampitch.workers.dev`. The production Worker remains `vesta-web` at `https://vesta-web.teampitch.workers.dev`.
+The staging Worker is `nudge-web-staging` at `https://app.staging.explorenudge.com`, with `https://nudge-web-staging.teampitch.workers.dev` retained as the Cloudflare account fallback. The production Worker is `nudge-web` at `https://app.explorenudge.com`, with `https://nudge-web.teampitch.workers.dev` retained as the Cloudflare account fallback.
 
 The web deploy script injects client-side Convex and Clerk settings before the Vite build:
 
 - Staging Convex: `https://abundant-retriever-130.eu-west-1.convex.cloud`
 - Production Convex: `https://friendly-lion-904.eu-west-1.convex.cloud`
 - Local/dev Convex: `https://grandiose-hamster-855.eu-west-1.convex.cloud`
-- Staging Clerk app: `Vesta Staging`
-- Production Clerk app: `Vesta`
+- Staging Clerk app: `Nudge Staging`
+- Production Clerk app: `Nudge`
 - Staging web lockup: `/icons/nudge-logo-lockup-blobby-n-transparent.svg`
 
 Before the first staging deploy, provision the staging Cloudflare resources named in `apps/web/wrangler.jsonc` or let Wrangler resolve/create supported resources where available:
 
-- D1: `vesta-staging`
-- R2: `vesta-staging-media`, `vesta-staging-okf-files`, `vesta-staging-trace-artifacts`
+- R2: `nudge-staging-media`, `nudge-staging-okf-files`
 - Workflow: `daily-digest-workflow-staging`
 
 The iOS app has matching shared Xcode schemes: `Vesta Local`, `Vesta Staging`, and `Vesta Production`. The local scheme installs as `app.vesta.ios.local` and points at the local Worker plus the dev Convex deployment. The staging scheme installs as `app.vesta.ios.staging`, uses the `AppIconStaging` beta icon, and points at the staging Worker, staging Clerk app, and staging Convex deployment. The production scheme installs as `app.vesta.ios`, uses the normal `AppIcon`, and points at the production Worker and production Convex deployment.
@@ -66,10 +63,9 @@ The workflow:
 
 1. Computes a tag, defaulting to UTC CalVer `vYYYY.MM.DD.HHMM`.
 2. Generates GitHub release notes from merged changes since the previous tag.
-3. Optionally applies remote D1 migrations.
-4. Runs the normal production deploy with `APP_VERSION=<tag>`.
-5. Creates and pushes the Git tag.
-6. Creates a GitHub Release with the generated notes.
+3. Runs the normal production deploy with `APP_VERSION=<tag>`.
+4. Creates and pushes the Git tag.
+5. Creates a GitHub Release with the generated notes.
 
 Required repository secrets:
 
@@ -98,8 +94,8 @@ Preferred rollback paths:
 After rollback, verify:
 
 ```bash
-curl https://vesta-web.teampitch.workers.dev/health
-bun run traces:recent
+curl https://app.explorenudge.com/health
+bun run logs:tail
 ```
 
 ## Pull Requests

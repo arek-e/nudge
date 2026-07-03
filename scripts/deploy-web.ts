@@ -1,11 +1,13 @@
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
+const wrangler = `${root}node_modules/.bin/wrangler`;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
+const containersRolloutArg = process.argv.find((arg) => arg.startsWith("--containers-rollout="));
 const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
 const requestedVersion = versionArg?.slice("--version=".length).trim();
 
@@ -60,7 +62,7 @@ const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = 
   staging: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
     VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
-    VITE_VESTA_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+    VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
   },
 };
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
@@ -69,20 +71,25 @@ if (!clientEnvironment) {
   process.exit(1);
 }
 const deployTargetArgs = [`--env ${deployEnvironment}`];
+const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
+const containersRollout =
+  containersRolloutArg ?? (deployEnvironment === "production" ? "--containers-rollout=none" : "");
 const deployArgs = [
   ...deployTargetArgs,
+  containersRollout,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
+  `--var CONVEX_URL:${serverConvexUrl}`,
   `--tag ${version}`,
   `--message ${JSON.stringify(`Deploy ${version}`)}`,
 ]
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run build", { cwd: web, env: clientEnvironment });
-run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
+run("bun run build", { cwd: web, env: clientEnvironment });
+run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
 
 console.log(
-  `${dryRun ? "Dry-run verified" : "Deployed"} vesta-web ${deployEnvironment} at ${version}`,
+  `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,
 );

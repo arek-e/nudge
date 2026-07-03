@@ -21,12 +21,7 @@ export const isClerkConfigured = (env: Env) => Boolean(env.CLERK_SECRET_KEY);
 
 export const resolveClerkSession: AuthSessionResolver = async ({ env, request }) => {
   const secretKey = env.CLERK_SECRET_KEY;
-  if (!secretKey) {
-    if (env.ENVIRONMENT === "production") {
-      throw new Error("CLERK_SECRET_KEY is required to authenticate production requests");
-    }
-    return null;
-  }
+  if (!secretKey) return null;
 
   const clerk = createClerkClient({
     ...(env.CLERK_PUBLISHABLE_KEY ? { publishableKey: env.CLERK_PUBLISHABLE_KEY } : {}),

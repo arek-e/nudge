@@ -1,18 +1,18 @@
-# Vesta Product Vision
+# Nudge Product Vision
 
-Vesta is a private daily operating layer for modern life. It helps a person notice what changed, remember what matters, decide what deserves attention, and act at the right time without surrendering control.
+Nudge is a private daily operating layer for modern life. It helps a person notice what changed, remember what matters, decide what deserves attention, and act at the right time without surrendering control.
 
-The name comes from the Roman Vesta: household guardian spirits associated with protection, continuity, memory, and the everyday life of a home. That is the product posture: not a generic chatbot, not a sales CRM, and not an autonomous operator, but a trusted guardian for the user's commitments, relationships, reflections, and routines.
+The name is intentionally plain: a small, timely prompt toward what matters next. That is the product posture: not a generic chatbot, not a sales CRM, and not an autonomous operator, but a private operating layer for the user's commitments, relationships, reflections, and routines.
 
 ## Promise
 
-Vesta turns scattered personal signals into a calm Daily Operating Loop:
+Nudge turns scattered personal signals into a calm Daily Operating Loop:
 
 ```txt
 signals -> memory -> understanding -> decision -> action -> feedback -> adaptation
 ```
 
-Each day, Vesta should answer:
+Each day, Nudge should answer:
 
 - What changed?
 - What did I miss?
@@ -22,7 +22,7 @@ Each day, Vesta should answer:
 
 ## Product Feel
 
-Vesta should feel private, protective, and quietly competent. It should feel more like a household intelligence or personal command sanctuary than a generic productivity dashboard.
+Nudge should feel private, protective, and quietly competent. It should feel more like a household intelligence or personal command sanctuary than a generic productivity dashboard.
 
 Design cues:
 
@@ -34,9 +34,9 @@ Design cues:
 
 Visual directions:
 
-- hearth, doorway, guardian, small flame, arch, shrine, or protective circle
+- clear prompts, subtle motion, grounded daily context, and source-linked evidence
 - warm ivory, terracotta, muted gold, black olive, stone gray
-- modern serif or humanist wordmark with subtle Roman/architectural influence
+- humanist wordmark with a direct, quiet, action-oriented feel
 
 ## Core Product Concepts
 
@@ -73,4 +73,4 @@ The current wedge is the Daily Operating Loop through notes, memory, review, and
 
 ## Long-Term Vision
 
-Vesta becomes the user's private adaptive memory and decision layer across life domains: work, relationships, calendar, commitments, routines, health, learning, and long-term goals. It earns more agency over time through evaluation, trust, and explicit consent, but it never silently becomes the owner of the user's life.
+Nudge becomes the user's private adaptive memory and decision layer across life domains: work, relationships, calendar, commitments, routines, health, learning, and long-term goals. It earns more agency over time through evaluation, trust, and explicit consent, but it never silently becomes the owner of the user's life.

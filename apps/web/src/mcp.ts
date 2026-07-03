@@ -2,16 +2,16 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { type Effect } from "effect";
-import { Db, type DbService } from "@vesta/db";
+import { Db, type DbService } from "@nudge/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
-} from "@vesta/effect-services";
+} from "@nudge/effect-services";
 
-type VestaMcpContent =
+type NudgeMcpContent =
   | { readonly text: string; readonly type: "text" }
   | {
       readonly description: string;
@@ -21,12 +21,12 @@ type VestaMcpContent =
       readonly uri: string;
     };
 
-const textContent = (content: Extract<VestaMcpContent, { readonly type: "text" }>) => content;
+const textContent = (content: Extract<NudgeMcpContent, { readonly type: "text" }>) => content;
 const resourceLinkContent = (
-  content: Extract<VestaMcpContent, { readonly type: "resource_link" }>,
+  content: Extract<NudgeMcpContent, { readonly type: "resource_link" }>,
 ) => content;
 
-export async function handleVestaMcpRequest(
+export async function handleNudgeMcpRequest(
   request: Request,
   input: {
     readonly db: DbService;
@@ -35,7 +35,7 @@ export async function handleVestaMcpRequest(
     readonly version: string;
   },
 ) {
-  const server = createVestaMcpServer(input);
+  const server = createNudgeMcpServer(input);
   const transport = new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
@@ -48,13 +48,13 @@ export async function handleVestaMcpRequest(
   }
 }
 
-function createVestaMcpServer(input: {
+function createNudgeMcpServer(input: {
   readonly db: DbService;
   readonly runEffect: <A, E>(effect: Effect.Effect<A, E, Db>) => Promise<A>;
   readonly user: { readonly displayName: string; readonly id: string };
   readonly version: string;
 }) {
-  const server = new McpServer({ name: "vesta", version: input.version });
+  const server = new McpServer({ name: "nudge", version: input.version });
 
   server.registerResource(
     "okf_files",

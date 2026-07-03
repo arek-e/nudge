@@ -1,10 +1,18 @@
 import { Context, Effect, Layer } from "effect";
-import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@vesta/db";
+import {
+  Db,
+  type DbUser,
+  type EventRecord,
+  type MemoryChunkRecord,
+  type ProposalRecord,
+  type ReviewDecision,
+  type SynthesisRecord,
+} from "@nudge/db";
 import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
   defaultFrame,
-} from "@vesta/domain";
+} from "@nudge/domain";
 
 export * from "./okf";
 export * from "./agent-prompts";
@@ -33,6 +41,25 @@ export const currentWorkflowVersion = 1;
 export type WorkflowVersion = typeof currentWorkflowVersion;
 
 export const workflowStepName = (version: WorkflowVersion, name: string) => `v${version}.${name}`;
+
+export interface LoopIntakeDraftInput {
+  readonly conversationId: string;
+  readonly message: string;
+  readonly occurredAt?: string;
+  readonly user: DbUser;
+}
+
+export interface LoopIntakeDraftResult {
+  readonly draft: {
+    readonly confidence: number;
+    readonly proposal: ProposalRecord;
+    readonly requiresReview: true;
+    readonly signal: EventRecord;
+  } | null;
+  readonly proposals: ReadonlyArray<ProposalRecord>;
+  readonly signal: EventRecord;
+  readonly synthesis: SynthesisRecord;
+}
 
 export interface MemorySearchResult {
   readonly chunkId: string;
@@ -186,7 +213,7 @@ export class MemoryIndex extends Context.Service<
     }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
     readonly deleteUserNamespace: (input: { readonly user: DbUser }) => Effect.Effect<void, Error>;
   }
->()("vesta/MemoryIndex") {
+>()("nudge/MemoryIndex") {
   static readonly layerMemory = Layer.succeed(MemoryIndex)({
     deleteUserNamespace: () => Effect.void,
     indexPending: (input) =>
@@ -425,6 +452,42 @@ export const PrimitiveWorkflows = {
         created.push(yield* db.appendProposal(proposalInput));
       }
       return created;
+    }),
+
+  draftLoopIntake: (input: LoopIntakeDraftInput): Effect.Effect<LoopIntakeDraftResult, Error, Db> =>
+    Effect.gen(function* () {
+      const signal = yield* PrimitiveWorkflows.appendSignal({
+        idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+        occurredAt: input.occurredAt ?? new Date().toISOString(),
+        payload: { note: input.message },
+        schemaVersion: 1,
+        source: "vesta_agent_intake",
+        type: "manual_check_in_submitted",
+        user: input.user,
+      });
+      const { synthesis } = yield* PrimitiveWorkflows.createSynthesis({
+        frameKey: "current_state",
+        user: input.user,
+      });
+      const proposals = yield* PrimitiveWorkflows.generateProposals({
+        frameKey: "current_state",
+        user: input.user,
+      });
+      const proposal = proposals[0];
+
+      return {
+        draft: proposal
+          ? {
+              confidence: 0.82,
+              proposal,
+              requiresReview: true,
+              signal,
+            }
+          : null,
+        proposals,
+        signal,
+        synthesis,
+      };
     }),
 
   listPendingProposals: (input: { readonly user: DbUser; readonly limit: number }) =>

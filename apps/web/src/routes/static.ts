@@ -6,7 +6,7 @@ const nudgeAppIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25
 export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   const versionHandler: Handler<ObservabilityHonoEnv> = (c) => {
     return c.json({
-      service: "vesta-web",
+      service: "nudge-web",
       version: c.env.APP_VERSION ?? "0.0.0",
     });
   };
@@ -403,11 +403,10 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
     return c.json({
       ok: true,
-      service: "vesta-web",
+      service: "nudge-web",
       environment: env.ENVIRONMENT ?? "unknown",
       version: env.APP_VERSION ?? "0.0.0",
       bindings: {
-        d1: Boolean(env.DB),
         dailyDigestWorkflow: Boolean(env.DAILY_DIGEST_WORKFLOW),
         userAgentSession: Boolean(env.USER_AGENT_SESSION),
       },
@@ -420,7 +419,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     }
 
     if (c.req.query("kind") === "transient") {
-      throw new Error("D1_ERROR: database is locked");
+      throw new Error("database is locked");
     }
     throw new Error("test failure");
   });

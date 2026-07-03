@@ -372,7 +372,7 @@ const plateValueToPlainText = (value: Value) => {
     .trim();
 };
 
-export function VestaAppShell(props: { readonly children: ReactNode }) {
+export function NudgeAppShell(props: { readonly children: ReactNode }) {
   return (
     <main className={shellClass}>
       <div className={contentViewportClass}>{props.children}</div>
@@ -638,7 +638,7 @@ export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeT
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={props.data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
           <defs>
-            <linearGradient id="vesta-completed" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient id="nudge-completed" x1="0" x2="0" y1="0" y2="1">
               <stop offset="5%" stopColor="#9fbf9f" stopOpacity={0.55} />
               <stop offset="95%" stopColor="#9fbf9f" stopOpacity={0.02} />
             </linearGradient>
@@ -650,7 +650,7 @@ export function OutcomeTrendChart(props: { readonly data: ReadonlyArray<OutcomeT
             type="monotone"
             dataKey="completed"
             stroke="#9fbf9f"
-            fill="url(#vesta-completed)"
+            fill="url(#nudge-completed)"
             strokeWidth={2}
           />
           <Area
@@ -725,9 +725,9 @@ type ChatAlign = "start" | "end";
 type BubbleVariant = "default" | "secondary" | "muted" | "ghost" | "destructive";
 type MarkerVariant = "default" | "border" | "separator";
 type DotMatrixVisualState = "thinking" | "tool";
-type VestaChatActivityStatus = "active" | "complete" | "error";
+type NudgeChatActivityStatus = "active" | "complete" | "error";
 
-export interface VestaChatMessage {
+export interface NudgeChatMessage {
   readonly content: string;
   readonly draftTitle?: string;
   readonly id: string;
@@ -736,37 +736,37 @@ export interface VestaChatMessage {
   readonly streaming?: boolean;
 }
 
-export interface VestaChatActivity {
+export interface NudgeChatActivity {
   readonly id: string;
   readonly kind: "thinking" | "tool";
   readonly label: string;
-  readonly status?: VestaChatActivityStatus;
+  readonly status?: NudgeChatActivityStatus;
 }
 
-export interface VestaChatAttachment {
+export interface NudgeChatAttachment {
   readonly id: string;
   readonly name: string;
   readonly size?: number;
   readonly type?: string;
 }
 
-export type VestaChatEvent =
-  | ({ readonly type: "activity" } & VestaChatActivity)
-  | ({ readonly type: "message" } & VestaChatMessage);
+export type NudgeChatEvent =
+  | ({ readonly type: "activity" } & NudgeChatActivity)
+  | ({ readonly type: "message" } & NudgeChatMessage);
 
-const chatActivity = (activity: VestaChatActivity) => activity;
-const chatEvent = (event: VestaChatEvent) => event;
+const chatActivity = (activity: NudgeChatActivity) => activity;
+const chatEvent = (event: NudgeChatEvent) => event;
 
 type ChatTimelineGroup =
   | {
-      readonly activities: ReadonlyArray<VestaChatActivity>;
+      readonly activities: ReadonlyArray<NudgeChatActivity>;
       readonly id: string;
       readonly minimized: boolean;
       readonly type: "activity";
     }
   | {
       readonly id: string;
-      readonly message: VestaChatMessage;
+      readonly message: NudgeChatMessage;
       readonly type: "message";
     };
 
@@ -1015,7 +1015,7 @@ function formatAttachmentSize(size?: number) {
   return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MB`;
 }
 
-function isImageAttachment(attachment: VestaChatAttachment) {
+function isImageAttachment(attachment: NudgeChatAttachment) {
   return (
     attachment.type?.startsWith("image/") ||
     /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(attachment.name)
@@ -1104,13 +1104,13 @@ export function DotMatrixLoader(props: { readonly state?: DotMatrixVisualState }
 }
 
 function groupChatTimeline(
-  events: ReadonlyArray<VestaChatEvent>,
+  events: ReadonlyArray<NudgeChatEvent>,
 ): ReadonlyArray<ChatTimelineGroup> {
   const groups: Array<
     | Omit<Extract<ChatTimelineGroup, { type: "activity" }>, "minimized">
     | Extract<ChatTimelineGroup, { type: "message" }>
   > = [];
-  let activities: Array<VestaChatActivity> = [];
+  let activities: Array<NudgeChatActivity> = [];
   let activityGroupId = "";
   const flushActivities = () => {
     if (activities.length === 0) return;
@@ -1152,13 +1152,13 @@ function groupChatTimeline(
   );
 }
 
-function activityStatus(activity: VestaChatActivity): VestaChatActivityStatus {
+function activityStatus(activity: NudgeChatActivity): NudgeChatActivityStatus {
   return activity.status ?? "active";
 }
 
 function ActivityStatusDot(props: {
   readonly state?: DotMatrixVisualState;
-  readonly status: VestaChatActivityStatus;
+  readonly status: NudgeChatActivityStatus;
 }) {
   return (
     <span
@@ -1180,7 +1180,7 @@ function ActivityStatusDot(props: {
 }
 
 function ActivitySteps(props: {
-  readonly activities: ReadonlyArray<VestaChatActivity>;
+  readonly activities: ReadonlyArray<NudgeChatActivity>;
   readonly minimized?: boolean;
 }) {
   if (props.activities.length === 0) {
@@ -1258,14 +1258,14 @@ function ActivitySteps(props: {
   );
 }
 
-export function VestaChat(props: {
-  readonly activities?: ReadonlyArray<VestaChatActivity>;
-  readonly attachments?: ReadonlyArray<VestaChatAttachment>;
+export function NudgeChat(props: {
+  readonly activities?: ReadonlyArray<NudgeChatActivity>;
+  readonly attachments?: ReadonlyArray<NudgeChatAttachment>;
   readonly className?: string;
   readonly error?: string;
-  readonly events?: ReadonlyArray<VestaChatEvent>;
+  readonly events?: ReadonlyArray<NudgeChatEvent>;
   readonly input: string;
-  readonly messages: ReadonlyArray<VestaChatMessage>;
+  readonly messages: ReadonlyArray<NudgeChatMessage>;
   readonly sending: boolean;
   readonly onAttachmentRemove?: (id: string) => void;
   readonly onAttachmentsAdd?: (files: ReadonlyArray<File>) => void;
@@ -1287,7 +1287,7 @@ export function VestaChat(props: {
     ([
       ...props.messages.map((message) => chatEvent({ ...message, type: "message" })),
       ...activities.map((activity) => chatEvent({ ...activity, type: "activity" })),
-    ] satisfies ReadonlyArray<VestaChatEvent>);
+    ] satisfies ReadonlyArray<NudgeChatEvent>);
   const timelineGroups = groupChatTimeline(timelineEvents);
   const hasMessages = timelineEvents.some((event) => event.type === "message");
   const addFiles = (files: ReadonlyArray<File>) => {

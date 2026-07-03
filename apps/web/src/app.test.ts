@@ -1,9 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Db } from "@vesta/db";
-import { readHttpTelemetrySnapshot } from "@vesta/observability";
+import { Db } from "@nudge/db";
+import { readHttpTelemetrySnapshot } from "@nudge/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
+import { assembleNudgeHarnessTurn, nudgeHarnessRegistry } from "./nudge-harness";
 
 const testAi = (() => ({ provider: "test" })) as Ai;
 const testWorkflow = {
@@ -11,7 +12,7 @@ const testWorkflow = {
 } as Workflow;
 const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
 const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
-const anonymousHeaders = { "x-vesta-anonymous-user-id": anonymousUserId };
+const anonymousHeaders = { "x-nudge-anonymous-user-id": anonymousUserId };
 const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
 const anonymousMcpHeaders = {
   ...anonymousJsonHeaders,
@@ -19,36 +20,20 @@ const anonymousMcpHeaders = {
 };
 
 const env = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
   LOG_HTTP_REQUESTS: "false",
+  CONVEX_RUNTIME_SECRET: "test-convex-runtime-secret",
+  CONVEX_URL: "https://test.convex.cloud",
   AI: testAi,
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
 
-const createTraceDb = () => {
-  const rows: Array<ReadonlyArray<unknown>> = [];
-  const db = {
-    prepare: (sql: string) => ({
-      bind: (...values: ReadonlyArray<unknown>) => ({
-        run: async () => {
-          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
-          return { success: true };
-        },
-      }),
-    }),
-  } as D1Database;
-
-  return { db, rows };
-};
-
 describe("web app", () => {
-  test("GET / serves the Vesta Daily Operating Loop app", async () => {
+  test("GET / serves the Nudge Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
     const body = await response.text();
@@ -82,11 +67,10 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       ok: true,
-      service: "vesta-web",
+      service: "nudge-web",
       environment: "test",
       version: "test-version",
       bindings: {
-        d1: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
@@ -100,6 +84,7 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       name: "Nudge",
+      short_name: "Nudge",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
       theme_color: "#1a2735",
@@ -142,6 +127,22 @@ describe("web app", () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication required" });
+  });
+
+  test("GET /api/session stays unauthenticated when Clerk is not configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const productionEnv = {
+      ...env,
+      ENVIRONMENT: "production",
+    } satisfies Env;
+    const response = await app.request("/api/session", {}, productionEnv);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "unauthenticated",
+      user: null,
+      workspace: null,
+    });
   });
 
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
@@ -223,7 +224,7 @@ describe("web app", () => {
       expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
-        service: "vesta-web",
+        service: "nudge-web",
         environment: "test",
         version: "test-version",
         requestId: "test-ray",
@@ -241,171 +242,6 @@ describe("web app", () => {
     } finally {
       consoleLog.mockRestore();
     }
-  });
-
-  test("GET /health persists a safe trace event", async () => {
-    const app = createApp();
-    const traceDb = createTraceDb();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "persisted-ray", "user-agent": "persist-test" } },
-      { ...env, DB: traceDb.db },
-    );
-
-    expect(response.status).toBe(200);
-    expect(traceDb.rows).toHaveLength(1);
-    expect(traceDb.rows[0]).toEqual([
-      expect.any(String),
-      expect.any(String),
-      "http_request_completed",
-      "wide_event",
-      "vesta-web",
-      "test",
-      "test-version",
-      "persisted-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(Number),
-      "default",
-      null,
-      expect.stringContaining("persisted-ray"),
-      expect.any(String),
-    ]);
-  });
-
-  test("GET /health persists a root request trace span", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(1);
-    expect(spanRows[0]).toEqual([
-      expect.stringMatching(/^[a-f0-9]{32}$/),
-      expect.stringMatching(/^[a-f0-9]{16}$/),
-      null,
-      "GET /health",
-      "server",
-      "ok",
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      "vesta-web",
-      "test",
-      "test-version",
-      "span-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(String),
-      expect.any(String),
-    ]);
-  });
-
-  test("POST /api/syntheses records framework and primitive child spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/syntheses",
-      {
-        method: "POST",
-        headers: { ...anonymousJsonHeaders, "cf-ray": "synthesis-ray" },
-        body: JSON.stringify({ frameKey: "current_state" }),
-      },
-      { ...env, DB: traceDb },
-    );
-
-    const names = spanRows.map((row) => row[3]);
-    const traceIds = new Set(spanRows.map((row) => row[0]));
-    const rootSpan = spanRows.find((row) => row[2] === null);
-    const childSpans = spanRows.filter((row) => row[2] !== null);
-
-    expect(response.status).toBe(200);
-    expect(names).toContain("POST /api/syntheses");
-    expect(names).toContain("app.resolve");
-    expect(names).toContain("auth.current_user");
-    expect(names).toContain("orpc.handle");
-    expect(names).toContain("syntheses.create");
-    expect(traceIds.size).toBe(1);
-    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
-    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
-  });
-
-  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          all: async () => ({ results: [] }),
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(0);
-  });
-
-  test("GET /api/version bypasses db and auth spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
-
-    expect(response.status).toBe(200);
-    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
   });
 
   test("request errors still emit one wide request completion log", async () => {
@@ -479,7 +315,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "vesta-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
@@ -491,7 +327,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "vesta-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
@@ -516,7 +352,7 @@ describe("web app", () => {
     const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
-    expect(body.spokenResponse).toBe("Understood. I logged it to Vesta.");
+    expect(body.spokenResponse).toBe("Understood. I logged it to Nudge.");
     expect(body.route).toBe("capture_only");
     expect(body.capture).toMatchObject({
       idempotencyKey: "siri-log-1",
@@ -530,66 +366,6 @@ describe("web app", () => {
       payload: { text: "Log that I need to follow up with Maya tomorrow" },
       source: "ios_siri",
       type: "capture.voice_log",
-    });
-  });
-
-  test("GET /api/traces/recent lists safe trace span summaries", async () => {
-    const rows = [
-      {
-        id: "span-1",
-        trace_id: "trace-1",
-        parent_span_id: null,
-        name: "GET /health",
-        kind: "server",
-        status: "ok",
-        started_at: "2026-06-12T10:00:00.000Z",
-        ended_at: "2026-06-12T10:00:00.125Z",
-        duration_ms: 125,
-        route_name: "health",
-        method: "GET",
-        path: "/health",
-      },
-    ];
-    let capturedSelectSql = "";
-    const traceDb = {
-      prepare: (sql: string) => {
-        if (sql.includes("SELECT")) capturedSelectSql = sql;
-        return {
-          bind: () => ({
-            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
-            run: async () => ({ success: true }),
-          }),
-        };
-      },
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(capturedSelectSql).toContain("span_id AS id");
-    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
-    expect(await response.json()).toEqual({
-      spans: [
-        {
-          id: "span-1",
-          traceId: "trace-1",
-          parentSpanId: null,
-          name: "GET /health",
-          kind: "server",
-          status: "ok",
-          startedAt: "2026-06-12T10:00:00.000Z",
-          endedAt: "2026-06-12T10:00:00.125Z",
-          durationMs: 125,
-          routeName: "health",
-          method: "GET",
-          path: "/health",
-        },
-      ],
     });
   });
 
@@ -762,6 +538,7 @@ describe("web app", () => {
             updatedAt: null,
             recentToolEvents: [],
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+            harness: nudgeHarnessRegistry,
             skills: ["intake-loop", "review-commitment", "close-loop"],
             subAgents: ["loopIntakeThink"],
             tools: ["listRecentSignals", "retrieveMemory"],
@@ -790,6 +567,7 @@ describe("web app", () => {
       updatedAt: null,
       recentToolEvents: [],
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+      harness: nudgeHarnessRegistry,
       skills: ["intake-loop", "review-commitment", "close-loop"],
       subAgents: ["loopIntakeThink"],
       tools: ["listRecentSignals", "retrieveMemory"],
@@ -849,10 +627,15 @@ describe("web app", () => {
             ],
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
             reply: "I found 1 related memory and drafted a reviewable next step from your message.",
+            activeHarness: assembleNudgeHarnessTurn({
+              intent: "loopIntake",
+              memoryRetrievalAvailable: true,
+            }),
+            agentActionsApplied: ["draftLoopIntake"],
             skillsApplied: ["intake-loop"],
             subAgentsUsed: ["loopIntakeThink"],
-            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
-            workflowHooks: ["dailyDigest"],
+            usedTools: ["retrieveMemory"],
+            workflowHooks: [],
           });
         },
       }),
@@ -916,10 +699,15 @@ describe("web app", () => {
       ],
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
       reply: "I found 1 related memory and drafted a reviewable next step from your message.",
+      activeHarness: assembleNudgeHarnessTurn({
+        intent: "loopIntake",
+        memoryRetrievalAvailable: true,
+      }),
+      agentActionsApplied: ["draftLoopIntake"],
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
-      usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
-      workflowHooks: ["dailyDigest"],
+      usedTools: ["retrieveMemory"],
+      workflowHooks: [],
     });
   });
 
@@ -1089,7 +877,7 @@ describe("web app", () => {
       "/api/session",
       {
         headers: {
-          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       env,
@@ -1125,7 +913,7 @@ describe("web app", () => {
       "/api/signals?limit=10",
       {
         headers: {
-          "x-vesta-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
         },
       },
       env,
@@ -1379,61 +1167,62 @@ describe("web app", () => {
     ]);
   });
 
-  test("POST /api/journal persists AI context as a debug-wide event", async () => {
-    const traceDb = createTraceDb();
+  test("POST /api/journal emits AI context as a debug-wide event", async () => {
     const workflow = {
       create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
     } as Workflow;
     const app = createApp({ dbLayer: Db.layerMemory });
+    const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
-    const response = await app.request(
-      "/api/journal",
-      {
-        method: "POST",
-        headers: {
-          ...anonymousJsonHeaders,
-          "cf-ray": "journal-ray",
-          "content-type": "application/json",
-          "user-agent": "Vesta/1",
+    try {
+      const response = await app.request(
+        "/api/journal",
+        {
+          method: "POST",
+          headers: {
+            ...anonymousJsonHeaders,
+            "cf-ray": "journal-ray",
+            "content-type": "application/json",
+            "user-agent": "Nudge/1",
+          },
+          body: JSON.stringify({
+            bodyText: "I need to work on the guest list",
+            localDate: "2026-07-01",
+            title: "July 1",
+          }),
         },
-        body: JSON.stringify({
-          bodyText: "I need to work on the guest list",
-          localDate: "2026-07-01",
-          title: "July 1",
-        }),
-      },
-      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
-    );
+        { ...env, DAILY_DIGEST_WORKFLOW: workflow, LOG_HTTP_REQUESTS: "true" },
+      );
 
-    expect(response.status).toBe(200);
-    const saved = await response.json();
-    expect(traceDb.rows).toHaveLength(1);
+      expect(response.status).toBe(200);
+      const saved = await response.json();
+      const payload = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
 
-    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
-    expect(payload).toMatchObject({
-      event: "http_request_completed",
-      routeName: "api.journal",
-      aiErrorCode: null,
-      aiModel: "@cf/zai-org/glm-4.7-flash",
-      aiRunId: saved.analysisRun.id,
-      aiSourceType: "note_revision",
-      aiSystem: "cloudflare-think",
-      noteLocalDate: "2026-07-01",
-      "otel.name": "api.journal",
-      "otel.status_code": "OK",
-      "http.request.method": "POST",
-      "http.route": "api.journal",
-      "http.response.status_code": 200,
-      "url.path": "/api/journal",
-      "user_agent.original": "Vesta/1",
-      "service.name": "vesta-web",
-      "deployment.environment.name": "test",
-      "vesta.debug_kind": "ai",
-      "vesta.ai.system": "cloudflare-think",
-      "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "vesta.ai.run_id": saved.analysisRun.id,
-      "vesta.ai.error_code": null,
-    });
+      expect(payload).toMatchObject({
+        event: "http_request_completed",
+        routeName: "api.journal",
+        aiModel: "@cf/zai-org/glm-4.7-flash",
+        aiRunId: saved.analysisRun.id,
+        aiSourceType: "note_revision",
+        aiSystem: "cloudflare-think",
+        noteLocalDate: "2026-07-01",
+        "otel.name": "api.journal",
+        "otel.status_code": "OK",
+        "http.request.method": "POST",
+        "http.route": "api.journal",
+        "http.response.status_code": 200,
+        "url.path": "/api/journal",
+        "user_agent.original": "Nudge/1",
+        "service.name": "nudge-web",
+        "deployment.environment.name": "test",
+        "vesta.debug_kind": "ai",
+        "vesta.ai.system": "cloudflare-think",
+        "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
+        "vesta.ai.run_id": saved.analysisRun.id,
+      });
+    } finally {
+      consoleLog.mockRestore();
+    }
   });
 
   test("custom integrations can fetch a queued agent run by id", async () => {
@@ -2076,7 +1865,7 @@ describe("web app", () => {
     ).json();
 
     expect(response.status).toBe(200);
-    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Vesta.");
+    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Nudge.");
     expect(voiceLog.route).toBe("reasoning_candidate");
     expect(voiceLog.capture).toEqual(
       expect.objectContaining({
@@ -2435,7 +2224,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(spec.info).toEqual({
-      title: "Vesta API",
+      title: "Nudge API",
       version: "0.1.0",
     });
     expect(spec.paths["/events"].get).toMatchObject({
@@ -2479,6 +2268,6 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(body).toContain("Vesta API");
+    expect(body).toContain("Nudge API");
   });
 });

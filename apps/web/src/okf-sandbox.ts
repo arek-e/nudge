@@ -1,4 +1,4 @@
-import type { OkfProjection } from "@vesta/effect-services";
+import type { OkfProjection } from "@nudge/effect-services";
 
 export interface OkfSandbox {
   readonly deletePrefix?: (prefix: string) => Promise<unknown>;

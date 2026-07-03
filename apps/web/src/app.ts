@@ -1,17 +1,17 @@
 import { Hono } from "hono";
 import { Layer } from "effect";
-import { Db } from "@vesta/db";
 import type { Env } from "./env";
 import type { HonoHandlerContext } from "./request-context";
-import type { VestaAppRuntime, VestaOkfSandboxFactory, RunEffect } from "./Services/VestaApp";
+import type { NudgeAppRuntime, NudgeOkfSandboxFactory, RunEffect } from "./Services/NudgeApp";
 import { resolveClerkSession, type AuthSessionResolver } from "./auth";
+import { resolveDbLayerForEnv } from "./db-layer";
 import {
-  makeVestaAppRuntime,
-  resolveVestaApp,
-  runVestaAppDbEffect,
-  type VestaAppDbLayer,
-} from "./Layers/VestaAppLive";
-import { handleVestaMcpRequest } from "./mcp";
+  makeNudgeAppRuntime,
+  resolveNudgeApp,
+  runNudgeAppDbEffect,
+  type NudgeAppDbLayer,
+} from "./Layers/NudgeAppLive";
+import { handleNudgeMcpRequest } from "./mcp";
 import {
   addWideEventFields,
   evlogWideEvents,
@@ -20,6 +20,7 @@ import {
   retryAfterSecondsFor,
   runWithRequestSpan,
   serverTiming,
+  withRequestTraceContext,
   wideEventFields,
 } from "./observability";
 import { defaultOkfSandboxFactory } from "./okf-sandbox-live";
@@ -29,8 +30,8 @@ import { registerStaticRoutes } from "./routes/static";
 
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
-  readonly dbLayer?: VestaAppDbLayer;
-  readonly okfSandboxFactory?: VestaOkfSandboxFactory;
+  readonly dbLayer?: NudgeAppDbLayer;
+  readonly okfSandboxFactory?: NudgeOkfSandboxFactory;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -38,21 +39,12 @@ export function createApp(options: CreateAppOptions = {}) {
   const okfSandboxFactory = options.okfSandboxFactory ?? defaultOkfSandboxFactory;
   const resolveSession = options.authSessionResolver ?? resolveClerkSession;
   const runtimeMemoMap = Layer.makeMemoMapUnsafe();
-  const appRuntimes = new WeakMap<Env, VestaAppRuntime>();
-  const d1Layers = new WeakMap<D1Database, VestaAppDbLayer>();
-  const dbLayerForEnv = (env: Env) => {
-    if (options.dbLayer) return options.dbLayer;
-    const existing = d1Layers.get(env.DB);
-    if (existing) return existing;
-    const layer = Db.layerD1(env.DB);
-    d1Layers.set(env.DB, layer);
-    return layer;
-  };
+  const appRuntimes = new WeakMap<Env, NudgeAppRuntime>();
   const runtimeForEnv = (env: Env) => {
     const existing = appRuntimes.get(env);
     if (existing) return existing;
-    const runtime = makeVestaAppRuntime({
-      dbLayer: dbLayerForEnv(env),
+    const runtime = makeNudgeAppRuntime({
+      dbLayer: resolveDbLayerForEnv(env, options.dbLayer),
       env,
       memoMap: runtimeMemoMap,
       okfSandboxFactory,
@@ -66,13 +58,14 @@ export function createApp(options: CreateAppOptions = {}) {
     const appServices = await runWithRequestSpan(
       c,
       {
-        attributes: { "vesta.layer": "VestaApp" },
+        attributes: { "nudge.layer": "NudgeApp" },
         kind: "client",
         name: "app.resolve",
       },
-      () => resolveVestaApp(appRuntime),
+      () => resolveNudgeApp(appRuntime),
     );
-    const runEffect: RunEffect = (effect) => runVestaAppDbEffect(appRuntime, effect);
+    const runEffect: RunEffect = (effect) =>
+      runNudgeAppDbEffect(appRuntime, withRequestTraceContext(c, effect));
     return { appServices, runEffect };
   };
 
@@ -86,11 +79,11 @@ export function createApp(options: CreateAppOptions = {}) {
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
       c,
-      { attributes: { "vesta.auth.provider": "clerk" }, name: "auth.current_user" },
+      { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
     if (!auth.user) return c.json({ error: "Authentication required" }, 401);
-    return handleVestaMcpRequest(c.req.raw, {
+    return handleNudgeMcpRequest(c.req.raw, {
       db: appServices.db,
       runEffect,
       user: auth.user,
@@ -108,6 +101,7 @@ export function createApp(options: CreateAppOptions = {}) {
       outcome: "error",
       errorType: error.name,
       errorMessage: error.message,
+      ...(error.stack ? { errorStack: error.stack } : {}),
       ...(retryAfterSeconds !== null
         ? { retryAfterSeconds, resilienceKind: "transient_backpressure" }
         : {}),

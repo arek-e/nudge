@@ -93,11 +93,10 @@
     },
     {
       "name": "db-service-anchor",
-      "description": "The persistence package keeps its Effect service and D1 factory as public anchors.",
+      "description": "The persistence package keeps its Effect service as the public anchor.",
       "paths": "packages/db/src/index.ts",
       "must": {
         "exportClasses": ["Db"],
-        "exportConstants": ["createD1DrizzleDatabase"],
         "exportInterfaces": ["DbService"]
       }
     },

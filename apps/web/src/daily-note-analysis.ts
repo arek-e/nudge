@@ -1,4 +1,4 @@
-import type { DurableWorkflowStepConfig } from "@vesta/effect-services";
+import type { DurableWorkflowStepConfig } from "@nudge/effect-services";
 
 export const dailyNoteAnalysisExtractionStepConfig = {
   retries: {

@@ -123,7 +123,7 @@ export const buildDeterministicProposals = (input: {
       synthesisId: input.synthesisId,
       kind: "clarify",
       title: "Capture more context",
-      body: "Add another capture so Vesta has enough context to help.",
+      body: "Add another capture so Nudge has enough context to help.",
       rationale: "Created because there were no open questions or specific themes.",
     },
   ];

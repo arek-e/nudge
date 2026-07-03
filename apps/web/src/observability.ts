@@ -4,19 +4,18 @@ import type { Context, MiddlewareHandler } from "hono";
 import { timing } from "hono/timing";
 import { Effect } from "effect";
 import {
-  buildRootServerSpan,
   buildDebugWideEventFields,
-  buildTraceSpanRow,
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
-  persistTraceCacheEvent,
-  persistTraceCacheSpan,
-  pruneTraceCache,
+  parseTraceparent,
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
   safeErrorFields,
-} from "@vesta/observability";
+  traceparentHeader,
+  type RuntimeTraceContext,
+  withRuntimeTraceContext,
+} from "@nudge/observability";
 import type { Env } from "./env";
 import {
   ensureBraintrustTracing,
@@ -33,23 +32,16 @@ type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;
 
 initLogger({
   drain: () => {},
-  env: { service: "vesta-web" },
+  env: { service: "nudge-web" },
   redact: true,
   silent: true,
 });
 
 declare module "hono" {
   interface ContextVariableMap {
-    traceContext?: RequestTraceContext;
+    traceContext?: RuntimeTraceContext;
     wideEvent?: Record<string, unknown>;
   }
-}
-
-interface RequestTraceContext {
-  readonly cacheable: boolean;
-  readonly parentSpanId: string | null;
-  readonly rootSpanId: string;
-  readonly traceId: string;
 }
 
 interface RequestSpanInput {
@@ -69,14 +61,6 @@ const now = () => {
 const requestId = (request: Request) => {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
 };
-
-const parseTraceparent = (value: string | null) => {
-  const match = value?.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/);
-  if (!match) return null;
-  return { flags: match[3], parentSpanId: match[2], traceId: match[1] };
-};
-
-const isTraceCacheRoute = (path: string) => path.startsWith("/api/traces");
 
 export const addWideEventFields = (c: AppContext, fields: Record<string, unknown>) => {
   const current = c.get("wideEvent") ?? {};
@@ -117,26 +101,31 @@ export const evlogWideEvents = (): AppMiddleware => {
 export const requestObservability = (): AppMiddleware => {
   return async (c, next) => {
     const startedAt = now();
-    const startedAtIso = new Date().toISOString();
     const id = requestId(c.req.raw);
     const incomingTrace = parseTraceparent(c.req.header("traceparent") ?? null);
     const traceId = incomingTrace?.traceId ?? createTraceId();
     const spanId = createSpanId();
+    const flags = incomingTrace?.flags ?? "01";
     const path = new URL(c.req.url).pathname;
-    const cacheable = !isTraceCacheRoute(path);
 
     c.header("x-request-id", id);
-    c.header("traceparent", `00-${traceId}-${spanId}-${incomingTrace?.flags ?? "01"}`);
+    c.header("traceparent", traceparentHeader({ flags, spanId, traceId }));
     c.set("traceContext", {
-      cacheable,
-      parentSpanId: incomingTrace?.parentSpanId ?? null,
+      environment: c.env.ENVIRONMENT ?? "unknown",
+      flags,
+      method: c.req.method,
+      parentSpanId: spanId,
+      path,
+      requestId: id,
       rootSpanId: spanId,
+      service: "nudge-web",
       traceId,
+      version: c.env.APP_VERSION ?? "0.0.0",
     });
     c.set("wideEvent", {
       event: "http_request_completed",
       logKind: "wide_event",
-      service: "vesta-web",
+      service: "nudge-web",
       environment: c.env.ENVIRONMENT ?? "unknown",
       version: c.env.APP_VERSION ?? "0.0.0",
       requestId: id,
@@ -175,7 +164,6 @@ export const requestObservability = (): AppMiddleware => {
       c.res = Response.json({ error: "Internal Server Error" }, { status: 500 });
     } finally {
       const durationMs = now() - startedAt;
-      const endedAtIso = new Date().toISOString();
       const status = c.res.status;
 
       await Effect.runPromise(
@@ -197,38 +185,6 @@ export const requestObservability = (): AppMiddleware => {
 
       c.get("log").set(debugWideEvent);
 
-      if (cacheable && typeof c.env.DB?.prepare === "function") {
-        runBackgroundEffect(
-          c,
-          Effect.gen(function* () {
-            yield* persistTraceEvent(c, debugWideEvent);
-            yield* persistRootTraceSpan(c, {
-              ...debugWideEvent,
-              durationMs,
-              endedAt: endedAtIso,
-              parentSpanId: incomingTrace?.parentSpanId ?? null,
-              startedAt: startedAtIso,
-              traceId,
-            });
-            yield* pruneTraceCache(c.env.DB).pipe(
-              Effect.catch((cause) =>
-                Effect.sync(() => {
-                  console.warn(
-                    JSON.stringify({
-                      event: "trace_cache_prune_failed",
-                      logKind: "wide_event",
-                      service: "vesta-web",
-                      requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
-                      ...safeErrorFields(cause),
-                    }),
-                  );
-                }),
-              ),
-            );
-          }),
-        );
-      }
-
       runBackgroundPromise(
         c,
         flushBraintrustTracing(c.env.BRAINTRUST_API_KEY),
@@ -243,54 +199,37 @@ export const runWithRequestSpan = async <A>(
   input: RequestSpanInput,
   task: () => Promise<A>,
 ) => {
-  const traceContext = c.get("traceContext");
-  const startedAt = now();
-  const startedAtIso = new Date().toISOString();
-  const spanId = createSpanId();
-  let spanStatus: "ok" | "error" = "ok";
-
-  try {
-    return await runBraintrustSpan(
-      {
-        attributes: {
-          ...(input.attributes ?? {}),
-          "span.kind": input.kind ?? "internal",
-        },
-        name: input.name,
+  return runBraintrustSpan(
+    {
+      attributes: {
+        ...(input.attributes ?? {}),
+        "span.kind": input.kind ?? "internal",
       },
-      task,
-    );
-  } catch (cause) {
-    spanStatus = "error";
-    throw cause;
-  } finally {
-    if (traceContext?.cacheable && typeof c.env.DB?.prepare === "function") {
-      const event = c.get("wideEvent") ?? {};
-      const row = buildTraceSpanRow({
-        attributes: input.attributes ?? {},
-        durationMs: Number((now() - startedAt).toFixed(2)),
-        endedAt: new Date().toISOString(),
-        environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
-        httpStatus: numberField(event, "status"),
-        kind: input.kind ?? "internal",
-        method: nullableStringField(event, "method"),
-        name: input.name,
-        outcome: spanStatus === "error" ? "error" : "success",
-        parentSpanId: traceContext.rootSpanId,
-        path: nullableStringField(event, "path"),
-        requestId: nullableStringField(event, "requestId"),
-        routeName: nullableStringField(event, "routeName"),
-        service: stringField(event, "service", "vesta-web"),
-        spanId,
-        startedAt: startedAtIso,
-        status: spanStatus,
-        traceId: traceContext.traceId,
-        version: stringField(event, "version", c.env.APP_VERSION ?? "0.0.0"),
-      });
+      name: input.name,
+    },
+    task,
+  );
+};
 
-      runBackgroundEffect(c, persistTraceSpanRow(c, row));
-    }
-  }
+const requestRuntimeTraceContext = (c: AppContext) => c.get("traceContext");
+
+export const withRequestTraceContext = <A, E, R>(c: AppContext, effect: Effect.Effect<A, E, R>) => {
+  const traceContext = requestRuntimeTraceContext(c);
+  return traceContext ? withRuntimeTraceContext(effect, traceContext) : effect;
+};
+
+export const requestTraceHeaders = (c: AppContext) => {
+  const traceContext = requestRuntimeTraceContext(c);
+  if (!traceContext) return {};
+
+  return {
+    traceparent: traceparentHeader({
+      flags: traceContext.flags,
+      spanId: traceContext.rootSpanId,
+      traceId: traceContext.traceId,
+    }),
+    ...(traceContext.requestId ? { "x-request-id": traceContext.requestId } : {}),
+  };
 };
 
 export const serverTiming = () => {
@@ -300,82 +239,9 @@ export const serverTiming = () => {
   });
 };
 
-const stringField = (event: Record<string, unknown>, key: string, fallback = "") => {
-  const value = event[key];
-  return typeof value === "string" ? value : fallback;
-};
-
 const nullableStringField = (event: Record<string, unknown>, key: string) => {
   const value = event[key];
   return typeof value === "string" ? value : null;
-};
-
-const numberField = (event: Record<string, unknown>, key: string) => {
-  const value = event[key];
-  return typeof value === "number" ? value : null;
-};
-
-const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
-  if (typeof c.env.DB?.prepare !== "function") return Effect.void;
-
-  return persistTraceCacheEvent(c.env.DB, {
-    event,
-    id: crypto.randomUUID(),
-    now: new Date().toISOString(),
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.sync(() => {
-        console.warn(
-          JSON.stringify({
-            event: "trace_event_persist_failed",
-            logKind: "wide_event",
-            service: "vesta-web",
-            requestId: nullableStringField(event, "requestId"),
-            ...safeErrorFields(cause),
-          }),
-        );
-      }),
-    ),
-    Effect.asVoid,
-  );
-};
-
-const persistRootTraceSpan = (c: AppContext, event: Record<string, unknown>) => {
-  if (typeof c.env.DB?.prepare !== "function") return Effect.void;
-
-  const row = buildRootServerSpan({
-    durationMs: numberField(event, "durationMs") ?? 0,
-    endedAt: stringField(event, "endedAt", new Date().toISOString()),
-    event,
-    parentSpanId: nullableStringField(event, "parentSpanId"),
-    spanId: stringField(event, "spanId", createSpanId()),
-    startedAt: stringField(event, "startedAt", new Date().toISOString()),
-    traceId: stringField(event, "traceId", createTraceId()),
-  });
-
-  return persistTraceSpanRow(c, row);
-};
-
-const persistTraceSpanRow = (
-  c: AppContext,
-  row: { readonly sql: string; readonly values: ReadonlyArray<unknown> },
-) => {
-  return persistTraceCacheSpan(c.env.DB, row).pipe(
-    Effect.catch((cause) =>
-      Effect.sync(() => {
-        console.warn(
-          JSON.stringify({
-            event: "trace_span_persist_failed",
-            logKind: "wide_event",
-            service: "vesta-web",
-            requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
-            ...safeErrorFields(cause),
-          }),
-        );
-      }),
-    ),
-    Effect.asVoid,
-  );
 };
 
 const safeExecutionContext = (c: AppContext) => {
@@ -386,22 +252,13 @@ const safeExecutionContext = (c: AppContext) => {
   }
 };
 
-const runBackgroundEffect = (c: AppContext, effect: Effect.Effect<void, unknown>) => {
-  const persistence = Effect.runPromise(effect);
-  const executionCtx = safeExecutionContext(c);
-  if (executionCtx) {
-    executionCtx.waitUntil(persistence);
-    return;
-  }
-};
-
 const runBackgroundPromise = (c: AppContext, promise: Promise<unknown>, failureEvent: string) => {
   const guarded = promise.catch((cause) => {
     console.warn(
       JSON.stringify({
         event: failureEvent,
         logKind: "wide_event",
-        service: "vesta-web",
+        service: "nudge-web",
         requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
         ...safeErrorFields(cause),
       }),

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { Db } from "@vesta/db";
-import { loopIntakeSystemPrompt, PrimitiveWorkflows } from "@vesta/effect-services";
+import { Db } from "@nudge/db";
+import { loopIntakeSystemPrompt, PrimitiveWorkflows } from "@nudge/effect-services";
 
 export interface AgentEvalCase {
   readonly id: string;
@@ -658,7 +658,7 @@ const runCodexExec = async (config: CodexCliJudgeConfig, input: CodexCliJudgeRun
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { spawn } = await import("node:child_process");
-  const temp = await mkdtemp(join(tmpdir(), "vesta-codex-judge-"));
+  const temp = await mkdtemp(join(tmpdir(), "nudge-codex-judge-"));
   const schemaPath = join(temp, "judge.schema.json");
   const outputPath = join(temp, "judge.output.json");
   await writeFile(schemaPath, JSON.stringify(input.schema));

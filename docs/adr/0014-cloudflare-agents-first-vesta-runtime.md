@@ -1,4 +1,4 @@
-# 0014. Cloudflare Agents First Vesta Runtime
+# 0014. Cloudflare Agents First Nudge Runtime
 
 ## Status
 
@@ -8,13 +8,13 @@ Current state: `UserAgentSession` exists, conversation requests are request/resp
 
 ## Context
 
-Vesta should behave like a private operating loop run by agents, not like a form-based app with a chatbot bolted on. The core loop still uses the primitive chain Capture -> Signal -> Frame -> Synthesis -> Proposal -> Review -> Commitment -> Outcome, but the user-facing interaction should be: tell Vesta what is happening, Vesta drafts loop operations, and the user reviews before commitments or actions are created.
+Nudge should behave like a private operating loop run by agents, not like a form-based app with a chatbot bolted on. The core loop still uses the primitive chain Capture -> Signal -> Frame -> Synthesis -> Proposal -> Review -> Commitment -> Outcome, but the user-facing interaction should be: tell Nudge what is happening, Nudge drafts loop operations, and the user reviews before commitments or actions are created.
 
 Cloudflare Agents now provides the runtime primitives we need: durable agent identity, per-agent state and SQLite, sub-agents, agent tools, skills, Workflows integration, scheduling, and Think for full chat/memory/tool orchestration.
 
 ## Decision
 
-Use Cloudflare Agents as the Vesta runtime boundary.
+Use Cloudflare Agents as the Nudge runtime boundary.
 
 - `UserAgentSession` is the parent orchestrator for one user/conversation boundary.
 - Domain-specific sub-agents own isolated responsibilities, starting with `LoopIntakeThinkAgent` for message intake, note extraction, and reviewable draft creation.

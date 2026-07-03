@@ -31,7 +31,6 @@ export default defineConfig({
     ? {
         command: [
           `CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} VITE_CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} bun run build`,
-          `wrangler d1 migrations apply DB --local --persist-to ${shellQuote(persistTo)}`,
           [
             "wrangler dev",
             `--port ${devPort}`,

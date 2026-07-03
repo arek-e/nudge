@@ -15,7 +15,7 @@ test("unauthenticated app shell shows the login page", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("link", { name: "Vesta" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Nudge" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   await expect(page.getByText("Sign in with a passkey, Google, or an email code.")).toBeVisible();
   await expect(page.getByText("Other ways to continue")).toBeVisible();

@@ -1,4 +1,4 @@
-import { Effect, Metric } from "effect";
+import { Context, Effect, Metric, Option } from "effect";
 
 export interface WideEvent {
   readonly [key: string]: unknown;
@@ -27,55 +27,24 @@ export interface BuildDebugWideEventInput {
   readonly event: WideEvent;
 }
 
-export interface TraceEventRowInput {
-  readonly event: WideEvent;
-  readonly id: string;
-  readonly now: string;
-}
-
-export interface RootServerSpanInput {
-  readonly durationMs: number;
-  readonly endedAt: string;
-  readonly event: WideEvent;
-  readonly parentSpanId?: string | null;
-  readonly spanId: string;
-  readonly startedAt: string;
+export interface Traceparent {
+  readonly flags: string;
+  readonly parentSpanId: string;
   readonly traceId: string;
 }
 
-export interface TraceSpanRowInput {
-  readonly attributes: Readonly<Record<string, unknown>>;
-  readonly durationMs: number;
-  readonly endedAt: string;
+export interface RuntimeTraceContext {
   readonly environment: string;
-  readonly httpStatus?: number | null;
-  readonly kind: "server" | "client" | "internal" | "producer" | "consumer";
+  readonly flags: string;
   readonly method?: string | null;
-  readonly name: string;
-  readonly outcome?: string | null;
   readonly parentSpanId: string | null;
   readonly path?: string | null;
   readonly requestId?: string | null;
+  readonly rootSpanId: string;
   readonly routeName?: string | null;
   readonly service: string;
-  readonly spanId: string;
-  readonly startedAt: string;
-  readonly status: "ok" | "error" | "unset";
   readonly traceId: string;
   readonly version: string;
-}
-
-export interface SqlInsertRow {
-  readonly sql: string;
-  readonly values: ReadonlyArray<unknown>;
-}
-
-export interface TraceCacheDb {
-  readonly prepare: (sql: string) => {
-    readonly bind: (...values: ReadonlyArray<unknown>) => {
-      readonly run: () => Promise<unknown>;
-    };
-  };
 }
 
 const randomHex = (bytes: number) => {
@@ -86,6 +55,33 @@ const randomHex = (bytes: number) => {
 
 export const createTraceId = () => randomHex(16);
 export const createSpanId = () => randomHex(8);
+
+export class RuntimeTrace extends Context.Service<RuntimeTrace, RuntimeTraceContext>()(
+  "nudge/observability/RuntimeTrace",
+) {}
+
+export const currentRuntimeTraceContext = Effect.context<never>().pipe(
+  Effect.map((context) => Option.getOrNull(Context.getOption(context, RuntimeTrace))),
+);
+
+export const withRuntimeTraceContext = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  context: RuntimeTraceContext,
+) => Effect.provideService(effect, RuntimeTrace, RuntimeTrace.of(context));
+
+export const parseTraceparent = (value: string | null): Traceparent | null => {
+  const match = value?.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/);
+  if (!match) return null;
+  const [, traceId, parentSpanId, flags] = match;
+  if (!traceId || !parentSpanId || !flags) return null;
+  return { flags, parentSpanId, traceId };
+};
+
+export const traceparentHeader = (input: {
+  readonly flags?: string | null;
+  readonly spanId: string;
+  readonly traceId: string;
+}) => `00-${input.traceId}-${input.spanId}-${input.flags ?? "01"}`;
 
 export const statusGroup = (status: number) => `${Math.floor(status / 100)}xx`;
 
@@ -103,9 +99,18 @@ export const safeErrorFields = (cause: unknown) => {
   };
 };
 
+export const safeExceptionAttributes = (cause: unknown) => {
+  const safe = safeErrorFields(cause);
+  return {
+    "exception.type": safe.errorType,
+    "exception.message": safe.errorMessage,
+    ...(cause instanceof Error && cause.stack ? { "exception.stacktrace": cause.stack } : {}),
+  } satisfies WideEvent;
+};
+
 export const isTransientBackpressureError = (cause: unknown) => {
   const message = cause instanceof Error ? cause.message : String(cause);
-  return /\b(rate limit|too many requests|overloaded|temporarily unavailable|timeout|timed out|database is locked|D1_ERROR)\b/i.test(
+  return /\b(rate limit|too many requests|overloaded|temporarily unavailable|timeout|timed out|database is locked)\b/i.test(
     message,
   );
 };
@@ -174,7 +179,7 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "http.route": routeName,
     "url.path": path,
     "user_agent.original": nullableStringField(event, "userAgent"),
-    "service.name": stringField(event, "service", "vesta-web"),
+    "service.name": stringField(event, "service", "nudge-web"),
     "service.version": stringField(event, "version", "0.0.0"),
     "deployment.environment.name": stringField(event, "environment", "unknown"),
     "vesta.request_id": nullableStringField(event, "requestId"),
@@ -193,176 +198,6 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "exception.type": errorType,
     "exception.message": nullableStringField(event, "errorMessage"),
   } satisfies WideEvent;
-};
-
-export const buildTraceEventRow = (input: TraceEventRowInput): SqlInsertRow => {
-  return {
-    sql: `INSERT INTO trace_events (
-      id,
-      timestamp,
-      event,
-      log_kind,
-      service,
-      environment,
-      version,
-      request_id,
-      route_name,
-      method,
-      path,
-      status,
-      outcome,
-      duration_ms,
-      sample_reason,
-      artifact_key,
-      payload,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    values: [
-      input.id,
-      stringField(input.event, "timestamp", input.now),
-      stringField(input.event, "event", "unknown"),
-      stringField(input.event, "logKind", "wide_event"),
-      stringField(input.event, "service", "vesta-web"),
-      stringField(input.event, "environment", "unknown"),
-      stringField(input.event, "version", "0.0.0"),
-      nullableStringField(input.event, "requestId"),
-      nullableStringField(input.event, "routeName"),
-      nullableStringField(input.event, "method"),
-      nullableStringField(input.event, "path"),
-      numberField(input.event, "status"),
-      nullableStringField(input.event, "outcome"),
-      numberField(input.event, "durationMs"),
-      nullableStringField(input.event, "sampleReason"),
-      nullableStringField(input.event, "artifactKey"),
-      JSON.stringify(input.event),
-      input.now,
-    ],
-  };
-};
-
-export const buildRootServerSpan = (input: RootServerSpanInput): SqlInsertRow => {
-  const status = numberField(input.event, "status");
-  const method = stringField(input.event, "method", "HTTP");
-  const path = stringField(input.event, "path", "/");
-  const routeName = nullableStringField(input.event, "routeName");
-
-  return buildTraceSpanRow({
-    attributes: {
-      ...buildDebugWideEventFields({ event: input.event }),
-      "vesta.sampled": input.event.sampled === true,
-    },
-    durationMs: input.durationMs,
-    endedAt: input.endedAt,
-    environment: stringField(input.event, "environment", "unknown"),
-    httpStatus: status,
-    kind: "server",
-    method: nullableStringField(input.event, "method"),
-    name: `${method} ${path}`,
-    outcome: nullableStringField(input.event, "outcome"),
-    parentSpanId: input.parentSpanId ?? null,
-    path: nullableStringField(input.event, "path"),
-    requestId: nullableStringField(input.event, "requestId"),
-    routeName,
-    service: stringField(input.event, "service", "vesta-web"),
-    spanId: input.spanId,
-    startedAt: input.startedAt,
-    status: status && status >= 500 ? "error" : "ok",
-    traceId: input.traceId,
-    version: stringField(input.event, "version", "0.0.0"),
-  });
-};
-
-export const buildTraceSpanRow = (input: TraceSpanRowInput): SqlInsertRow => {
-  return {
-    sql: `INSERT INTO trace_spans (
-      trace_id,
-      span_id,
-      parent_span_id,
-      name,
-      kind,
-      status,
-      started_at,
-      ended_at,
-      duration_ms,
-      service,
-      environment,
-      version,
-      request_id,
-      route_name,
-      method,
-      path,
-      http_status,
-      outcome,
-      attributes,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    values: [
-      input.traceId,
-      input.spanId,
-      input.parentSpanId,
-      input.name,
-      input.kind,
-      input.status,
-      input.startedAt,
-      input.endedAt,
-      input.durationMs,
-      input.service,
-      input.environment,
-      input.version,
-      input.requestId ?? null,
-      input.routeName ?? null,
-      input.method ?? null,
-      input.path ?? null,
-      input.httpStatus ?? null,
-      input.outcome ?? null,
-      JSON.stringify(input.attributes),
-      input.endedAt,
-    ],
-  };
-};
-
-export const persistTraceCacheEvent = (db: TraceCacheDb, input: TraceEventRowInput) =>
-  runTraceCacheRow(db, buildTraceEventRow(input));
-
-export const persistTraceCacheSpan = (db: TraceCacheDb, row: SqlInsertRow) => {
-  return runTraceCacheRow(db, row);
-};
-
-export const pruneTraceCache = Effect.fn("pruneTraceCache")(function* (db: TraceCacheDb) {
-  yield* runTraceCacheStatement(
-    db,
-    "DELETE FROM trace_spans WHERE julianday(created_at) < julianday('now', '-7 days')",
-  );
-  yield* runTraceCacheStatement(
-    db,
-    "DELETE FROM trace_spans WHERE span_id NOT IN (SELECT span_id FROM trace_spans ORDER BY created_at DESC LIMIT 5000)",
-  );
-  yield* runTraceCacheStatement(
-    db,
-    "DELETE FROM trace_events WHERE julianday(created_at) < julianday('now', '-7 days')",
-  );
-  yield* runTraceCacheStatement(
-    db,
-    "DELETE FROM trace_events WHERE id NOT IN (SELECT id FROM trace_events ORDER BY created_at DESC LIMIT 1000)",
-  );
-});
-
-const runTraceCacheRow = (db: TraceCacheDb, row: SqlInsertRow) => {
-  return Effect.tryPromise({
-    try: () =>
-      db
-        .prepare(row.sql)
-        .bind(...row.values)
-        .run(),
-    catch: (cause) => cause,
-  }).pipe(Effect.asVoid);
-};
-
-const runTraceCacheStatement = (db: TraceCacheDb, sql: string) => {
-  return Effect.tryPromise({
-    try: () => db.prepare(sql).bind().run(),
-    catch: (cause) => cause,
-  }).pipe(Effect.asVoid);
 };
 
 const httpRequestsTotal = Metric.counter("http_requests_total", {

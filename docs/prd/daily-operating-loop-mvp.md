@@ -80,7 +80,7 @@ The system starts read-first and draft-first. External writes and behavior-chang
 - Workers Workflows own long-running multi-step jobs such as Daily Digest generation, calendar sync, memory consolidation, Human-in-the-Loop pause/resume, and evaluation runs.
 - D1 stores source-of-truth records: users, events, memories, Review Queue items, Resume Tokens, decisions, feedback, Consent Grants, skills, golden cases, and evaluations.
 - Queues, R2, and Vectorize are later additions, not MVP dependencies.
-- The repo starts as a monorepo with one Vesta app layer backed by a Cloudflare Worker.
+- The repo starts as a monorepo with one Nudge app layer backed by a Cloudflare Worker.
 - The app structure is `apps/web` for Hono routes, Workflows, Agents SDK entrypoints, the typed API contract, and the PWA App Surface; `apps/ios` for the native iOS App Surface; `packages/domain` for product/domain types and pure logic; `packages/effect-services` for service definitions and workflows; `packages/db` for D1 schema/migrations/repositories; `packages/evals` for golden cases and evaluators; and `packages/ui` for shared React UI.
 - The MVP starts with Clerk for signed-in users and an install-scoped anonymous identity for accountless use; user-data routes reject requests with neither identity.
 - Anonymous identities are explicit client identifiers, not a server-side dev fallback, so local data can later be linked to a real account without changing table ownership.

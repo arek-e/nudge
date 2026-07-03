@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Db } from "@vesta/db";
+import { Db } from "@nudge/db";
 import { MemoryIndex } from "./index";
 
 const user = { id: "memory-user", displayName: "Memory User" };

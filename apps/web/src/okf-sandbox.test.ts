@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildOkfProjection } from "@vesta/effect-services";
+import { buildOkfProjection } from "@nudge/effect-services";
 import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 
 describe("OKF sandbox smoke", () => {

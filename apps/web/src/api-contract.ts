@@ -309,21 +309,6 @@ const summaryListInputSchema = z.object({
   periodType: z.enum(["day", "week", "month", "quarter", "year", "custom"]).optional(),
 });
 
-export const traceSpanSummarySchema = z.object({
-  id: z.string(),
-  traceId: z.string(),
-  parentSpanId: z.string().nullable(),
-  name: z.string(),
-  kind: z.string(),
-  status: z.string(),
-  startedAt: z.string(),
-  endedAt: z.string().nullable(),
-  durationMs: z.number().nullable(),
-  routeName: z.string().nullable(),
-  method: z.string().nullable(),
-  path: z.string().nullable(),
-});
-
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
@@ -331,6 +316,35 @@ export const conversationToolEventSchema = z.object({
 });
 
 export const conversationToolSchema = z.enum(["listRecentSignals", "retrieveMemory"]);
+
+const nudgeHarnessCapabilitySchema = z.object({
+  id: z.string(),
+  kind: z.enum(["read", "draft", "reviewGated", "workflow", "subagent"]),
+  label: z.string(),
+  status: z.enum(["active", "planned"]),
+});
+
+const nudgeHarnessCapabilityGroupsSchema = z.object({
+  read: z.array(nudgeHarnessCapabilitySchema),
+  draft: z.array(nudgeHarnessCapabilitySchema),
+  reviewGated: z.array(nudgeHarnessCapabilitySchema),
+  workflow: z.array(nudgeHarnessCapabilitySchema),
+  subagent: z.array(nudgeHarnessCapabilitySchema),
+});
+
+const nudgeHarnessRegistrySchema = z.object({
+  identity: z.object({
+    agentName: z.literal("Nudge Agent"),
+    durableFrontDoor: z.literal("UserAgentSession"),
+  }),
+  capabilities: nudgeHarnessCapabilityGroupsSchema,
+});
+
+const nudgeHarnessTurnSchema = z.object({
+  intent: z.literal("loopIntake"),
+  activeCapabilities: nudgeHarnessCapabilityGroupsSchema,
+  activeCapabilityIds: z.array(z.string()),
+});
 
 export const conversationMetadataSchema = z.object({
   conversationId: z.string(),
@@ -342,6 +356,7 @@ export const conversationMetadataSchema = z.object({
     name: z.literal("think"),
     runtime: z.literal("cloudflare-agents"),
   }),
+  harness: nudgeHarnessRegistrySchema,
   skills: z.array(z.enum(["intake-loop", "review-commitment", "close-loop"])),
   subAgents: z.array(z.enum(["loopIntakeThink"])),
   tools: z.array(conversationToolSchema),
@@ -397,11 +412,11 @@ export const conversationMessageResponseSchema = z.object({
     runtime: z.literal("cloudflare-agents"),
   }),
   reply: z.string(),
+  activeHarness: nudgeHarnessTurnSchema,
+  agentActionsApplied: z.array(z.enum(["draftLoopIntake"])),
   skillsApplied: z.array(z.enum(["intake-loop"])),
   subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
-  usedTools: z.array(
-    z.enum(["appendSignal", "createSynthesis", "generateProposals", "retrieveMemory"]),
-  ),
+  usedTools: z.array(z.enum(["retrieveMemory"])),
   workflowHooks: z.array(z.enum(["dailyDigest"])),
 });
 
@@ -682,12 +697,6 @@ export const apiContract = {
       .route({ method: "GET", path: "/syntheses/latest" })
       .input(synthesisInputSchema)
       .output(synthesisResponseSchema),
-  },
-  traces: {
-    recent: oc
-      .route({ method: "GET", path: "/traces/recent" })
-      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
-      .output(z.object({ spans: z.array(traceSpanSummarySchema) })),
   },
   voice: {
     log: oc
