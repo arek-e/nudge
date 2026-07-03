@@ -4,9 +4,9 @@
 
 # Nudge
 
-**A native iOS journal and Siri capture app for private context**
+**A multi-surface notes workspace for agent-assisted follow-through**
 
-iOS-first. Journal-led. Source-linked. Human-in-the-loop.
+Write anywhere. Sync through Convex. Let the Engine turn notes into reviewable action.
 
 [Live Web App](https://nudge-web.teampitch.workers.dev/) &middot; [iOS App](apps/ios/Nudge) &middot; [API Docs](https://nudge-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://nudge-web.teampitch.workers.dev/api/openapi.json)
 
@@ -16,11 +16,11 @@ iOS-first. Journal-led. Source-linked. Human-in-the-loop.
 
 ## What Nudge Is
 
-Nudge is an iOS-first private workspace for writing things down, capturing notes with Siri, and letting agents turn that context into reviewable drafts.
+Nudge is a private notes and sticky-notes workspace for writing things down from any surface and letting agents turn that context into reviewable drafts.
 
-The native iOS app is the primary surface: quick captures, daily notes, calendar-aware context, and Siri phrases such as "Tell Nudge" or "Log this in Nudge." The Cloudflare backend stores the source material, runs analysis, and exposes OpenAPI/MCP surfaces for integrations and agents.
+Nudge is multi-surface: web and Electron should feel like the same React App Surface, SwiftUI iOS keeps native mobile capture and Siri/App Intents, and Raycast gives a fast command surface. Convex stores canonical product state in realtime, while the Cloudflare-hosted Nudge Engine runs the agent loop, integrations, API, review boundaries, and tool execution.
 
-The web app is the companion surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development.
+The web app is the first React surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development. The Electron desktop app should reuse that React surface logic rather than becoming a separate product fork.
 
 Internally, Nudge keeps the model small and inspectable: Captures become Signals, Signals form Context, Frames define what Nudge is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
 
@@ -28,46 +28,45 @@ The goal is not another chatbot. The goal is a private operating layer that reme
 
 ## App Surfaces
 
-| Surface               | What it is                                                                  |
-| --------------------- | --------------------------------------------------------------------------- |
-| **Native iOS app**    | SwiftUI app for journal capture, calendar context, Siri capture, and review |
-| **Siri App Intents**  | Voice capture phrases that post directly to the Nudge API                   |
-| **Web app / PWA**     | Companion surface for capture, review, actions, summaries, and settings     |
-| **OpenAPI + MCP API** | Integration surface for custom tools and agent workflows                    |
+| Surface               | What it is                                                                    |
+| --------------------- | ----------------------------------------------------------------------------- |
+| **Web app / PWA**     | React App Surface for capture, notes, review, actions, summaries, settings    |
+| **Electron desktop**  | Desktop App Surface that should reuse web React surface logic and editors     |
+| **Native iOS app**    | SwiftUI App Surface for mobile capture, notes, calendar context, Siri, review |
+| **Raycast extension** | TypeScript command surface for fast capture, search, menu-bar status, review  |
+| **Siri App Intents**  | Voice capture phrases through the SwiftUI iOS app                             |
+| **OpenAPI + MCP API** | Engine integration surface for custom tools and agent workflows               |
 
 ## How It Works
 
 ```text
-User / Integration
+User / Surface / Integration
       |
       |  Capture
       v
-+----------------+       +----------------+
-|    Signals     | ----> |    Context     |
-| append-only D1 |       | time-scoped    |
-+----------------+       +-------+--------+
-                                  |
-                                  | Frame: "What matters now?"
-                                  v
-                         +----------------+
-                         |   Synthesis    |
-                         | source-linked  |
-                         +-------+--------+
-                                  |
-                                  | later
-                                  v
-                         +----------------+
-                         | Proposal/Review|
-                         | HITL decisions |
-                         +----------------+
++------------------+       +------------------+
+| Convex product   | ----> | Nudge Engine     |
+| notes, signals,  |       | agent loop, API, |
+| reviews, memory  |       | tools, workflows |
++--------+---------+       +--------+---------+
+         |                          |
+         | realtime sync            | source-linked reasoning
+         v                          v
++------------------+       +------------------+
+| App Surfaces     |       | Synthesis,       |
+| web, Electron,   | <---- | Proposal, Review |
+| iOS, Raycast     |       | Commitment       |
++------------------+       +------------------+
 ```
 
 What is live now:
 
 - Native iOS app source in `apps/ios/Nudge`, including Siri App Intents and local run instructions.
+- Locked surface direction for Electron desktop and Raycast extension, with implementation still to be scaffolded.
 - Siri capture through `POST /api/voice/log`.
 - Mobile-first web captures, daily notes, and journal revisions.
-- User-owned Signals, notes, summaries, memory, and traces in D1/R2.
+- Canonical Convex product store for notes, Signals, summaries, memory, proposals, reviews, agent outputs, and outcomes.
+- D1 remains available for trace persistence while product data moves through the Convex-backed store.
 - Source-linked Syntheses over a selected time frame.
 - Draft extraction of actions, reminders, events, questions, ideas, and memory candidates from note revisions.
 - Durable `UserAgentSession` conversations with memory retrieval and reviewable loop drafts.
@@ -139,17 +138,20 @@ See [`apps/ios/Nudge/README.md`](apps/ios/Nudge/README.md) for Siri phrases and 
 
 ## Features
 
-|                   | Feature                     | Description                                                  |
-| ----------------- | --------------------------- | ------------------------------------------------------------ |
-| :iphone:          | **Native iOS app**          | SwiftUI app for capture, notes, calendar context, and Siri   |
-| :microphone:      | **Siri capture**            | App Intents for hands-free note logging into Nudge           |
-| :memo:            | **Captures**                | User or integration input recorded as source-linked Signals  |
-| :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload      |
-| :compass:         | **Frames**                  | Bounded questions like “What matters now?”                   |
-| :sparkles:        | **Syntheses**               | Deterministic, source-linked interpretations over Signals    |
-| :link:            | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows |
-| :shield:          | **Human-in-the-loop model** | Review-first posture for memory, actions, and automation     |
-| :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement  |
+|                        | Feature                     | Description                                                   |
+| ---------------------- | --------------------------- | ------------------------------------------------------------- |
+| :globe_with_meridians: | **Web app / PWA**           | React surface for notes, review, settings, and API docs       |
+| :desktop_computer:     | **Electron desktop**        | Planned desktop shell sharing web React surface logic         |
+| :iphone:               | **Native iOS app**          | SwiftUI app for capture, notes, calendar context, and Siri    |
+| :mag:                  | **Raycast extension**       | Planned command surface for capture, search, and review       |
+| :microphone:           | **Siri capture**            | App Intents for hands-free note logging into Nudge            |
+| :memo:                 | **Captures**                | User or integration input recorded as source-linked Signals   |
+| :signal_strength:      | **Signals**                 | Source-linked Convex records with occurrence time and payload |
+| :compass:              | **Frames**                  | Bounded questions like “What matters now?”                    |
+| :sparkles:             | **Syntheses**               | Deterministic, source-linked interpretations over Signals     |
+| :link:                 | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows  |
+| :shield:               | **Human-in-the-loop model** | Review-first posture for memory, actions, and automation      |
+| :bar_chart:            | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement   |
 
 ## Brand Assets
 
@@ -168,50 +170,50 @@ brand assets for app UI and documentation.
 ## Architecture
 
 ```text
-+--------------------------------------------------+
-|                    Nudge Worker                  |
-|       Cloudflare Worker - Hono - oRPC/OpenAPI     |
-+---------------------+----------------------------+
-                      |
-      +---------------+---------------+
-      |                               |
-      v                               v
-+------------+                 +-------------+
-| D1         |                 | R2          |
-| Signals    |                 | Redacted    |
-| Frames     |                 | artifacts   |
-| Syntheses  |                 +-------------+
-| Notes      |
-| Memory     |
-| Traces     |
-+------------+
-      |
-      v
-+--------------------+       +----------------------+
-| Durable Objects    |       | Workers Workflows    |
-| user agents        |       | note/digest analysis |
-+--------------------+       +----------------------+
++----------------------+   +----------------------+   +----------------------+
+| Web React surface    |   | Electron desktop     |   | SwiftUI iOS / Siri   |
++----------+-----------+   +----------+-----------+   +----------+-----------+
+           |                          |                          |
+           +------------+-------------+-------------+------------+
+                        |                           |
+                        v                           v
+              +------------------+        +----------------------+
+              | Convex product   | <----> | Nudge Engine         |
+              | store + realtime |        | Worker/Agents/Flows  |
+              +--------+---------+        +----------+-----------+
+                       |                             |
+                       v                             v
+              +------------------+        +----------------------+
+              | Raycast surface  |        | R2 artifacts / D1    |
+              | commands/status  |        | trace cache          |
+              +------------------+        +----------------------+
 ```
 
-- **`apps/ios`**: native SwiftUI app, Siri App Intents, capture UI, calendar views, and local device docs.
+- **`apps/ios`**: SwiftUI iOS App Surface, Siri App Intents, capture UI, calendar views, and local device docs.
 - **`apps/web`**: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Clerk auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
+- **`apps/desktop`**: planned Electron App Surface that should reuse web React surface logic and editor modules.
+- **`apps/raycast`**: planned Raycast TypeScript App Surface for fast capture, search, menu-bar status, and lightweight review.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
-- **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
-- **`packages/ui`**: shared React UI components and design tokens.
+- **`packages/db`**: product storage port plus legacy/local D1 adapters.
+- **`packages/db-convex`**: Convex-backed product storage adapter and runtime Convex client wiring.
+- **`packages/surface`**: shared App Surface logic for local draft policy, Convex note payloads, signal previews, and local date helpers.
+- **`packages/ui`**: shared React UI components, design tokens, and surface primitives for web and Electron.
 - **`packages/observability`**: shared tracing, Braintrust wrappers, trace-cache read models, request telemetry, and safe error fields.
-- **`packages/effect-services`**: Effect service seams for auth, primitive workflows, and memory indexing.
+- **`packages/effect-services`**: reusable Nudge Engine workflows, Effect services, memory indexing, and OKF projection.
 - **`packages/evals`**: golden-case agent/product evals.
 
 ## Stack
 
-- Cloudflare Workers, D1, R2, Durable Objects, Workers Workflows.
+- Convex for canonical realtime product data across App Surfaces and runtime code.
+- Cloudflare Workers, D1 trace cache, R2, Durable Objects, Workers Workflows.
 - Cloudflare Agents, Workers AI, and optional Turbopuffer memory search.
+- Electron for desktop, SwiftUI for iOS, and Raycast API for command surfaces.
 - Hono for Worker routing and middleware.
 - oRPC/OpenAPI for public API contracts and typed frontend clients.
 - React, TanStack Router, TanStack Query, TanStack Table, Motion.
 - Clerk for user authentication across the web app and Convex sync.
 - Effect v4 for services and dependency injection.
-- Drizzle over D1 behind an Effect `Db` port.
+- Drizzle over D1 for legacy/local adapters and trace persistence.
 - Bun, Mise, Oxfmt, Oxlint, Lefthook.
 
 ## Development
@@ -237,6 +239,8 @@ bun run traces:recent
 | **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                                                                 |
 | **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                                                   |
 | **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Nudge` with Local, Staging, and Production schemes. Siri branding and phrase docs are covered by Bun tests. |
+| **Electron desktop**            | Decision locked in ADR 0017; app shell and release automation are not scaffolded yet.                                                                                            |
+| **Raycast extension**           | Decision locked in ADR 0017; extension package and release flow are not scaffolded yet.                                                                                          |
 | **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow.                                    |
 
 ## Deployment

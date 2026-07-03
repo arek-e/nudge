@@ -12,7 +12,8 @@ modules still earn that split case by case.
 - `apps/web/src/Services/NudgeApp.ts` owns the `NudgeApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
 - `apps/web/src/Layers/NudgeAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
 - `packages/db` owns persistence and row decoding. Runtime code should call the `Db` Effect service, not D1 or Drizzle directly.
-- `packages/effect-services` owns primitive Loop Composition modules such as memory indexing, OKF projection, and primitive workflows.
+- `packages/effect-services` owns reusable Nudge Engine workflows such as primitive Loop Composition, daily note analysis preparation, memory indexing, and OKF projection. Routes and App Surfaces supply platform adapters; they should not recreate Engine workflow sequencing.
+- `packages/surface` owns shared App Surface logic that is not presentation-specific, such as local draft policy, Convex note patch payloads, local date formatting, and signal preview text. Web, Electron, and Raycast should depend on this package instead of copying helpers into each surface.
 - `apps/web/src/index.ts` owns Cloudflare Agent and Workflow entrypoints. Durable background work lives there until a repeated reactor pattern justifies a deeper module.
 - `apps/web/src/api-contract.ts` owns public OpenAPI/oRPC input and output schemas.
 
@@ -39,5 +40,6 @@ Split a Nudge module only when at least one is true:
 - Two real adapters exist, such as memory and durable storage, or test and production adapters that cannot stay tiny.
 - Tests need to wait for async work and are starting to sleep or poll.
 - The module has become the place where Capture, Signal, Context, Frame, Synthesis, Proposal, Review, Commitment, Outcome, or Loop Composition rules are leaking into unrelated code.
+- App Surface behavior would otherwise be copied between web, Electron, Raycast, and iOS instead of living behind `packages/surface` or the Nudge Engine.
 
 Otherwise keep the module boring and local.

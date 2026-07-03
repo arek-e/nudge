@@ -73,13 +73,20 @@ describe("OKF projection", () => {
     const projection = buildOkfProjection(exportedUserData);
 
     expect(listOkfDirectory(projection, "/")).toEqual([
+      "actions",
       "daily",
       "index.md",
       "items",
       "memory",
       "summaries",
+      "user",
     ]);
     expect(listOkfDirectory(projection, "/daily")).toEqual(["2026-06-29.md", "index.md"]);
+    expect(listOkfDirectory(projection, "/user")).toEqual([
+      "index.md",
+      "profile.md",
+      "writing-style.md",
+    ]);
 
     expect(readOkfFile(projection, "/daily/2026-06-29.md")).toContain(
       'type: "Daily Note"\ntitle: "June 29"',
@@ -94,6 +101,11 @@ describe("OKF projection", () => {
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
       "OKF should be a projection over workspace data.",
     );
+    expect(readOkfFile(projection, "/user/profile.md")).toContain("Display name: Alex");
+    expect(readOkfFile(projection, "/user/writing-style.md")).toContain(
+      "Look into OKF as the filesystem shape",
+    );
+    expect(readOkfFile(projection, "/actions/open.md")).toContain("Follow up on OKF");
   });
 
   test("renders concept files with OKF-required type and stable resource metadata", () => {
@@ -129,12 +141,22 @@ describe("OKF projection", () => {
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
       'resource: "nudge://summaries/day/2026-06-29"',
     );
+    expect(readOkfFile(projection, "/user/profile.md")).toContain(
+      'resource: "nudge://user/profile"',
+    );
+    expect(readOkfFile(projection, "/actions/open.md")).toContain(
+      'resource: "nudge://actions/open"',
+    );
   });
 
   test("searches projected OKF files by path and content", () => {
     const projection = buildOkfProjection(exportedUserData);
 
     expect(searchOkfFiles(projection, "sandbox")).toEqual([
+      expect.objectContaining({
+        path: "/actions/open.md",
+        snippet: "Decide whether the Cloudflare sandbox gets a mounted OKF tree.",
+      }),
       expect.objectContaining({
         path: "/items/item-1.md",
         snippet: "Decide whether the Cloudflare sandbox gets a mounted OKF tree.",
