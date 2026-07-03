@@ -32,10 +32,6 @@
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
-  "ai": {
-    "binding": "AI",
-    "remote": true,
-  },
   "d1_databases": [
     {
       "binding": "DB",
