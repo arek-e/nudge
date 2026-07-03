@@ -1,13 +1,17 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Notification, shell } from "electron";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
   canOpenExternalUrl,
+  defaultDesktopSettings,
+  desktopSettingsFromUnknown,
+  desktopSettingsUpdateFromUnknown,
   desktopAuthTicketFromCallbackUrl,
   desktopProtocol,
   desktopWebAppUrlForAuthTicket,
+  type DesktopSettings,
   isDesktopAuthCallbackUrl,
   resolveDesktopAutoUpdatesEnabled,
   resolveDesktopE2eReadyFile,
@@ -27,12 +31,13 @@ const currentFile = fileURLToPath(import.meta.url);
 const currentDirectory = dirname(currentFile);
 const desktopUpdateStartupDelayMs = 10_000;
 const desktopUpdatePollIntervalMs = 4 * 60 * 60 * 1000;
-const quickCaptureShortcut = "CommandOrControl+Shift+N";
 
 type DesktopUpdatesRuntime = ManagedRuntime.ManagedRuntime<DesktopUpdates, never>;
 
 let mainWindow: BrowserWindow | undefined;
 let quickCaptureWindow: BrowserWindow | undefined;
+let desktopSettings: DesktopSettings = defaultDesktopSettings;
+let registeredQuickCaptureShortcut: string | undefined;
 let pendingDesktopAuthCallbackUrl: string | undefined;
 let desktopUpdatesRuntime: DesktopUpdatesRuntime | undefined;
 let desktopUpdateStartupTimer: NodeJS.Timeout | undefined;
@@ -128,6 +133,48 @@ function desktopWebAppRouteUrl(pathname: string) {
   return url.toString();
 }
 
+function desktopSettingsPath() {
+  return join(app.getPath("userData"), "desktop-settings.json");
+}
+
+function isNodeErrorWithCode(error: unknown, code: string) {
+  return typeof error === "object" && error !== null && Reflect.get(error, "code") === code;
+}
+
+async function loadDesktopSettings() {
+  const settingsPath = desktopSettingsPath();
+  try {
+    desktopSettings = desktopSettingsFromUnknown(JSON.parse(await readFile(settingsPath, "utf8")));
+  } catch (error) {
+    if (!isNodeErrorWithCode(error, "ENOENT")) {
+      console.warn("[desktop-settings] could not read settings", error);
+    }
+    desktopSettings = defaultDesktopSettings;
+  }
+}
+
+async function saveDesktopSettings(settings: DesktopSettings) {
+  const settingsPath = desktopSettingsPath();
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+async function updateDesktopSettings(value: unknown) {
+  const nextSettings = desktopSettingsUpdateFromUnknown(value);
+  if (!nextSettings) {
+    return {
+      error: "Enter a shortcut like CommandOrControl+Shift+N.",
+      ok: false,
+      settings: desktopSettings,
+    };
+  }
+
+  desktopSettings = nextSettings;
+  await saveDesktopSettings(desktopSettings);
+  registerQuickCaptureShortcut(desktopSettings.quickCaptureShortcut);
+  return { ok: true, settings: desktopSettings };
+}
+
 function registerDesktopAuthProtocolClient() {
   if (process.defaultApp) {
     const appEntryPoint = process.argv[1];
@@ -177,10 +224,14 @@ function hideQuickCaptureWindow() {
   window.hide();
 }
 
-function registerQuickCaptureShortcut() {
-  const registered = globalShortcut.register(quickCaptureShortcut, openQuickCaptureWindow);
+function registerQuickCaptureShortcut(shortcut: string) {
+  if (registeredQuickCaptureShortcut) {
+    globalShortcut.unregister(registeredQuickCaptureShortcut);
+  }
+  registeredQuickCaptureShortcut = shortcut;
+  const registered = globalShortcut.register(shortcut, openQuickCaptureWindow);
   if (!registered) {
-    console.warn(`[quick-capture] failed to register ${quickCaptureShortcut}`);
+    console.warn(`[quick-capture] failed to register ${shortcut}`);
   }
 }
 
@@ -395,6 +446,12 @@ ipcMain.handle("nudge:update-install", async () =>
   runDesktopUpdatesAction((updates) => updates.install()),
 );
 
+ipcMain.handle("nudge:desktop-settings-get", () => ({ ok: true, settings: desktopSettings }));
+
+ipcMain.handle("nudge:desktop-settings-set", async (_event, settings: unknown) =>
+  updateDesktopSettings(settings),
+);
+
 ipcMain.handle("nudge:quick-capture-close", () => {
   hideQuickCaptureWindow();
   return { ok: true };
@@ -427,11 +484,12 @@ if (!singleInstanceLock) {
     if (mainWindow) focusWindow(mainWindow);
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    await loadDesktopSettings();
     registerDesktopAuthProtocolClient();
     setupDesktopUpdates();
     createMainWindow();
-    registerQuickCaptureShortcut();
+    registerQuickCaptureShortcut(desktopSettings.quickCaptureShortcut);
 
     if (pendingDesktopAuthCallbackUrl) {
       const callbackUrl = pendingDesktopAuthCallbackUrl;
