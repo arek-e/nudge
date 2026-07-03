@@ -26,6 +26,7 @@ describe("Nudge Worker environments", () => {
     expect(wrangler).toContain(
       '"CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );
+    expect(wrangler).toContain('"CLERK_PROXY_URL": "https://app.explorenudge.com/__clerk"');
     expect(wrangler).not.toContain('"d1_databases"');
     expect(wrangler).not.toContain('"binding": "DB"');
     expect(wrangler).not.toContain('"TRACE_ARTIFACTS"');
@@ -51,6 +52,7 @@ describe("Nudge Worker environments", () => {
     expect(deployScript).toContain(
       'VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );
+    expect(deployScript).toContain('VITE_CLERK_PROXY_URL: "/__clerk"');
     expect(deployScript).toContain(
       'VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud"',
     );
@@ -63,6 +65,8 @@ describe("Nudge Worker environments", () => {
     expect(clientEntry).toContain(
       'import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud"',
     );
+    expect(clientEntry).toContain("import.meta.env.VITE_CLERK_PROXY_URL");
+    expect(clientEntry).toContain("proxyUrl: clerkProxyUrl");
     expect(clientEntry).toContain("import.meta.env.VITE_NUDGE_LOGO_LONG_SRC");
     expect(deployScript).toContain("VITE_CLERK_PUBLISHABLE_KEY");
   });

@@ -48,6 +48,9 @@ const convexUrl =
   import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
 const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = requiredClerkPublishableKey();
+const clerkProxyUrl = optionalEnvString(
+  import.meta.env.VITE_CLERK_PROXY_URL ?? import.meta.env.CLERK_PROXY_URL,
+);
 const logoLongSrc =
   import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
 const desktopAuthRequestParam = "desktop_auth";
@@ -63,6 +66,10 @@ function requiredClerkPublishableKey() {
   const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
   if (typeof value === "string" && value.startsWith("pk_")) return value;
   throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
+}
+
+function optionalEnvString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -1659,7 +1666,11 @@ if (!rootElement) throw new Error("Missing #root element");
 
 function NudgeConvexProvider(props: { readonly children: ReactNode }) {
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={clerkPublishableKey}
+      afterSignOutUrl="/"
+      {...(clerkProxyUrl ? { proxyUrl: clerkProxyUrl } : {})}
+    >
       <ClerkLoading>
         <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />
       </ClerkLoading>

@@ -81,6 +81,23 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use("*", requestObservability());
   app.use("*", serverTiming());
 
+  app.all("/__clerk/*", wideEventFields({ routeName: "clerk.proxy" }), async (c) => {
+    const secretKey = c.env.CLERK_SECRET_KEY;
+    if (!secretKey) return c.json({ error: "CLERK_SECRET_KEY is required" }, 503);
+
+    const requestUrl = new URL(c.req.url);
+    const clerkPath = requestUrl.pathname.slice("/__clerk".length) || "/";
+    const targetUrl = new URL(clerkPath, "https://frontend-api.clerk.dev");
+    targetUrl.search = requestUrl.search;
+
+    const proxyRequest = new Request(targetUrl.toString(), c.req.raw);
+    proxyRequest.headers.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
+    proxyRequest.headers.set("Clerk-Secret-Key", secretKey);
+    proxyRequest.headers.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
+
+    return fetch(proxyRequest);
+  });
+
   registerStaticRoutes(app);
 
   app.on(["GET", "POST", "OPTIONS"], "/mcp", wideEventFields({ routeName: "mcp" }), async (c) => {
@@ -124,4 +141,15 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   return app;
+}
+
+function clerkProxyUrl(requestUrl: string, env: Env) {
+  const configured = env.CLERK_PROXY_URL?.trim();
+  if (configured && configured.length > 0) return configured;
+
+  const url = new URL(requestUrl);
+  url.pathname = "/__clerk";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
