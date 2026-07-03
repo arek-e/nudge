@@ -86,7 +86,7 @@ export function createApp(options: CreateAppOptions = {}) {
     if (!secretKey) return c.json({ error: "CLERK_SECRET_KEY is required" }, 503);
 
     const requestUrl = new URL(c.req.url);
-    const clerkPath = requestUrl.pathname.slice("/__clerk".length) || "/";
+    const clerkPath = decodeClerkProxyPath(requestUrl.pathname.slice("/__clerk".length) || "/");
     const targetUrl = new URL(clerkPath, "https://frontend-api.clerk.dev");
     targetUrl.search = requestUrl.search;
 
@@ -100,7 +100,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const proxyInit: RequestInit = {
       headers: proxyHeaders,
       method: c.req.raw.method,
-      redirect: "follow",
+      redirect: "manual",
     };
     const proxyBody = clerkProxyBody(c.req.raw);
     if (proxyBody) proxyInit.body = proxyBody;
@@ -169,4 +169,11 @@ function clerkProxyUrl(requestUrl: string, env: Env) {
 
 function clerkProxyBody(request: Request) {
   return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
+}
+
+function decodeClerkProxyPath(path: string) {
+  return path
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
 }
