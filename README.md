@@ -18,9 +18,9 @@ Write anywhere. Sync through Convex. Let the Engine turn notes into reviewable a
 
 Nudge is a private notes and sticky-notes workspace for writing things down from any surface and letting agents turn that context into reviewable drafts.
 
-Nudge is multi-surface: web and Electron should feel like the same React App Surface, SwiftUI iOS keeps native mobile capture and Siri/App Intents, and Raycast gives a fast command surface. Convex stores canonical product state in realtime, while the Cloudflare-hosted Nudge Engine runs the agent loop, integrations, API, review boundaries, and tool execution.
+Nudge is multi-surface: web and desktop should feel like the same React App Surface, SwiftUI iOS keeps native mobile capture and Siri/App Intents, and Raycast gives a fast command surface. Convex stores canonical product state in realtime, while the Cloudflare-hosted Nudge Engine runs the agent loop, integrations, API, review boundaries, and tool execution.
 
-The web app is the first React surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development. The Electron desktop app should reuse that React surface logic rather than becoming a separate product fork.
+The web app is the first React surface for the same operating loop: capture, review, actions, summaries, settings, API docs, and local development. The desktop app should reuse that React surface logic rather than becoming a separate product fork.
 
 Internally, Nudge keeps the model small and inspectable: Captures become Signals, Signals form Context, Frames define what Nudge is helping with, Syntheses interpret that context, and Proposals, Reviews, Commitments, and Outcomes close the loop.
 
@@ -31,9 +31,9 @@ The goal is not another chatbot. The goal is a private operating layer that reme
 | Surface               | What it is                                                                    |
 | --------------------- | ----------------------------------------------------------------------------- |
 | **Web app / PWA**     | React App Surface for capture, notes, review, actions, summaries, settings    |
-| **Electron desktop**  | Desktop App Surface that should reuse web React surface logic and editors     |
+| **Desktop app**       | Desktop App Surface that should reuse web React surface logic and editors     |
 | **Native iOS app**    | SwiftUI App Surface for mobile capture, notes, calendar context, Siri, review |
-| **Raycast extension** | TypeScript command surface for fast capture, search, menu-bar status, review  |
+| **Raycast extension** | TypeScript command surface for fast capture, current context, ask, and review |
 | **Siri App Intents**  | Voice capture phrases through the SwiftUI iOS app                             |
 | **OpenAPI + MCP API** | Engine integration surface for custom tools and agent workflows               |
 
@@ -54,7 +54,7 @@ User / Surface / Integration
          v                          v
 +------------------+       +------------------+
 | App Surfaces     |       | Synthesis,       |
-| web, Electron,   | <---- | Proposal, Review |
+| web, desktop,    | <---- | Proposal, Review |
 | iOS, Raycast     |       | Commitment       |
 +------------------+       +------------------+
 ```
@@ -62,7 +62,7 @@ User / Surface / Integration
 What is live now:
 
 - Native iOS app source in `apps/ios/Nudge`, including Siri App Intents and local run instructions.
-- Locked surface direction for Electron desktop and Raycast extension, with implementation still to be scaffolded.
+- Locked surface direction for desktop and Raycast extension.
 - Siri capture through `POST /api/voice/log`.
 - Mobile-first web captures, daily notes, and journal revisions.
 - Canonical Convex product store for notes, Signals, summaries, memory, proposals, reviews, agent outputs, and outcomes.
@@ -141,9 +141,9 @@ See [`apps/ios/Nudge/README.md`](apps/ios/Nudge/README.md) for Siri phrases and 
 |                        | Feature                     | Description                                                   |
 | ---------------------- | --------------------------- | ------------------------------------------------------------- |
 | :globe_with_meridians: | **Web app / PWA**           | React surface for notes, review, settings, and API docs       |
-| :desktop_computer:     | **Electron desktop**        | Planned desktop shell sharing web React surface logic         |
+| :desktop_computer:     | **Desktop app**             | Desktop shell sharing web React surface logic                 |
 | :iphone:               | **Native iOS app**          | SwiftUI app for capture, notes, calendar context, and Siri    |
-| :mag:                  | **Raycast extension**       | Planned command surface for capture, search, and review       |
+| :mag:                  | **Raycast extension**       | Command surface for capture, current context, ask, and review |
 | :microphone:           | **Siri capture**            | App Intents for hands-free note logging into Nudge            |
 | :memo:                 | **Captures**                | User or integration input recorded as source-linked Signals   |
 | :signal_strength:      | **Signals**                 | Source-linked Convex records with occurrence time and payload |
@@ -171,7 +171,7 @@ brand assets for app UI and documentation.
 
 ```text
 +----------------------+   +----------------------+   +----------------------+
-| Web React surface    |   | Electron desktop     |   | SwiftUI iOS / Siri   |
+| Web React surface    |   | Desktop app          |   | SwiftUI iOS / Siri   |
 +----------+-----------+   +----------+-----------+   +----------+-----------+
            |                          |                          |
            +------------+-------------+-------------+------------+
@@ -191,13 +191,13 @@ brand assets for app UI and documentation.
 
 - **`apps/ios`**: SwiftUI iOS App Surface, Siri App Intents, capture UI, calendar views, and local device docs.
 - **`apps/web`**: Cloudflare Worker, Hono app, oRPC/OpenAPI API, Clerk auth, Workers Workflow, Cloudflare Agent entrypoints, React PWA surface, and static assets.
-- **`apps/desktop`**: planned Electron App Surface that should reuse web React surface logic and editor modules.
-- **`apps/raycast`**: planned Raycast TypeScript App Surface for fast capture, search, menu-bar status, and lightweight review.
+- **`apps/desktop`**: desktop App Surface that reuses web React surface logic and editor modules.
+- **`apps/raycast`**: Raycast TypeScript App Surface for fast capture, current context, ask, and lightweight review.
 - **`apps/web/src/api-contract.ts`**: shared TypeScript contract for the app API.
 - **`packages/db`**: product storage port plus legacy/local D1 adapters.
 - **`packages/db-convex`**: Convex-backed product storage adapter and runtime Convex client wiring.
 - **`packages/surface`**: shared App Surface logic for local draft policy, Convex note payloads, signal previews, and local date helpers.
-- **`packages/ui`**: shared React UI components, design tokens, and surface primitives for web and Electron.
+- **`packages/ui`**: shared React UI components, design tokens, and surface primitives for web and desktop.
 - **`packages/observability`**: shared tracing, Braintrust wrappers, trace-cache read models, request telemetry, and safe error fields.
 - **`packages/effect-services`**: reusable Nudge Engine workflows, Effect services, memory indexing, and OKF projection.
 - **`packages/evals`**: golden-case agent/product evals.
@@ -207,7 +207,7 @@ brand assets for app UI and documentation.
 - Convex for canonical realtime product data across App Surfaces and runtime code.
 - Cloudflare Workers, D1 trace cache, R2, Durable Objects, Workers Workflows.
 - Cloudflare Agents, Workers AI, and optional Turbopuffer memory search.
-- Electron for desktop, SwiftUI for iOS, and Raycast API for command surfaces.
+- Desktop shell, SwiftUI for iOS, and Raycast API for command surfaces.
 - Hono for Worker routing and middleware.
 - oRPC/OpenAPI for public API contracts and typed frontend clients.
 - React, TanStack Router, TanStack Query, TanStack Table, Motion.
@@ -220,7 +220,7 @@ brand assets for app UI and documentation.
 
 ```bash
 bun run check          # format + lint + typecheck + unit tests
-bun run test:e2e       # mobile Playwright smoke test
+bun run test:e2e       # desktop-mounted web Playwright e2e
 bun run dev            # build web and start the Worker with wrangler dev
 ```
 
@@ -236,11 +236,11 @@ bun run traces:recent
 
 | Area                            | Status                                                                                                                                                                           |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and WebKit E2E on `main`.                                                                                 |
+| **Repository CI**               | `CI` runs Bun install, format, lint, typecheck, unit tests, web build, and Playwright E2E on `main`.                                                                             |
 | **Cloudflare Worker / web app** | GitHub Actions deploys the Cloudflare Worker, web assets, and remote D1 migrations after successful `main` CI.                                                                   |
 | **Native iOS app**              | The Xcode project is checked in and manually runnable from `apps/ios/Nudge` with Local, Staging, and Production schemes. Siri branding and phrase docs are covered by Bun tests. |
-| **Electron desktop**            | Decision locked in ADR 0017; app shell and release automation are not scaffolded yet.                                                                                            |
-| **Raycast extension**           | Decision locked in ADR 0017; extension package and release flow are not scaffolded yet.                                                                                          |
+| **Desktop app**                 | `apps/desktop` mounts the shared React web surface and has Electron e2e coverage; release automation is not wired yet.                                                           |
+| **Raycast extension**           | `apps/raycast` has capture, current context, ask, and review commands with service e2e coverage; release flow is not wired yet.                                                  |
 | **iOS release automation**      | TestFlight/App Store deployment is not wired yet. There is no macOS GitHub Actions job, `xcodebuild archive`, Fastlane lane, or signing flow.                                    |
 
 ## Deployment

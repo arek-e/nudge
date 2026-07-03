@@ -1,4 +1,3 @@
-import type { FunctionReturnType } from "convex/server";
 import { ClerkProvider, SignIn, UserButton, useAuth, useClerk } from "@clerk/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -11,25 +10,50 @@ import {
 } from "@tanstack/react-router";
 import { ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { type ReactNode, StrictMode, useEffect, useState } from "react";
+import { type PointerEvent, type ReactNode, StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  buildStickyNoteCreateInput,
-  buildStickyNotePatchInput,
-  stickyNoteTitleFromText,
-  surfacePayloadHash,
+  type AppSurface,
+  type SurfaceActionItem,
+  type SurfaceAgentRun,
+  type SurfaceRefreshContext,
   todayLocalDate,
 } from "@nudge/surface";
 import {
-  EmptyNotesStateSurface,
+  CalendarActivitySurface,
+  CaptureResultSurface,
+  DailyOperatingLoopSurface,
   NoteComposerSurface,
   ReviewActionSurface,
-  StickyNoteSurface,
-  stickyColorFrom,
+  SettingsSurface,
   type StickyColor,
 } from "@nudge/ui";
 import { api } from "../../../../convex/_generated/api";
-import { apiClient, setSessionTokenResolver } from "./api-client";
+import { apiClient, createWebSurfaceEngineClient, setSessionTokenResolver } from "./api-client";
+import {
+  normalizeWebMediaMimeType,
+  preferredBrowserVoiceMimeType,
+  webMediaAttachmentDraft,
+} from "./browser-media";
+import { JournalStack } from "./journal-stack";
+import {
+  anonymousUiEnabled,
+  currentAppSurface,
+  surfaceContextRefetchInterval,
+} from "./surface-runtime";
+import {
+  captureResultFromSavedWebCapture,
+  saveWebCapture,
+  type WebMediaAttachmentDraft,
+  type WebMediaMimeType,
+  type WebCaptureResult,
+} from "./web-capture";
+import {
+  clearWebLocalDraft,
+  loadWebLocalDraft,
+  saveWebLocalDraft,
+  type WebDraftStorage,
+} from "./web-draft";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
@@ -37,12 +61,9 @@ const queryClient = new QueryClient();
 const convexUrl =
   import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
 const convexClient = new ConvexReactClient(convexUrl);
-const clerkPublishableKey = requiredClerkPublishableKey();
+const clerkPublishableKey = anonymousUiEnabled() ? null : requiredClerkPublishableKey();
 const logoLongSrc =
   import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
-
-type ConvexStickyNotesState = FunctionReturnType<typeof api.stickyNotes.list>;
-type StickyNote = ConvexStickyNotesState["notes"][number];
 
 function requiredClerkPublishableKey() {
   const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
@@ -73,7 +94,13 @@ declare module "@tanstack/react-router" {
 }
 
 function AppShell() {
+  if (anonymousUiEnabled()) return <AuthenticatedAppShell />;
+  return <ClerkAppShell />;
+}
+
+function ClerkAppShell() {
   const auth = useAuth();
+
   if (!auth.isLoaded) {
     return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
   }
@@ -100,10 +127,87 @@ function AuthenticatedAppShell() {
 }
 
 function NotesScreen() {
-  const clerk = useClerk();
   const navigate = useNavigate();
-  const notesState = useStickyNotes();
   const session = useSession();
+  const localDate = todayLocalDate();
+  const surfaceContext = useSurfaceContext(localDate);
+  const signedInAs =
+    surfaceContext.data?.session.user?.displayName ?? session.data?.user?.displayName ?? "You";
+  const pendingActions = pendingActionItems(surfaceContext.data?.actions.actions ?? []);
+  const latestRun = surfaceContext.data?.actions.latestRun;
+  const statusMessage = surfaceContext.isLoading
+    ? "Updating context"
+    : latestRun
+      ? agentRunText(latestRun)
+      : "Connected";
+  const signalCount = surfaceContext.data?.signals.length ?? 0;
+
+  return (
+    <DailyOperatingLoopSurface
+      actionCount={pendingActions.length}
+      activitySlot={
+        <CalendarActivitySurface
+          currentDate={localDate}
+          days={surfaceContext.data?.calendarDays ?? []}
+        />
+      }
+      captureSlot={
+        <NewNoteComposer
+          actionCount={pendingActions.length}
+          existingJournalText={surfaceContext.data?.journal?.bodyText}
+          localDate={localDate}
+          signalCount={signalCount}
+        />
+      }
+      currentDate={localDate}
+      journalSlot={
+        <JournalStack
+          journal={surfaceContext.data?.journal}
+          signedInAs={signedInAs}
+          signals={surfaceContext.data?.signals ?? []}
+        />
+      }
+      navigationSlot={
+        <>
+          <button
+            className="flex min-h-10 items-center gap-3 rounded-md border border-white/7 bg-[#131518] px-3 text-left text-sm font-semibold text-[#edeae0] shadow-sm"
+            type="button"
+            onClick={() => navigate({ to: "/" })}
+          >
+            <img className="h-7 w-auto" src={logoLongSrc} alt="Nudge" />
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0] shadow-sm"
+              type="button"
+              onClick={() => navigate({ to: "/settings" })}
+            >
+              Settings
+            </button>
+            {anonymousUiEnabled() ? <AnonymousSessionPill /> : <ClerkSignOutButton />}
+          </div>
+        </>
+      }
+      reviewSlot={
+        <ActionReviewPanel context={surfaceContext.data} loading={surfaceContext.isLoading} />
+      }
+      signalCount={signalCount}
+      signedInAs={signedInAs}
+      statusMessage={statusMessage}
+    />
+  );
+}
+
+function AnonymousSessionPill() {
+  return (
+    <div className="flex min-h-10 items-center rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0] shadow-sm">
+      Local
+    </div>
+  );
+}
+
+function ClerkSignOutButton() {
+  const clerk = useClerk();
   const signOut = useMutation({
     mutationFn: async () => {
       await clerk.signOut();
@@ -113,246 +217,781 @@ function NotesScreen() {
       queryClient.clear();
     },
   });
-  const notes = notesState?.notes ?? [];
-  const signedInAs = session.data?.user?.displayName ?? "You";
 
   return (
-    <main className="min-h-dvh bg-[#eef1f5] text-[#111827]">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex min-h-14 items-center justify-between gap-4 border-b border-[#cbd5df] pb-4">
-          <button
-            className="flex items-center gap-3 text-left"
-            type="button"
-            onClick={() => navigate({ to: "/" })}
-          >
-            <img className="h-8 w-auto" src={logoLongSrc} alt="Nudge" />
-          </button>
-          <div className="flex items-center gap-2">
-            <button
-              className="min-h-10 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm font-semibold text-[#1f2937] shadow-sm"
-              type="button"
-              onClick={() => navigate({ to: "/settings" })}
-            >
-              Settings
-            </button>
-            <button
-              className="min-h-10 rounded-md bg-[#111827] px-3 text-sm font-semibold text-white shadow-sm disabled:opacity-60"
-              disabled={signOut.isPending}
-              type="button"
-              onClick={() => signOut.mutate()}
-            >
-              Sign out
-            </button>
-          </div>
-        </header>
-
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="grid gap-4">
-            <div>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#5b6472] uppercase">
-                {todayLocalDate()}
-              </p>
-              <h1 className="m-0 mt-1 text-2xl font-semibold tracking-normal text-[#111827]">
-                Notes
-              </h1>
-            </div>
-
-            <NewNoteComposer />
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {notes.length > 0 ? (
-                notes.map((note) => <StickyNoteCard key={note._id} note={note} />)
-              ) : (
-                <EmptyNotesStateSurface signedInAs={signedInAs} />
-              )}
-            </div>
-          </div>
-
-          <ActionReviewPanel />
-        </section>
-      </div>
-    </main>
+    <button
+      className="min-h-10 rounded-md bg-[#579ef5] px-3 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-60"
+      disabled={signOut.isPending}
+      type="button"
+      onClick={() => signOut.mutate()}
+    >
+      Sign out
+    </button>
   );
 }
 
-function NewNoteComposer() {
-  const convex = useConvex();
-  const convexAuth = useConvexAuth();
-  const [bodyText, setBodyText] = useState("");
+function NewNoteComposer(props: {
+  readonly actionCount: number;
+  readonly existingJournalText: string | undefined;
+  readonly localDate: string;
+  readonly signalCount: number;
+}) {
+  const initialDraftRef = useRef<WebInitialLocalDraft | null>(null);
+  if (initialDraftRef.current === null) {
+    initialDraftRef.current = initialWebLocalDraft(props.localDate);
+  }
+  const initialDraft = initialDraftRef.current;
+  const [bodyText, setBodyText] = useState(initialDraft.bodyText);
   const [color, setColor] = useState<StickyColor>("yellow");
-  const [statusMessage, setStatusMessage] = useState("");
-  const createNote = useMutation({
+  const [continuationText, setContinuationText] = useState(initialDraft.continuationText);
+  const [captureResult, setCaptureResult] = useState<WebCaptureResult | null>(null);
+  const [mediaAttachments, setMediaAttachments] = useState<ReadonlyArray<WebMediaAttachmentDraft>>(
+    [],
+  );
+  const [statusMessage, setStatusMessage] = useState(
+    initialDraft.restored ? "Saved on this device" : "",
+  );
+  const [drawingPadOpen, setDrawingPadOpen] = useState(false);
+  const [voiceRecorderOpen, setVoiceRecorderOpen] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const voiceInputRef = useRef<HTMLInputElement | null>(null);
+  const capture = useMutation({
     mutationFn: async () => {
-      if (!convexAuth.isAuthenticated) {
-        throw new Error("Sign in with Clerk to sync notes.");
-      }
-      const value = bodyText.trim();
-      if (!value) throw new Error("Write a note first.");
-      const result = await convex.mutation(
-        api.stickyNotes.create,
-        buildStickyNoteCreateInput({
-          bodyText: value,
-          color,
-          idempotencyKey: crypto.randomUUID(),
-        }),
-      );
-      if (!result.ok) {
-        throw new Error(result.error?.code ?? "Convex note create failed");
-      }
+      const leadingNote = bodyText.trim();
+      const trailingNote = continuationText.trim();
+      const attachmentNote = mediaAttachments.map((attachment) => attachment.label).join("\n");
+      const noteText = leadingNote || (trailingNote ? "" : attachmentNote);
+      const captureTitle =
+        [leadingNote, trailingNote].filter((text) => text.length > 0).join("\n\n") ||
+        attachmentNote;
+      const saved = await saveWebCapture({
+        attachments: { color },
+        ...(props.existingJournalText !== undefined
+          ? { existingJournalText: props.existingJournalText }
+          : {}),
+        localDate: props.localDate,
+        mediaAttachments,
+        note: noteText,
+        ...(trailingNote ? { trailingNote } : {}),
+      });
+      return { noteText: captureTitle, saved };
     },
     onError: (error) =>
-      setStatusMessage(error instanceof Error ? error.message : "Could not create note."),
-    onSuccess: () => {
+      setStatusMessage(error instanceof Error ? error.message : "Could not capture note."),
+    onSuccess: (data) => {
+      setCaptureResult(
+        captureResultFromSavedWebCapture({
+          actionCount: props.actionCount,
+          noteText: data.noteText,
+          saved: data.saved,
+          signalCount: props.signalCount,
+        }),
+      );
       setBodyText("");
-      setStatusMessage("Saved");
+      setContinuationText("");
+      setMediaAttachments([]);
+      clearCurrentWebLocalDraft(props.localDate);
+      setStatusMessage("Captured");
+      void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
     },
   });
 
+  useEffect(() => {
+    const draft = initialWebLocalDraft(props.localDate);
+    setBodyText(draft.bodyText);
+    setContinuationText(draft.continuationText);
+    if (draft.restored) setStatusMessage("Saved on this device");
+  }, [props.localDate]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const draft = saveCurrentWebLocalDraft({
+        bodyText,
+        continuationText,
+        localDate: props.localDate,
+      });
+      if (draft) setStatusMessage("Saved on this device");
+    }, 700);
+    return () => window.clearTimeout(timeout);
+  }, [bodyText, continuationText, props.localDate]);
+
   return (
-    <NoteComposerSurface
-      bodyText={bodyText}
-      color={color}
-      disabled={createNote.isPending || !convexAuth.isAuthenticated}
-      statusMessage={statusMessage}
-      onBodyTextChange={setBodyText}
-      onChange={setColor}
-      onSubmit={() => createNote.mutate()}
-    />
+    <div className="grid gap-3">
+      <input
+        accept="image/jpeg,image/png"
+        className="sr-only"
+        ref={imageInputRef}
+        type="file"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.item(0);
+          event.currentTarget.value = "";
+          if (!file) return;
+          void appendMediaAttachment(
+            file,
+            {
+              defaultLabel: "Photo",
+              kind: "image",
+              mimeTypes: ["image/jpeg", "image/png"],
+              presentationKind: "photo",
+              statusMessage: "Photo attached",
+              unsupportedMessage: "Choose a JPEG or PNG image.",
+            },
+            setMediaAttachments,
+            setStatusMessage,
+          );
+        }}
+      />
+      <input
+        accept="audio/mp4,audio/webm"
+        className="sr-only"
+        ref={voiceInputRef}
+        type="file"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.item(0);
+          event.currentTarget.value = "";
+          if (!file) return;
+          void appendMediaAttachment(
+            file,
+            {
+              defaultLabel: "Voice recording",
+              kind: "voice",
+              mimeTypes: ["audio/mp4", "audio/webm"],
+              presentationKind: "voice",
+              statusMessage: "Voice attached",
+              unsupportedMessage: "Choose an MP4 or WebM audio recording.",
+            },
+            setMediaAttachments,
+            setStatusMessage,
+          );
+          setVoiceRecorderOpen(false);
+        }}
+      />
+      <NoteComposerSurface
+        attachments={mediaAttachments.map((attachment) => ({
+          id: attachment.id,
+          kind: attachment.presentationKind ?? (attachment.kind === "voice" ? "voice" : "photo"),
+          label: attachment.label,
+        }))}
+        bodyText={bodyText}
+        color={color}
+        continuationText={continuationText}
+        disabled={capture.isPending}
+        statusMessage={statusMessage}
+        onAttachDrawing={() => setDrawingPadOpen(true)}
+        onAttachImage={() => imageInputRef.current?.click()}
+        onAttachVoice={() => setVoiceRecorderOpen(true)}
+        onBodyTextChange={setBodyText}
+        onChange={setColor}
+        onContinuationTextChange={setContinuationText}
+        onRemoveAttachment={(id) =>
+          setMediaAttachments((attachments) =>
+            attachments.filter((attachment) => attachment.id !== id),
+          )
+        }
+        onSubmit={() => capture.mutate()}
+      />
+      <DrawingCaptureDialog
+        open={drawingPadOpen}
+        onAttach={(dataURL) => {
+          appendPreparedMediaAttachment(
+            {
+              dataURL,
+              id: crypto.randomUUID(),
+              kind: "image",
+              label: "Drawing",
+              mimeType: "image/png",
+              presentationKind: "drawing",
+            },
+            {
+              defaultLabel: "Drawing",
+              kind: "image",
+              mimeTypes: ["image/png"],
+              presentationKind: "drawing",
+              statusMessage: "Drawing attached",
+              unsupportedMessage: "Could not prepare drawing.",
+            },
+            setMediaAttachments,
+            setStatusMessage,
+          );
+        }}
+        onClose={() => setDrawingPadOpen(false)}
+      />
+      <VoiceCaptureDialog
+        open={voiceRecorderOpen}
+        onAttach={(blob) => {
+          void appendBlobMediaAttachment(
+            blob,
+            "Voice recording",
+            {
+              defaultLabel: "Voice recording",
+              kind: "voice",
+              mimeTypes: ["audio/mp4", "audio/webm"],
+              presentationKind: "voice",
+              statusMessage: "Voice attached",
+              unsupportedMessage: "Could not prepare voice recording.",
+            },
+            setMediaAttachments,
+            setStatusMessage,
+          );
+          setVoiceRecorderOpen(false);
+        }}
+        onClose={() => setVoiceRecorderOpen(false)}
+        onImportAudio={() => voiceInputRef.current?.click()}
+      />
+      {captureResult ? (
+        <CaptureResultSurface
+          actionCount={captureResult.actionCount}
+          items={captureResult.items}
+          references={captureResult.references}
+          signalCount={captureResult.signalCount}
+          sourceCount={captureResult.sourceCount}
+          summary={captureResult.summary}
+          title={captureResult.title}
+        />
+      ) : null}
+    </div>
   );
 }
 
-function StickyNoteCard(props: { readonly note: StickyNote }) {
-  const convex = useConvex();
-  const convexAuth = useConvexAuth();
-  const [bodyText, setBodyText] = useState(props.note.bodyText);
-  const [color, setColor] = useState<StickyColor>(stickyColorFrom(props.note.color));
-  const [pinned, setPinned] = useState(props.note.pinned);
-  const [dirty, setDirty] = useState(false);
+interface WebInitialLocalDraft {
+  readonly bodyText: string;
+  readonly continuationText: string;
+  readonly restored: boolean;
+}
+
+function initialWebLocalDraft(localDate: string) {
+  const storage = browserDraftStorage();
+  if (!storage) return { bodyText: "", continuationText: "", restored: false };
+  const draft = loadWebLocalDraft({
+    localDate,
+    storage,
+    surface: currentAppSurface(),
+  });
+  return draft
+    ? {
+        bodyText: draft.bodyText,
+        continuationText: draft.continuationText,
+        restored: true,
+      }
+    : { bodyText: "", continuationText: "", restored: false };
+}
+
+function saveCurrentWebLocalDraft(input: {
+  readonly bodyText: string;
+  readonly continuationText: string;
+  readonly localDate: string;
+}) {
+  const storage = browserDraftStorage();
+  if (!storage) return null;
+  return saveWebLocalDraft({
+    bodyText: input.bodyText,
+    continuationText: input.continuationText,
+    localDate: input.localDate,
+    storage,
+    surface: currentAppSurface(),
+  });
+}
+
+function clearCurrentWebLocalDraft(localDate: string) {
+  const storage = browserDraftStorage();
+  if (!storage) return;
+  clearWebLocalDraft({
+    localDate,
+    storage,
+    surface: currentAppSurface(),
+  });
+}
+
+function browserDraftStorage(): WebDraftStorage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function appendMediaAttachment(
+  file: File,
+  options: AppendMediaAttachmentOptions,
+  setMediaAttachments: (
+    updater: (
+      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
+    ) => ReadonlyArray<WebMediaAttachmentDraft>,
+  ) => void,
+  setStatusMessage: (message: string) => void,
+) {
+  await appendBlobMediaAttachment(
+    file,
+    file.name.trim() || options.defaultLabel,
+    options,
+    setMediaAttachments,
+    setStatusMessage,
+  );
+}
+
+async function appendBlobMediaAttachment(
+  blob: Blob,
+  label: string,
+  options: AppendMediaAttachmentOptions,
+  setMediaAttachments: (
+    updater: (
+      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
+    ) => ReadonlyArray<WebMediaAttachmentDraft>,
+  ) => void,
+  setStatusMessage: (message: string) => void,
+) {
+  const mimeType = mediaAttachmentMimeType(blob.type, options.mimeTypes);
+  if (!mimeType) {
+    setStatusMessage(options.unsupportedMessage);
+    return;
+  }
+
+  try {
+    const dataURL = await blobDataURL(blob);
+    appendPreparedMediaAttachment(
+      {
+        dataURL,
+        id: crypto.randomUUID(),
+        kind: options.kind,
+        label,
+        mimeType,
+        presentationKind: options.presentationKind,
+      },
+      options,
+      setMediaAttachments,
+      setStatusMessage,
+    );
+  } catch {
+    setStatusMessage("Could not read attachment.");
+  }
+}
+
+function appendPreparedMediaAttachment(
+  input: {
+    readonly dataURL: string;
+    readonly id: string;
+    readonly kind: "image" | "voice";
+    readonly label: string;
+    readonly mimeType: string;
+    readonly presentationKind: "drawing" | "photo" | "voice";
+  },
+  options: AppendMediaAttachmentOptions,
+  setMediaAttachments: (
+    updater: (
+      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
+    ) => ReadonlyArray<WebMediaAttachmentDraft>,
+  ) => void,
+  setStatusMessage: (message: string) => void,
+) {
+  const draft = webMediaAttachmentDraft(input);
+  if (!draft || !mediaAttachmentMimeType(draft.mimeType, options.mimeTypes)) {
+    setStatusMessage(options.unsupportedMessage);
+    return;
+  }
+
+  setMediaAttachments((attachments) => [...attachments, draft]);
+  setStatusMessage(options.statusMessage);
+}
+
+interface AppendMediaAttachmentOptions {
+  readonly defaultLabel: string;
+  readonly kind: "image" | "voice";
+  readonly mimeTypes: ReadonlyArray<WebMediaMimeType>;
+  readonly presentationKind: "drawing" | "photo" | "voice";
+  readonly statusMessage: string;
+  readonly unsupportedMessage: string;
+}
+
+function mediaAttachmentMimeType(value: string, allowed: ReadonlyArray<WebMediaMimeType>) {
+  const normalized = normalizeWebMediaMimeType(value);
+  if (!normalized) return null;
+  for (const mimeType of allowed) {
+    if (normalized === mimeType) return mimeType;
+  }
+  return null;
+}
+
+async function blobDataURL(blob: Blob) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read attachment."));
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("Could not read attachment."));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function DrawingCaptureDialog(props: {
+  readonly open: boolean;
+  readonly onAttach: (dataURL: string) => void;
+  readonly onClose: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const pointerIdRef = useRef<number | null>(null);
+  const [hasDrawing, setHasDrawing] = useState(false);
+
+  useEffect(() => {
+    if (!props.open) return;
+    prepareDrawingCanvas(canvasRef.current);
+    drawingRef.current = false;
+    pointerIdRef.current = null;
+    setHasDrawing(false);
+  }, [props.open]);
+
+  if (!props.open) return null;
+
+  const startDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    drawingRef.current = true;
+    pointerIdRef.current = event.pointerId;
+    canvas.setPointerCapture(event.pointerId);
+    const point = drawingCanvasPoint(canvas, event);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    setHasDrawing(true);
+  };
+
+  const continueDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current || pointerIdRef.current !== event.pointerId) return;
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    const point = drawingCanvasPoint(canvas, event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  };
+
+  const finishDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (pointerIdRef.current !== event.pointerId) return;
+    drawingRef.current = false;
+    pointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const clearDrawing = () => {
+    prepareDrawingCanvas(canvasRef.current);
+    drawingRef.current = false;
+    pointerIdRef.current = null;
+    setHasDrawing(false);
+  };
+
+  const attachDrawing = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasDrawing) return;
+    props.onAttach(canvas.toDataURL("image/png"));
+    props.onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
+      <section
+        aria-label="Drawing"
+        aria-modal="true"
+        className="grid w-full max-w-3xl gap-4 rounded-lg border border-white/7 bg-[#131518] p-4 text-[#edeae0] shadow-[0_24px_90px_rgba(0,0,0,0.45)]"
+        role="dialog"
+      >
+        <header className="flex items-center justify-between gap-3">
+          <h2 className="m-0 text-lg font-semibold">Drawing</h2>
+          <button
+            className="min-h-9 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0]"
+            type="button"
+            onClick={props.onClose}
+          >
+            Close
+          </button>
+        </header>
+        <canvas
+          aria-label="Drawing canvas"
+          className="h-72 w-full touch-none rounded-md border border-white/10 bg-[#f5eecf]"
+          height={540}
+          ref={canvasRef}
+          width={960}
+          onPointerCancel={finishDrawing}
+          onPointerDown={startDrawing}
+          onPointerMove={continueDrawing}
+          onPointerUp={finishDrawing}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-4 text-sm font-semibold text-[#edeae0]"
+            type="button"
+            onClick={clearDrawing}
+          >
+            Clear
+          </button>
+          <button
+            className="min-h-10 rounded-md bg-[#579ef5] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+            disabled={!hasDrawing}
+            type="button"
+            onClick={attachDrawing}
+          >
+            Attach drawing
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type VoiceRecordingState = "idle" | "ready" | "recording";
+
+function VoiceCaptureDialog(props: {
+  readonly open: boolean;
+  readonly onAttach: (blob: Blob) => void;
+  readonly onClose: () => void;
+  readonly onImportAudio: () => void;
+}) {
+  const chunksRef = useRef<Blob[]>([]);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordingState, setRecordingState] = useState<VoiceRecordingState>("idle");
   const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
-    if (dirty) return;
-    setBodyText(props.note.bodyText);
-    setColor(stickyColorFrom(props.note.color));
-    setPinned(props.note.pinned);
-  }, [dirty, props.note.bodyText, props.note.color, props.note.pinned]);
+    return () => {
+      cleanupVoiceResources(timerRef, streamRef, recorderRef);
+    };
+  }, []);
 
-  const saveNote = useMutation({
-    mutationFn: async () => {
-      if (!convexAuth.isAuthenticated) {
-        throw new Error("Sign in with Clerk to sync notes.");
-      }
-      const value = bodyText.trim();
-      if (!value) throw new Error("Write a note first.");
-      const result = await convex.mutation(
-        api.stickyNotes.patch,
-        buildStickyNotePatchInput({
-          bodyText: value,
-          color,
-          idempotencyKey: crypto.randomUUID(),
-          noteId: props.note._id,
-          pinned,
-          serverRevision: props.note.serverRevision,
-          title: stickyNoteTitleFromText(value),
-        }),
-      );
-      if (!result.ok) {
-        throw new Error(result.error?.code ?? "Convex note save failed");
-      }
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "Could not save note.";
-      setStatusMessage(
-        message === "revision_conflict"
-          ? "Changed elsewhere. Latest version will reload."
-          : message,
-      );
-      if (message === "revision_conflict") setDirty(false);
-    },
-    onSuccess: () => {
-      setDirty(false);
-      setStatusMessage("Saved");
-    },
-  });
+  useEffect(() => {
+    if (!props.open) return;
+    chunksRef.current = [];
+    setElapsedSeconds(0);
+    setRecordedBlob(null);
+    setRecordingState("idle");
+    setStatusMessage("");
+  }, [props.open]);
 
-  const archiveNote = useMutation({
-    mutationFn: async () => {
-      if (!convexAuth.isAuthenticated) {
-        throw new Error("Sign in with Clerk to sync notes.");
-      }
-      const result = await convex.mutation(api.stickyNotes.archive, {
-        idempotencyKey: crypto.randomUUID(),
-        noteId: props.note._id,
-        payloadHash: surfacePayloadHash(`archive:${props.note._id}:${props.note.serverRevision}`),
-      });
-      if (!result.ok) {
-        throw new Error(result.error?.code ?? "Convex note archive failed");
-      }
-    },
-    onError: (error) =>
-      setStatusMessage(error instanceof Error ? error.message : "Could not archive note."),
-  });
+  if (!props.open) return null;
+
+  const startRecording = async () => {
+    setStatusMessage("");
+    setRecordedBlob(null);
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setStatusMessage("Microphone unavailable.");
+      return;
+    }
+
+    const preferredMimeType = preferredBrowserVoiceMimeType();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = preferredMimeType
+        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+        : new MediaRecorder(stream);
+
+      chunksRef.current = [];
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current = [...chunksRef.current, event.data];
+        }
+      };
+      recorder.onstop = () => {
+        const recorderMimeType = normalizeWebMediaMimeType(recorder.mimeType);
+        const mimeType = recorderMimeType ?? preferredMimeType;
+        const chunks = chunksRef.current;
+        cleanupVoiceResources(timerRef, streamRef, recorderRef);
+        if (!mimeType || chunks.length === 0) {
+          setRecordingState("idle");
+          setStatusMessage("No recording captured.");
+          return;
+        }
+        setRecordedBlob(new Blob(chunks, { type: mimeType }));
+        setRecordingState("ready");
+        setStatusMessage("Recording ready");
+      };
+
+      recorder.start();
+      startedAtRef.current = Date.now();
+      setElapsedSeconds(0);
+      setRecordingState("recording");
+      timerRef.current = window.setInterval(() => {
+        const startedAt = startedAtRef.current;
+        if (startedAt === null) return;
+        setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      }, 250);
+    } catch {
+      cleanupVoiceResources(timerRef, streamRef, recorderRef);
+      setRecordingState("idle");
+      setStatusMessage("Microphone unavailable.");
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+    recorder.stop();
+  };
+
+  const close = () => {
+    const recorder = recorderRef.current;
+    if (recorder) {
+      recorder.onstop = null;
+      if (recorder.state !== "inactive") recorder.stop();
+    }
+    cleanupVoiceResources(timerRef, streamRef, recorderRef);
+    chunksRef.current = [];
+    props.onClose();
+  };
+
+  const attachRecording = () => {
+    if (!recordedBlob) return;
+    props.onAttach(recordedBlob);
+  };
 
   return (
-    <StickyNoteSurface
-      archiving={archiveNote.isPending}
-      bodyText={bodyText}
-      color={color}
-      dirty={dirty}
-      pinned={pinned}
-      saving={saveNote.isPending}
-      serverRevision={props.note.serverRevision}
-      statusMessage={statusMessage}
-      title={stickyNoteTitleFromText(bodyText)}
-      onArchive={() => archiveNote.mutate()}
-      onBodyTextChange={(value) => {
-        setBodyText(value);
-        setDirty(true);
-      }}
-      onChange={(nextColor) => {
-        setColor(nextColor);
-        setDirty(true);
-      }}
-      onPinnedChange={(nextPinned) => {
-        setPinned(nextPinned);
-        setDirty(true);
-      }}
-      onSave={() => saveNote.mutate()}
-    />
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
+      <section
+        aria-label="Voice"
+        aria-modal="true"
+        className="grid w-full max-w-md gap-4 rounded-lg border border-white/7 bg-[#131518] p-4 text-[#edeae0] shadow-[0_24px_90px_rgba(0,0,0,0.45)]"
+        role="dialog"
+      >
+        <header className="flex items-center justify-between gap-3">
+          <h2 className="m-0 text-lg font-semibold">Voice</h2>
+          <button
+            className="min-h-9 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0]"
+            type="button"
+            onClick={close}
+          >
+            Close
+          </button>
+        </header>
+        <div className="grid min-h-28 place-items-center rounded-lg border border-white/7 bg-[#090a0b]/55 p-4">
+          <p className="m-0 text-4xl font-semibold tabular-nums">
+            {formatElapsedSeconds(elapsedSeconds)}
+          </p>
+          {statusMessage ? (
+            <p className="m-0 mt-2 text-sm font-medium text-[#a1a6ad]">{statusMessage}</p>
+          ) : null}
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {recordingState === "recording" ? (
+            <button
+              className="min-h-10 rounded-md bg-[#d65f84] px-4 text-sm font-semibold text-white shadow-sm"
+              type="button"
+              onClick={stopRecording}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              className="min-h-10 rounded-md bg-[#579ef5] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+              disabled={recordingState === "ready"}
+              type="button"
+              onClick={() => void startRecording()}
+            >
+              Record
+            </button>
+          )}
+          <button
+            className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-4 text-sm font-semibold text-[#edeae0]"
+            type="button"
+            onClick={props.onImportAudio}
+          >
+            Import audio
+          </button>
+        </div>
+        <button
+          className="min-h-10 rounded-md bg-[#40c792] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+          disabled={!recordedBlob}
+          type="button"
+          onClick={attachRecording}
+        >
+          Attach recording
+        </button>
+      </section>
+    </div>
   );
 }
 
-function ActionReviewPanel() {
-  const actions = useActions();
-  const latestRun = actions.data?.latestRun;
-  const pendingActions =
-    actions.data?.actions.filter(
-      (action) => action.status === "proposed" || action.status === "accepted",
-    ) ?? [];
+function prepareDrawingCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = "#f5eecf";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = 7;
+  context.strokeStyle = "#15181d";
+}
+
+function drawingCanvasPoint(canvas: HTMLCanvasElement, event: PointerEvent<HTMLCanvasElement>) {
+  const rect = canvas.getBoundingClientRect();
+  const x = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * canvas.width : 0;
+  const y = rect.height > 0 ? ((event.clientY - rect.top) / rect.height) * canvas.height : 0;
+  return { x, y };
+}
+
+function cleanupVoiceResources(
+  timerRef: { current: number | null },
+  streamRef: { current: MediaStream | null },
+  recorderRef: { current: MediaRecorder | null },
+) {
+  if (timerRef.current !== null) {
+    window.clearInterval(timerRef.current);
+    timerRef.current = null;
+  }
+  const stream = streamRef.current;
+  if (stream) {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    streamRef.current = null;
+  }
+  recorderRef.current = null;
+}
+
+function formatElapsedSeconds(value: number) {
+  const minutes = Math.floor(value / 60);
+  const seconds = value % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function ActionReviewPanel(props: {
+  readonly context: SurfaceRefreshContext | undefined;
+  readonly loading: boolean;
+}) {
+  const latestRun = props.context?.actions.latestRun;
+  const pendingActions = pendingActionItems(props.context?.actions.actions ?? []);
   const updateStatus = useMutation({
     mutationFn: async (input: {
       readonly itemId: string;
       readonly status: "accepted" | "dismissed" | "completed";
     }) => {
-      await apiClient.actions.updateStatus(input);
+      const client = await createWebSurfaceEngineClient();
+      await client.updateActionStatus(input);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["actions"] });
+      await queryClient.invalidateQueries({ queryKey: ["surface-context"] });
     },
   });
 
   return (
-    <aside className="grid content-start gap-4">
-      <section className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
-        <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
-          Agent
-        </p>
-        <h2 className="m-0 mt-1 text-lg font-semibold text-[#111827]">Review</h2>
-        <p className="m-0 mt-2 text-sm leading-6 text-[#4b5563]">
-          {latestRun ? agentRunText(latestRun) : "Idle"}
-        </p>
-      </section>
-
+    <>
+      <p className="m-0 text-sm leading-6 text-[#a1a6ad]">
+        {latestRun ? agentRunText(latestRun) : props.loading ? "Loading review queue." : "Idle"}
+      </p>
       <section className="grid gap-3">
         {pendingActions.length > 0 ? (
           pendingActions.map((action) => (
@@ -371,12 +1010,12 @@ function ActionReviewPanel() {
             />
           ))
         ) : (
-          <section className="rounded-lg border border-dashed border-[#b7c1cd] bg-white/70 p-4">
-            <p className="m-0 text-sm font-medium text-[#596475]">No suggestions waiting.</p>
+          <section className="rounded-lg border border-dashed border-white/12 bg-[#131518]/70 p-4">
+            <p className="m-0 text-sm font-medium text-[#a1a6ad]">No suggestions waiting.</p>
           </section>
         )}
       </section>
-    </aside>
+    </>
   );
 }
 
@@ -405,80 +1044,45 @@ function SettingsScreen() {
   });
 
   return (
-    <main className="min-h-dvh bg-[#eef1f5] text-[#111827]">
-      <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-4 sm:px-6">
-        <header className="flex min-h-14 items-center justify-between border-b border-[#cbd5df] pb-4">
-          <button
-            className="min-h-10 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm font-semibold text-[#1f2937] shadow-sm"
-            type="button"
-            onClick={() => navigate({ to: "/" })}
-          >
-            Notes
-          </button>
-          <UserButton />
-        </header>
-
-        <section className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
-            Workspace
-          </p>
-          <h1 className="m-0 mt-1 text-xl font-semibold text-[#111827]">
-            {workspace?.label ?? "Workspace"}
-          </h1>
-          <p className="m-0 mt-2 text-sm text-[#4b5563]">
-            {sessionUser ? sessionUser.displayName : "Loading"}
-          </p>
-        </section>
-
-        <section className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
-            Data
-          </p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <button
-              className="min-h-11 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white disabled:opacity-50"
-              disabled={exportData.isPending}
-              type="button"
-              onClick={() => exportData.mutate()}
-            >
-              Export
-            </button>
-            <button
-              className="min-h-11 rounded-md border border-[#c3ccd7] bg-white px-4 text-sm font-semibold text-[#111827] disabled:opacity-50"
-              disabled={deleteData.isPending}
-              type="button"
-              onClick={() => deleteData.mutate()}
-            >
-              Delete local data
-            </button>
-          </div>
-        </section>
-      </div>
-    </main>
+    <SettingsSurface
+      accountName={sessionUser?.displayName ?? "You"}
+      accountSlot={anonymousUiEnabled() ? undefined : <UserButton />}
+      deleteDisabled={deleteData.isPending}
+      engineLabel={window.location.origin}
+      exportDisabled={exportData.isPending}
+      sessionLabel={session.data?.authMode ?? "Loading"}
+      surfaceLabel={surfaceDisplayName(currentAppSurface())}
+      workspaceLabel={workspace?.label ?? "Workspace"}
+      onBack={() => navigate({ to: "/" })}
+      onDeleteData={() => deleteData.mutate()}
+      onExportData={() => exportData.mutate()}
+    />
   );
 }
 
-function useStickyNotes() {
-  const convex = useConvex();
-  const [state, setState] = useState<ConvexStickyNotesState | undefined>();
-
-  useEffect(() => {
-    const watch = convex.watchQuery(api.stickyNotes.list, {
-      limit: 50,
-    });
-    const refresh = () => setState(watch.localQueryResult());
-    refresh();
-    return watch.onUpdate(refresh);
-  }, [convex]);
-
-  return state;
+function useSurfaceContext(localDate: string) {
+  return useQuery({
+    queryKey: ["surface-context", localDate],
+    queryFn: async () => {
+      const client = await createWebSurfaceEngineClient();
+      return await client.refreshContext({
+        actionLimit: 100,
+        localDate,
+        signalLimit: 100,
+        timeZone: currentTimeZone(),
+      });
+    },
+    refetchInterval: (query) => surfaceContextRefetchInterval(query.state.data),
+    staleTime: 30 * 1000,
+  });
 }
 
-function useActions() {
-  return useQuery({
-    queryKey: ["actions"],
-    queryFn: async () => apiClient.actions.list({ limit: 100 }),
-  });
+function currentTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function pendingActionItems(actions: ReadonlyArray<SurfaceActionItem>) {
+  return actions.filter((action) => action.status === "proposed" || action.status === "accepted");
 }
 
 function useSession() {
@@ -494,9 +1098,7 @@ function readObjectProperty(value: unknown, key: string) {
   return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
 }
 
-function agentRunText(
-  run: NonNullable<Awaited<ReturnType<typeof apiClient.actions.list>>["latestRun"]>,
-) {
+function agentRunText(run: SurfaceAgentRun) {
   const itemCountValue = readObjectProperty(run.metadata, "itemCount");
   const itemCount = typeof itemCountValue === "number" ? itemCountValue : undefined;
   if (run.status === "completed") {
@@ -508,9 +1110,7 @@ function agentRunText(
   return "Analysis is running.";
 }
 
-function followThroughText(
-  action: Awaited<ReturnType<typeof apiClient.actions.list>>["actions"][number],
-) {
+function followThroughText(action: SurfaceActionItem) {
   if (action.kind === "event") {
     return action.eventStartsAt
       ? `Calendar proposal for ${formatDateTime(action.eventStartsAt)}.`
@@ -532,10 +1132,26 @@ function formatDateTime(value: string) {
   return date.toLocaleString();
 }
 
+function surfaceDisplayName(surface: AppSurface) {
+  switch (surface) {
+    case "desktop":
+      return "Desktop";
+    case "ios":
+      return "iOS";
+    case "raycast":
+      return "Raycast";
+    case "web":
+      return "Web";
+  }
+}
+
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Missing #root element");
 
 function NudgeConvexProvider(props: { readonly children: ReactNode }) {
+  if (anonymousUiEnabled()) return <>{props.children}</>;
+  if (!clerkPublishableKey) throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
+
   return (
     <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
       <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
@@ -549,6 +1165,11 @@ function NudgeConvexProvider(props: { readonly children: ReactNode }) {
 
 function ClerkTokenBridge(props: { readonly children: ReactNode }) {
   const auth = useAuth();
+  if (anonymousUiEnabled()) {
+    setSessionTokenResolver(null);
+    return <>{props.children}</>;
+  }
+
   const expectedState = auth.isSignedIn ? "signed-in" : "signed-out";
   const [readyState, setReadyState] = useState<"loading" | "signed-in" | "signed-out">("loading");
 

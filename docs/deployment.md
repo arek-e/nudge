@@ -18,7 +18,7 @@ git commit -m "short slice summary"
 bun run deploy
 ```
 
-`bun run deploy` refuses to deploy when the working tree has uncommitted changes. It runs the full check suite, mobile Playwright smoke test, web build, and `wrangler deploy`.
+`bun run deploy` refuses to deploy when the working tree has uncommitted changes. It runs the full check suite, desktop-mounted Playwright e2e, web build, and `wrangler deploy`.
 
 `bun run deploy` targets the `production` Wrangler environment. Use the explicit scripts when checking environment-specific behavior:
 

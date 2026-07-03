@@ -1075,6 +1075,62 @@ describe("web app", () => {
     });
   });
 
+  test("browser voice uploads are stored as WebM media references", async () => {
+    const writes: Array<{
+      readonly key: string;
+      readonly options: R2PutOptions | undefined;
+      readonly value: Uint8Array;
+    }> = [];
+    const mediaBucket = {
+      get: async () => null,
+      put: async (key: string, value: Uint8Array, options?: R2PutOptions) => {
+        writes.push({ key, options, value });
+        return { key } as R2Object;
+      },
+    } as R2Bucket;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/media",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          dataBase64: btoa("voice bytes"),
+          id: "550e8400-e29b-41d4-a716-446655440003",
+          kind: "voice",
+          label: "Voice recording",
+          mimeType: "audio/webm",
+        }),
+      },
+      { ...env, MEDIA_FILES: mediaBucket },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      byteLength: 11,
+      id: "550e8400-e29b-41d4-a716-446655440003",
+      kind: "voice",
+      label: "Voice recording",
+      mimeType: "audio/webm",
+      url: "/api/media/550e8400-e29b-41d4-a716-446655440003",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.key).toBe(
+      `users/${anonymousUserId}/media/550e8400-e29b-41d4-a716-446655440003`,
+    );
+    expect(new TextDecoder().decode(writes[0]!.value)).toBe("voice bytes");
+    expect(writes[0]!.options).toEqual({
+      customMetadata: {
+        id: "550e8400-e29b-41d4-a716-446655440003",
+        kind: "voice",
+        label: "Voice recording",
+        userId: anonymousUserId,
+      },
+      httpMetadata: { contentType: "audio/webm" },
+    });
+  });
+
   test("custom integrations can inspect the current session workspace", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 

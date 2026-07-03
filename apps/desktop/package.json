@@ -1,0 +1,21 @@
+{
+  "name": "@nudge/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "bun run build && electron .",
+    "start": "electron .",
+    "test": "bun test ./src",
+    "test:e2e": "VITE_NUDGE_ANONYMOUS_UI=1 bun run --cwd ../web build && bun run build && NUDGE_DESKTOP_E2E=1 bun test ./src/desktop-e2e.test.ts"
+  },
+  "dependencies": {
+    "electron": "43.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

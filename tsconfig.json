@@ -1,6 +1,8 @@
 {
   "files": [],
   "references": [
+    { "path": "./apps/desktop" },
+    { "path": "./apps/raycast" },
     { "path": "./apps/web" },
     { "path": "./packages/domain" },
     { "path": "./packages/effect-services" },

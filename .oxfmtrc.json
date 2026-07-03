@@ -40,5 +40,10 @@
   "sortPackageJson": {
     "sortScripts": true
   },
-  "ignorePatterns": ["node_modules/**", ".tsbuild/**", ".wrangler/**"]
+  "ignorePatterns": [
+    "node_modules/**",
+    ".tsbuild/**",
+    ".wrangler/**",
+    "apps/raycast/raycast-env.d.ts"
+  ]
 }
