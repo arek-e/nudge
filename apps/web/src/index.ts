@@ -178,6 +178,15 @@ interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
   readonly fallbackReply: string;
 }
 
+interface AgentReceiptView {
+  readonly id: string;
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
+}
+
 const thinkExtractedItemSchema = z.object({
   body: z.string().min(1).max(2_000),
   confidence: z.number().min(0).max(1).optional(),
@@ -513,6 +522,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       memoryResults,
       message,
       reasoningHarness,
+      receipt: draft.receipt,
       reply: draft.reply,
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
@@ -764,6 +774,40 @@ export class LoopIntakeThinkAgent extends Think<Env> {
       PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
     );
     const proposal = proposals[0];
+    let receipt: AgentReceiptView | null = null;
+    if (proposal) {
+      const changed = {
+        proposalId: proposal.id,
+        status: proposal.status,
+        title: proposal.title,
+      };
+      const receiptSignal = await runRuntimeDbEffect(
+        this.env,
+        input.traceContext,
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent-receipt:proposal.generated:${proposal.id}`,
+          occurredAt: new Date().toISOString(),
+          payload: {
+            action: "proposal.generated",
+            changed,
+            signalIds: [signal.id],
+            why: proposal.rationale,
+          },
+          schemaVersion: 1,
+          source: "nudge_agent_session",
+          type: "agent.receipt",
+          user: input.user,
+        }),
+      );
+      receipt = {
+        id: receiptSignal.id,
+        action: "proposal.generated",
+        changed,
+        createdAt: receiptSignal.createdAt,
+        signalIds: [signal.id],
+        why: proposal.rationale,
+      };
+    }
 
     return {
       draft: proposal
@@ -794,6 +838,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
             },
           }
         : null,
+      receipt,
       reply: proposal
         ? input.memoryResults.length > 0
           ? `I found ${input.memoryResults.length} related memory and drafted a reviewable next step from your message.`

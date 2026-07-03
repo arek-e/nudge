@@ -79,6 +79,21 @@ export const proposalRecordSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const proposalExplanationSchema = z.object({
+  source: z.object({
+    label: z.string(),
+    signalIds: z.array(z.string()),
+    type: z.literal("signals"),
+  }),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  nextAction: z.string(),
+});
+
+export const proposalWithExplanationSchema = proposalRecordSchema.extend({
+  explanation: proposalExplanationSchema,
+});
+
 export const reviewRecordSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -88,6 +103,22 @@ export const reviewRecordSchema = z.object({
   editedBody: z.string().optional(),
   editedBodyDocument: z.unknown().optional(),
   createdAt: z.string(),
+});
+
+export const agentReceiptSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  changed: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+  signalIds: z.array(z.string()),
+  why: z.string(),
+});
+
+export const reviewInboxItemSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  kind: z.literal("proposal"),
+  proposal: proposalWithExplanationSchema,
 });
 
 export const commitmentRecordSchema = z.object({
@@ -397,6 +428,7 @@ export const conversationMessageResponseSchema = z.object({
     runtime: z.literal("cloudflare-agents"),
   }),
   reply: z.string(),
+  receipt: agentReceiptSchema.nullable().optional(),
   skillsApplied: z.array(z.enum(["intake-loop"])),
   subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
   usedTools: z.array(
@@ -645,11 +677,22 @@ export const apiContract = {
     generate: oc
       .route({ method: "POST", path: "/proposals/generate" })
       .input(proposalsInputSchema)
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
     list: oc
       .route({ method: "GET", path: "/proposals" })
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
+  },
+  reviewInbox: {
+    list: oc
+      .route({ method: "GET", path: "/review-inbox" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }))
+      .output(
+        z.object({
+          items: z.array(reviewInboxItemSchema),
+          receipts: z.array(agentReceiptSchema),
+        }),
+      ),
   },
   commitments: {
     list: oc

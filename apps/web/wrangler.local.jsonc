@@ -1,0 +1,89 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nudge-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/agents/*", "/mcp", "/health", "/__test/*", "/__internal/*"],
+  },
+  "observability": {
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "APP_VERSION": "0.0.0",
+    "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
+    "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    "LOG_HTTP_REQUESTS": "true",
+    "NUDGE_DB_DRIVER": "d1",
+    "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
+    "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
+    "TURBOPUFFER_REGION": "aws-eu-west-1",
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nudge-local",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_FILES",
+      "bucket_name": "nudge-local-media",
+    },
+    {
+      "binding": "OKF_FILES",
+      "bucket_name": "nudge-local-okf-files",
+    },
+    {
+      "binding": "TRACE_ARTIFACTS",
+      "bucket_name": "nudge-local-trace-artifacts",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_AGENT_SESSION",
+        "class_name": "UserAgentSession",
+      },
+      {
+        "name": "LoopIntakeThinkAgent",
+        "class_name": "LoopIntakeThinkAgent",
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "name": "daily-digest-workflow",
+      "binding": "DAILY_DIGEST_WORKFLOW",
+      "class_name": "DailyDigestWorkflow",
+    },
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserAgentSession"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["LoopIntakeThinkAgent"],
+    },
+  ],
+}

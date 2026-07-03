@@ -10,6 +10,9 @@ const convexLayers = new WeakMap<Env, NudgeDbLayer>();
 
 export function resolveDbLayerForEnv(env: Env, override?: NudgeDbLayer) {
   if (override) return override;
+  if (env.NUDGE_DB_DRIVER === "d1") {
+    return Db.layerD1(env.DB);
+  }
   if (!env.CONVEX_URL || !env.CONVEX_RUNTIME_SECRET) {
     throw new Error(
       "Convex runtime store is not configured. Set CONVEX_URL and CONVEX_RUNTIME_SECRET.",

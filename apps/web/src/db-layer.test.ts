@@ -31,6 +31,10 @@ describe("runtime DB layer", () => {
     expect(resolveDbLayerForEnv(baseEnv, Db.layerMemory)).toBe(Db.layerMemory);
   });
 
+  test("allows local development to use the D1 runtime store explicitly", () => {
+    expect(resolveDbLayerForEnv({ ...baseEnv, NUDGE_DB_DRIVER: "d1" })).toBeDefined();
+  });
+
   test("requires both Convex URL and runtime secret", () => {
     expect(() =>
       resolveDbLayerForEnv({

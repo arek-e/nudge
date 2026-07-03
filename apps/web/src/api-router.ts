@@ -3,7 +3,15 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Effect } from "effect";
-import { Db, type DbService, type EventRecord, type JournalDocumentRecord } from "@nudge/db";
+import {
+  Db,
+  type DbService,
+  type EventRecord,
+  type JournalDocumentRecord,
+  type ProposalRecord,
+  type SynthesisRecord,
+  type UserDataExport,
+} from "@nudge/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
@@ -60,6 +68,27 @@ interface CalendarDayActivity {
   readonly signalCount: number;
 }
 
+interface AgentReceiptPayload {
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
+}
+
+interface ProposalExplanation {
+  readonly source: {
+    readonly label: string;
+    readonly signalIds: string[];
+    readonly type: "signals";
+  };
+  readonly reason: string;
+  readonly confidence: number;
+  readonly nextAction: string;
+}
+
+const agentReceiptType = "agent.receipt";
+const agentReceiptSource = "nudge_engine";
+
 function localDateInTimeZone(isoDate: string, timeZone: string) {
   const date = new Date(isoDate);
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -105,6 +134,137 @@ function buildCalendarDays(input: {
     upsertCalendarDay(days, localDateInTimeZone(event.occurredAt, input.timeZone), { signals: 1 });
   }
   return [...days.values()].sort((left, right) => left.localDate.localeCompare(right.localDate));
+}
+
+function sourceLabel(signalIds: ReadonlyArray<string>) {
+  return `${signalIds.length} signal${signalIds.length === 1 ? "" : "s"}`;
+}
+
+function proposalSource(signalIds: ReadonlyArray<string>): ProposalExplanation["source"] {
+  return {
+    label: sourceLabel(signalIds),
+    signalIds: [...signalIds],
+    type: "signals",
+  };
+}
+
+function nextActionForProposal(kind: ProposalRecord["kind"]) {
+  switch (kind) {
+    case "clarify":
+      return "Answer or edit this clarification.";
+    case "follow_up":
+      return "Review this follow-up proposal.";
+    case "commit":
+      return "Accept, edit, or reject this commitment.";
+    case "ignore":
+      return "Confirm whether Nudge should ignore this.";
+  }
+}
+
+function confidenceForProposal(proposal: ProposalRecord, synthesis: SynthesisRecord | undefined) {
+  const sourceCount = synthesis?.sourceSignalIds.length ?? 0;
+  if (proposal.kind === "follow_up" && sourceCount > 0) return 0.82;
+  if (proposal.kind === "commit" && sourceCount > 0) return 0.78;
+  if (sourceCount > 0) return 0.7;
+  return 0.52;
+}
+
+function buildProposalExplanation(
+  proposal: ProposalRecord,
+  synthesesById: ReadonlyMap<string, SynthesisRecord>,
+): ProposalExplanation {
+  const synthesis = synthesesById.get(proposal.synthesisId);
+  const signalIds = synthesis ? [...synthesis.sourceSignalIds] : [];
+  return {
+    source: proposalSource(signalIds),
+    reason: proposal.rationale,
+    confidence: confidenceForProposal(proposal, synthesis),
+    nextAction: nextActionForProposal(proposal.kind),
+  };
+}
+
+function synthesesByIdFrom(exported: Pick<UserDataExport, "syntheses">) {
+  return new Map(exported.syntheses.map((synthesis) => [synthesis.id, synthesis]));
+}
+
+function readReceiptPayload(value: unknown): AgentReceiptPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const action = Reflect.get(value, "action");
+  const changed = Reflect.get(value, "changed");
+  const signalIds = Reflect.get(value, "signalIds");
+  const why = Reflect.get(value, "why");
+  if (
+    typeof action !== "string" ||
+    !changed ||
+    typeof changed !== "object" ||
+    !Array.isArray(signalIds) ||
+    !signalIds.every((signalId) => typeof signalId === "string") ||
+    typeof why !== "string"
+  ) {
+    return null;
+  }
+  return {
+    action,
+    changed: Object.fromEntries(Object.entries(changed)),
+    signalIds,
+    why,
+  };
+}
+
+function toReceiptResponse(event: EventRecord) {
+  const payload = readReceiptPayload(event.payload);
+  if (!payload) return null;
+  return {
+    id: event.id,
+    action: payload.action,
+    changed: payload.changed,
+    createdAt: event.createdAt,
+    signalIds: [...payload.signalIds],
+    why: payload.why,
+  };
+}
+
+function listReceiptResponses(exported: Pick<UserDataExport, "events">, limit: number) {
+  return exported.events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === agentReceiptType)
+    .sort(
+      (left, right) =>
+        right.event.createdAt.localeCompare(left.event.createdAt) || right.index - left.index,
+    )
+    .flatMap(({ event }) => {
+      const receipt = toReceiptResponse(event);
+      return receipt ? [receipt] : [];
+    })
+    .slice(0, limit);
+}
+
+async function recordAgentReceipt(
+  context: ApiContext,
+  input: {
+    readonly action: string;
+    readonly changed: Readonly<Record<string, unknown>>;
+    readonly idempotencyKey: string;
+    readonly signalIds: ReadonlyArray<string>;
+    readonly why: string;
+  },
+) {
+  await context.runEffect(
+    context.db.appendEvent({
+      idempotencyKey: `agent-receipt:${input.idempotencyKey}`,
+      occurredAt: new Date().toISOString(),
+      payload: {
+        action: input.action,
+        changed: input.changed,
+        signalIds: [...input.signalIds],
+        why: input.why,
+      },
+      schemaVersion: 1,
+      source: agentReceiptSource,
+      type: agentReceiptType,
+      userId: context.user.id,
+    }),
+  );
 }
 
 export interface ApiContext {
@@ -501,16 +661,60 @@ export const apiRouter = api.router({
             }),
           ),
       );
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
+      await Promise.all(
+        proposals.map((proposal) => {
+          const explanation = buildProposalExplanation(proposal, synthesesById);
+          return recordAgentReceipt(context, {
+            action: "proposal.generated",
+            changed: {
+              proposalId: proposal.id,
+              status: proposal.status,
+              title: proposal.title,
+            },
+            idempotencyKey: `proposal.generated:${proposal.id}`,
+            signalIds: explanation.source.signalIds,
+            why: explanation.reason,
+          });
+        }),
+      );
 
-      return { proposals: proposals.map(toProposalResponse) };
+      return {
+        proposals: proposals.map((proposal) => toProposalWithExplanation(proposal, synthesesById)),
+      };
     }),
     list: api.proposals.list.handler(async ({ context, input }) => {
       const proposals = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.listPendingProposals({ limit: input.limit ?? 20, user: context.user }),
       );
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
 
-      return { proposals: proposals.map(toProposalResponse) };
+      return {
+        proposals: proposals.map((proposal) => toProposalWithExplanation(proposal, synthesesById)),
+      };
+    }),
+  },
+  reviewInbox: {
+    list: api.reviewInbox.list.handler(async ({ context, input }) => {
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
+      const pendingProposals = exported.proposals
+        .filter((proposal) => proposal.status === "pending")
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, input.limit);
+
+      return {
+        items: pendingProposals.map((proposal) => ({
+          id: proposal.id,
+          createdAt: proposal.createdAt,
+          kind: "proposal",
+          proposal: toProposalWithExplanation(proposal, synthesesById),
+        })),
+        receipts: listReceiptResponses(exported, input.limit),
+      };
     }),
   },
   commitments: {
@@ -525,7 +729,20 @@ export const apiRouter = api.router({
   },
   reviews: {
     create: api.reviews.create.handler(async ({ context, input }) => {
-      return runWorkflow(
+      const exportedBeforeReview = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exportedBeforeReview);
+      const proposal = exportedBeforeReview.proposals.find(
+        (candidate) => candidate.id === input.proposalId,
+      );
+      const explanation = proposal
+        ? buildProposalExplanation(proposal, synthesesById)
+        : {
+            source: proposalSource([]),
+            reason: "Review decision recorded.",
+            confidence: 0.5,
+            nextAction: "Review saved.",
+          };
+      const review = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.reviewProposal({
           decision: input.decision,
@@ -538,6 +755,18 @@ export const apiRouter = api.router({
           user: context.user,
         }),
       );
+      await recordAgentReceipt(context, {
+        action: `review.${review.decision}`,
+        changed: {
+          decision: review.decision,
+          proposalId: review.proposalId,
+          reviewId: review.id,
+        },
+        idempotencyKey: `review.${review.id}`,
+        signalIds: explanation.source.signalIds,
+        why: explanation.reason,
+      });
+      return review;
     }),
   },
   outcomes: {
@@ -722,6 +951,16 @@ function toProposalResponse(proposal: {
   readonly updatedAt: string;
 }) {
   return proposal;
+}
+
+function toProposalWithExplanation(
+  proposal: ProposalRecord,
+  synthesesById: ReadonlyMap<string, SynthesisRecord>,
+) {
+  return {
+    ...toProposalResponse(proposal),
+    explanation: buildProposalExplanation(proposal, synthesesById),
+  };
 }
 
 interface ApiEffectResult<A> {
