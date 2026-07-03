@@ -122,6 +122,10 @@ describe("Desktop app", () => {
     expect(workflow).toContain(
       'bun run release:version:check -- --tag "${{ steps.release.outputs.tag }}"',
     );
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain('tag="${{ inputs.tag }}"');
+    expect(workflow).not.toContain("GITHUB_REF_TYPE");
+    expect(workflow).not.toContain("push:\n    tags:");
     expect(workflow).toContain("cp apps/desktop/release/*.yml release-assets/");
     expect(workflow).toContain("cp apps/desktop/release/*.blockmap release-assets/");
   });

@@ -43,10 +43,12 @@ The workflow maps `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` to Electron Builder'
    git push origin v0.1.0
    ```
 
-3. The `Release Apps` workflow checks out the tag, builds signed desktop
-   artifacts, builds the Raycast extension, and uploads everything to the
-   matching GitHub Release.
-4. Open [explorenudge.com](https://explorenudge.com/) and confirm the public
+3. Run the `Release Apps` workflow manually for that tag. For a public release,
+   keep `allow_unsigned_macos=false` and set `draft=false`; this requires the
+   Apple signing secrets above.
+4. The workflow checks out the tag, builds signed desktop artifacts, builds the
+   Raycast extension, and uploads everything to the matching GitHub Release.
+5. Open [explorenudge.com](https://explorenudge.com/) and confirm the public
    download links point at the newly attached assets.
 
 For an internal unsigned smoke build, run `Release Apps` manually with
