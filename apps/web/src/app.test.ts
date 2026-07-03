@@ -172,22 +172,54 @@ describe("web app", () => {
         },
       );
       const proxiedRequest = proxiedRequests[0];
-      const fetchCall = fetchMock.mock.calls[0];
       if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
-      if (!fetchCall) throw new Error("Expected Clerk fetch call");
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe("clerk-js");
       expect(proxiedRequests).toHaveLength(1);
-      expect(fetchCall[1]).toMatchObject({ redirect: "follow" });
+      expect(proxiedRequest.redirect).toBe("follow");
       expect(proxiedRequest.url).toBe(
         "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
       );
+      expect(proxiedRequest.headers.get("host")).toBeNull();
       expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
         "https://app.explorenudge.com/__clerk",
       );
       expect(proxiedRequest.headers.get("Clerk-Secret-Key")).toBe("sk_test_proxy");
       expect(proxiedRequest.headers.get("X-Forwarded-For")).toBe("203.0.113.10");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("POST /__clerk forwards request bodies through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedBodies: Array<string> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedBodies.push(await request.text());
+
+      return Response.json({ ok: true });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/client",
+        {
+          body: JSON.stringify({ strategy: "oauth_google" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(proxiedBodies).toEqual([JSON.stringify({ strategy: "oauth_google" })]);
     } finally {
       fetchMock.mockRestore();
     }

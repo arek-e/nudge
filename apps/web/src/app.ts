@@ -90,12 +90,25 @@ export function createApp(options: CreateAppOptions = {}) {
     const targetUrl = new URL(clerkPath, "https://frontend-api.clerk.dev");
     targetUrl.search = requestUrl.search;
 
-    const proxyRequest = new Request(targetUrl.toString(), c.req.raw);
-    proxyRequest.headers.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
-    proxyRequest.headers.set("Clerk-Secret-Key", secretKey);
-    proxyRequest.headers.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
+    const proxyHeaders = new Headers(c.req.raw.headers);
+    proxyHeaders.delete("host");
+    proxyHeaders.delete("content-length");
+    proxyHeaders.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
+    proxyHeaders.set("Clerk-Secret-Key", secretKey);
+    proxyHeaders.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
 
-    return fetch(proxyRequest, { redirect: "follow" });
+    const proxyInit: RequestInit = {
+      headers: proxyHeaders,
+      method: c.req.raw.method,
+      redirect: "follow",
+    };
+    const proxyBody = clerkProxyBody(c.req.raw);
+    if (proxyBody) proxyInit.body = proxyBody;
+
+    const proxyRequest = new Request(targetUrl.toString(), proxyInit);
+    const response = await fetch(proxyRequest);
+
+    return new Response(response.body, response);
   });
 
   registerStaticRoutes(app);
@@ -152,4 +165,8 @@ function clerkProxyUrl(requestUrl: string, env: Env) {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+function clerkProxyBody(request: Request) {
+  return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 }
