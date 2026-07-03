@@ -1,0 +1,131 @@
+name: Release Apps
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.1.0"
+        required: true
+        type: string
+      draft:
+        description: "Create or update the GitHub Release as a draft"
+        required: true
+        type: boolean
+        default: true
+      allow_unsigned_macos:
+        description: "Internal QA only: allow unsigned macOS artifacts"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apps-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package And Upload App Downloads
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ inputs.tag }}"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Release tag is required." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "draft=${{ inputs.draft }}" >> "$GITHUB_OUTPUT"
+            echo "allow_unsigned=${{ inputs.allow_unsigned_macos }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "allow_unsigned=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify macOS signing secrets
+        if: ${{ steps.release.outputs.allow_unsigned != 'true' }}
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required signing secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Build signed macOS desktop downloads
+        if: ${{ steps.release.outputs.allow_unsigned != 'true' }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun run desktop:dist:mac
+
+      - name: Build unsigned macOS desktop downloads
+        if: ${{ steps.release.outputs.allow_unsigned == 'true' }}
+        run: bun run desktop:dist:mac:unsigned
+
+      - name: Build Raycast extension
+        run: bun run raycast:build
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp apps/desktop/release/*.dmg release-assets/
+          cp apps/desktop/release/*.zip release-assets/
+          git archive --format zip --output "release-assets/Nudge-Raycast-extension-${{ steps.release.outputs.tag }}.zip" HEAD \
+            apps/raycast \
+            packages/surface \
+            package.json \
+            bun.lock \
+            tsconfig.base.json \
+            tsconfig.json
+
+      - name: Upload GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Nudge ${{ steps.release.outputs.tag }}
+          draft: ${{ steps.release.outputs.draft }}
+          files: release-assets/*
