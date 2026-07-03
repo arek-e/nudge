@@ -10,15 +10,13 @@ const distDirectory = join(raycastDirectory, "dist");
 await copyFile(join(raycastDirectory, "INSTALL.md"), join(distDirectory, "README.md"));
 
 const files = await listFiles(distDirectory);
+const sourceMapFiles = files.filter((file) => file.endsWith(".js.map"));
+const javascriptFiles = files.filter((file) => extname(file) === ".js");
 
-for (const file of files) {
-  if (file.endsWith(".js.map")) {
-    await rm(file);
-  }
-}
+await Promise.all(sourceMapFiles.map((file) => rm(file)));
+await Promise.all(javascriptFiles.map(stripSourceMapComment));
 
-for (const file of files) {
-  if (extname(file) !== ".js") continue;
+async function stripSourceMapComment(file: string) {
   const source = await readFile(file, "utf8");
   const cleaned = source.replace(/\n\/\/# sourceMappingURL=.*?\.map\s*$/u, "\n");
   if (cleaned !== source) await writeFile(file, cleaned);
@@ -39,16 +37,14 @@ console.log(`Prepared Raycast release package at ${distDirectory}`);
 
 async function listFiles(directory: string): Promise<ReadonlyArray<string>> {
   const entries = await readdir(directory, { withFileTypes: true });
-  const files: Array<string> = [];
+  const entryFiles = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = join(directory, entry.name);
+      if (entry.isDirectory()) return await listFiles(entryPath);
+      if (entry.isFile()) return [entryPath];
+      return [];
+    }),
+  );
 
-  for (const entry of entries) {
-    const entryPath = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)));
-      continue;
-    }
-    if (entry.isFile()) files.push(entryPath);
-  }
-
-  return files;
+  return entryFiles.flat();
 }
