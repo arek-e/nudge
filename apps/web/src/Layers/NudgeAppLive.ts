@@ -35,7 +35,6 @@ export function makeNudgeAppLayer(input: MakeNudgeAppLayerInput) {
         ...(env.MEDIA_FILES ? { mediaFiles: env.MEDIA_FILES } : {}),
         okfSandboxFor: async (user) => input.okfSandboxFactory({ env, user }),
         resolveSession: input.resolveSession,
-        traceDb: env.DB,
         ...(env.TURBOPUFFER_API_KEY
           ? {
               turbopuffer: {

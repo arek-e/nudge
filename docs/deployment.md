@@ -99,7 +99,7 @@ After rollback, verify:
 
 ```bash
 curl https://nudge-web.teampitch.workers.dev/health
-bun run traces:recent
+curl https://app.explorenudge.com/api/version
 ```
 
 ## Pull Requests

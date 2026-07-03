@@ -1,11 +1,13 @@
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
+const wrangler = `${root}node_modules/.bin/wrangler`;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
+const containersRolloutArg = process.argv.find((arg) => arg.startsWith("--containers-rollout="));
 const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
 const requestedVersion = versionArg?.slice("--version=".length).trim();
 
@@ -70,8 +72,11 @@ if (!clientEnvironment) {
 }
 const deployTargetArgs = [`--env ${deployEnvironment}`];
 const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
+const containersRollout =
+  containersRolloutArg ?? (deployEnvironment === "production" ? "--containers-rollout=none" : "");
 const deployArgs = [
   ...deployTargetArgs,
+  containersRollout,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
@@ -82,8 +87,8 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run build", { cwd: web, env: clientEnvironment });
-run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
+run("bun run build", { cwd: web, env: clientEnvironment });
+run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
 
 console.log(
   `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,

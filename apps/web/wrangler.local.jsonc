@@ -27,18 +27,11 @@
     "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
     "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
     "LOG_HTTP_REQUESTS": "true",
-    "NUDGE_DB_DRIVER": "d1",
+    "CONVEX_URL": "https://grandiose-hamster-855.eu-west-1.convex.cloud",
     "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "nudge-local",
-      "migrations_dir": "../../packages/db/migrations",
-    },
-  ],
   "r2_buckets": [
     {
       "binding": "MEDIA_FILES",
@@ -47,10 +40,6 @@
     {
       "binding": "OKF_FILES",
       "bucket_name": "nudge-local-okf-files",
-    },
-    {
-      "binding": "TRACE_ARTIFACTS",
-      "bucket_name": "nudge-local-trace-artifacts",
     },
   ],
   "durable_objects": {

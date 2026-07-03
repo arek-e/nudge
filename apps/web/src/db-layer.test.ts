@@ -8,8 +8,6 @@ const testWorkflow = {
 } as Workflow;
 
 const baseEnv = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
@@ -29,10 +27,6 @@ describe("runtime DB layer", () => {
 
   test("allows tests and local seams to inject an explicit DB layer", () => {
     expect(resolveDbLayerForEnv(baseEnv, Db.layerMemory)).toBe(Db.layerMemory);
-  });
-
-  test("allows local development to use the D1 runtime store explicitly", () => {
-    expect(resolveDbLayerForEnv({ ...baseEnv, NUDGE_DB_DRIVER: "d1" })).toBeDefined();
   });
 
   test("requires both Convex URL and runtime secret", () => {

@@ -285,7 +285,6 @@ export interface ApiContext {
   ) => Promise<A>;
   readonly runEffect: RunEffect;
   readonly traceHeaders?: Readonly<Record<string, string>>;
-  readonly traceDb?: D1Database;
   readonly turbopuffer?: {
     readonly apiKey: string;
     readonly region: string;
@@ -820,14 +819,6 @@ export const apiRouter = api.router({
       );
     }),
   },
-  traces: {
-    recent: api.traces.recent.handler(async ({ context, input }) => {
-      const rows = await context.runEffect(
-        listRecentTraceSpans(context.traceDb, input.limit ?? 20),
-      );
-      return { spans: rows.map(toTraceSpanSummary) };
-    }),
-  },
   voice: {
     log: api.voice.log.handler(async ({ context, input }) => {
       const route = classifyVoiceLogRoute(input.spokenText);
@@ -852,72 +843,6 @@ export const apiRouter = api.router({
     }),
   },
 });
-
-interface TraceSpanRow {
-  readonly id: string;
-  readonly trace_id: string;
-  readonly parent_span_id: string | null;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly started_at: string;
-  readonly ended_at: string | null;
-  readonly duration_ms: number | null;
-  readonly route_name: string | null;
-  readonly method: string | null;
-  readonly path: string | null;
-}
-
-function listRecentTraceSpans(traceDb: D1Database | undefined, limit: number) {
-  if (typeof traceDb?.prepare !== "function") return Effect.succeed([]);
-
-  return Effect.tryPromise({
-    try: async () => {
-      const result = await traceDb
-        .prepare(
-          `SELECT
-            span_id AS id,
-            trace_id,
-            parent_span_id,
-            name,
-            kind,
-            status,
-            started_at,
-            ended_at,
-            duration_ms,
-            route_name,
-            method,
-            path
-          FROM trace_spans
-          WHERE route_name IS NULL OR route_name != 'api.traces'
-          ORDER BY started_at DESC
-          LIMIT ?`,
-        )
-        .bind(limit)
-        .all<TraceSpanRow>();
-
-      return result.results ?? [];
-    },
-    catch: (cause) => cause,
-  }).pipe(Effect.withSpan("TraceSpans.listRecent", { attributes: { limit } }));
-}
-
-function toTraceSpanSummary(row: TraceSpanRow) {
-  return {
-    id: row.id,
-    traceId: row.trace_id,
-    parentSpanId: row.parent_span_id,
-    name: row.name,
-    kind: row.kind,
-    status: row.status,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    durationMs: row.duration_ms,
-    routeName: row.route_name,
-    method: row.method,
-    path: row.path,
-  };
-}
 
 function toSynthesisResponse(synthesis: {
   readonly id: string;

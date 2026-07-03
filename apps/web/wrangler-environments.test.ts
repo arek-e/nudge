@@ -13,16 +13,22 @@ describe("Nudge Worker environments", () => {
     expect(wrangler).toContain('"production"');
     expect(wrangler).toContain('"name": "nudge-web-staging"');
     expect(wrangler).toContain('"name": "nudge-web"');
+    expect(wrangler).toContain('"pattern": "app.staging.explorenudge.com"');
+    expect(wrangler).toContain('"custom_domain": true');
     expect(wrangler).toContain('"ENVIRONMENT": "staging"');
     expect(wrangler).toContain('"ENVIRONMENT": "production"');
+    expect(wrangler).toContain(
+      '"CLERK_AUTHORIZED_PARTIES": "https://app.staging.explorenudge.com,https://nudge-web-staging.teampitch.workers.dev"',
+    );
     expect(wrangler).toContain(
       '"CLERK_AUTHORIZED_PARTIES": "https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev"',
     );
     expect(wrangler).toContain(
       '"CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );
-    expect(wrangler).toContain('"database_name": "nudge-staging"');
-    expect(wrangler).toContain('"database_name": "nudge-production"');
+    expect(wrangler).not.toContain('"d1_databases"');
+    expect(wrangler).not.toContain('"binding": "DB"');
+    expect(wrangler).not.toContain('"TRACE_ARTIFACTS"');
     expect(wrangler).toContain('"bucket_name": "nudge-staging-media"');
     expect(wrangler).toContain('"bucket_name": "nudge-media"');
   });
@@ -40,6 +46,8 @@ describe("Nudge Worker environments", () => {
     expect(deployWorkflow).toContain("environment: production");
     expect(deployScript).toContain('const deployEnvironment = env ?? "production";');
     expect(deployScript).toContain("const deployTargetArgs = [`--env ${deployEnvironment}`");
+    expect(deployScript).toContain('deployEnvironment === "production"');
+    expect(deployScript).toContain('"--containers-rollout=none"');
     expect(deployScript).toContain(
       'VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );

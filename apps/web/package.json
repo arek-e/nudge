@@ -5,9 +5,6 @@
   "scripts": {
     "build": "vite build",
     "cf-typegen": "wrangler types",
-    "db:migrations:apply:local": "wrangler d1 migrations apply DB --local",
-    "db:migrations:apply:remote": "wrangler d1 migrations apply DB --remote --env production",
-    "db:migrations:apply:staging": "wrangler d1 migrations apply DB --remote --env staging",
     "deploy": "bun ../../scripts/deploy-web.ts",
     "deploy:dirty": "bun ../../scripts/deploy-web.ts --allow-dirty",
     "deploy:dry-run": "bun ../../scripts/deploy-web.ts --dry-run",
@@ -18,7 +15,6 @@
     "logs:tail": "wrangler tail nudge-web --format=json",
     "logs:tail:pretty": "wrangler tail nudge-web --format=pretty",
     "test:e2e": "playwright test",
-    "traces:recent": "wrangler d1 execute DB --remote --command \"SELECT timestamp, event, route_name, path, status, outcome, duration_ms, sample_reason FROM trace_events ORDER BY created_at DESC LIMIT 20\"",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -47,7 +43,6 @@
     "ai": "catalog:",
     "braintrust": "3.20.0",
     "convex": "catalog:",
-    "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "evlog": "catalog:",
     "hono": "catalog:",

@@ -128,7 +128,6 @@ export function registerApiRoutes(
             runEffect,
             session: auth,
             traceHeaders: requestTraceHeaders(c),
-            traceDb: appServices.traceDb,
             ...(appServices.turbopuffer ? { turbopuffer: appServices.turbopuffer } : {}),
             user,
           },
@@ -186,8 +185,6 @@ function apiRouteWideEventFields(path: string) {
     return { routeName: "api.reviews" };
   } else if (path.startsWith("/api/outcomes")) {
     return { routeName: "api.outcomes" };
-  } else if (path.startsWith("/api/traces")) {
-    return { routeName: "api.traces" };
   } else if (path.startsWith("/api/voice")) {
     return { routeName: "api.voice" };
   } else if (path.startsWith("/api/events")) {

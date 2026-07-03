@@ -19,8 +19,6 @@ const anonymousMcpHeaders = {
 };
 
 const env = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
@@ -32,22 +30,6 @@ const env = {
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
-
-const createTraceDb = () => {
-  const rows: Array<ReadonlyArray<unknown>> = [];
-  const db = {
-    prepare: (sql: string) => ({
-      bind: (...values: ReadonlyArray<unknown>) => ({
-        run: async () => {
-          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
-          return { success: true };
-        },
-      }),
-    }),
-  } as D1Database;
-
-  return { db, rows };
-};
 
 describe("web app", () => {
   test("GET / serves the Nudge Daily Operating Loop app", async () => {
@@ -89,7 +71,6 @@ describe("web app", () => {
       version: "test-version",
       bindings: {
         convex: true,
-        d1: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
@@ -267,171 +248,6 @@ describe("web app", () => {
     }
   });
 
-  test("GET /health persists a safe trace event", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const traceDb = createTraceDb();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "persisted-ray", "user-agent": "persist-test" } },
-      { ...env, DB: traceDb.db },
-    );
-
-    expect(response.status).toBe(200);
-    expect(traceDb.rows).toHaveLength(1);
-    expect(traceDb.rows[0]).toEqual([
-      expect.any(String),
-      expect.any(String),
-      "http_request_completed",
-      "wide_event",
-      "nudge-web",
-      "test",
-      "test-version",
-      "persisted-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(Number),
-      "default",
-      null,
-      expect.stringContaining("persisted-ray"),
-      expect.any(String),
-    ]);
-  });
-
-  test("GET /health persists a root request trace span", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(1);
-    expect(spanRows[0]).toEqual([
-      expect.stringMatching(/^[a-f0-9]{32}$/),
-      expect.stringMatching(/^[a-f0-9]{16}$/),
-      null,
-      "GET /health",
-      "server",
-      "ok",
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      "nudge-web",
-      "test",
-      "test-version",
-      "span-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(String),
-      expect.any(String),
-    ]);
-  });
-
-  test("POST /api/syntheses records framework and primitive child spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/syntheses",
-      {
-        method: "POST",
-        headers: { ...anonymousJsonHeaders, "cf-ray": "synthesis-ray" },
-        body: JSON.stringify({ frameKey: "current_state" }),
-      },
-      { ...env, DB: traceDb },
-    );
-
-    const names = spanRows.map((row) => row[3]);
-    const traceIds = new Set(spanRows.map((row) => row[0]));
-    const rootSpan = spanRows.find((row) => row[2] === null);
-    const childSpans = spanRows.filter((row) => row[2] !== null);
-
-    expect(response.status).toBe(200);
-    expect(names).toContain("POST /api/syntheses");
-    expect(names).toContain("app.resolve");
-    expect(names).toContain("auth.current_user");
-    expect(names).toContain("orpc.handle");
-    expect(names).toContain("syntheses.create");
-    expect(traceIds.size).toBe(1);
-    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
-    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
-  });
-
-  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          all: async () => ({ results: [] }),
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(0);
-  });
-
-  test("GET /api/version bypasses db and auth spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
-
-    expect(response.status).toBe(200);
-    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
-  });
-
   test("request errors still emit one wide request completion log", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
@@ -554,66 +370,6 @@ describe("web app", () => {
       payload: { text: "Log that I need to follow up with Maya tomorrow" },
       source: "ios_siri",
       type: "capture.voice_log",
-    });
-  });
-
-  test("GET /api/traces/recent lists safe trace span summaries", async () => {
-    const rows = [
-      {
-        id: "span-1",
-        trace_id: "trace-1",
-        parent_span_id: null,
-        name: "GET /health",
-        kind: "server",
-        status: "ok",
-        started_at: "2026-06-12T10:00:00.000Z",
-        ended_at: "2026-06-12T10:00:00.125Z",
-        duration_ms: 125,
-        route_name: "health",
-        method: "GET",
-        path: "/health",
-      },
-    ];
-    let capturedSelectSql = "";
-    const traceDb = {
-      prepare: (sql: string) => {
-        if (sql.includes("SELECT")) capturedSelectSql = sql;
-        return {
-          bind: () => ({
-            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
-            run: async () => ({ success: true }),
-          }),
-        };
-      },
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(capturedSelectSql).toContain("span_id AS id");
-    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
-    expect(await response.json()).toEqual({
-      spans: [
-        {
-          id: "span-1",
-          traceId: "trace-1",
-          parentSpanId: null,
-          name: "GET /health",
-          kind: "server",
-          status: "ok",
-          startedAt: "2026-06-12T10:00:00.000Z",
-          endedAt: "2026-06-12T10:00:00.125Z",
-          durationMs: 125,
-          routeName: "health",
-          method: "GET",
-          path: "/health",
-        },
-      ],
     });
   });
 
@@ -1531,63 +1287,6 @@ describe("web app", () => {
         signalCount: 1,
       },
     ]);
-  });
-
-  test("POST /api/journal persists AI context as a debug-wide event", async () => {
-    const traceDb = createTraceDb();
-    const workflow = {
-      create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
-    } as Workflow;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/journal",
-      {
-        method: "POST",
-        headers: {
-          ...anonymousJsonHeaders,
-          "cf-ray": "journal-ray",
-          "content-type": "application/json",
-          "user-agent": "Nudge/1",
-        },
-        body: JSON.stringify({
-          bodyText: "I need to work on the guest list",
-          localDate: "2026-07-01",
-          title: "July 1",
-        }),
-      },
-      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
-    );
-
-    expect(response.status).toBe(200);
-    const saved = await response.json();
-    expect(traceDb.rows).toHaveLength(1);
-
-    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
-    expect(payload).toMatchObject({
-      event: "http_request_completed",
-      routeName: "api.journal",
-      aiErrorCode: null,
-      aiModel: "@cf/zai-org/glm-4.7-flash",
-      aiRunId: saved.analysisRun.id,
-      aiSourceType: "note_revision",
-      aiSystem: "cloudflare-think",
-      noteLocalDate: "2026-07-01",
-      "otel.name": "api.journal",
-      "otel.status_code": "OK",
-      "http.request.method": "POST",
-      "http.route": "api.journal",
-      "http.response.status_code": 200,
-      "url.path": "/api/journal",
-      "user_agent.original": "Nudge/1",
-      "service.name": "nudge-web",
-      "deployment.environment.name": "test",
-      "nudge.debug_kind": "ai",
-      "nudge.ai.system": "cloudflare-think",
-      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "nudge.ai.run_id": saved.analysisRun.id,
-      "nudge.ai.error_code": null,
-    });
   });
 
   test("custom integrations can fetch a queued agent run by id", async () => {

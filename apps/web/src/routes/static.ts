@@ -438,23 +438,20 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   app.get("/health", wideEventFields({ routeName: "health" }), (c) => {
     const env = c.env;
     const convexConfigured = Boolean(env.CONVEX_URL && env.CONVEX_RUNTIME_SECRET);
-    const runtimeStoreConfigured =
-      env.NUDGE_DB_DRIVER === "d1" ? Boolean(env.DB) : convexConfigured;
 
     return c.json(
       {
-        ok: runtimeStoreConfigured,
+        ok: convexConfigured,
         service: "nudge-web",
         environment: env.ENVIRONMENT ?? "unknown",
         version: env.APP_VERSION ?? "0.0.0",
         bindings: {
           convex: convexConfigured,
-          d1: Boolean(env.DB),
           dailyDigestWorkflow: Boolean(env.DAILY_DIGEST_WORKFLOW),
           userAgentSession: Boolean(env.USER_AGENT_SESSION),
         },
       },
-      runtimeStoreConfigured ? 200 : 503,
+      convexConfigured ? 200 : 503,
     );
   });
 

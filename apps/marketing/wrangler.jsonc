@@ -11,5 +11,9 @@
       "pattern": "explorenudge.com",
       "custom_domain": true,
     },
+    {
+      "pattern": "www.explorenudge.com",
+      "custom_domain": true,
+    },
   ],
 }

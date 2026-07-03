@@ -22,10 +22,8 @@ import {
   createSpanId,
   createTraceId,
   parseTraceparent,
-  persistTraceCacheSpan,
   traceparentHeader,
   type RuntimeTraceContext,
-  type SqlInsertRow,
   withRuntimeTraceContext,
 } from "@nudge/observability";
 import type { Env } from "./env";
@@ -51,12 +49,6 @@ const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODE
 
 export default app;
 
-const safeRecordSpan = (env: Env) => (row: SqlInsertRow) => {
-  if (typeof env.DB?.prepare !== "function") return;
-  const persistence = persistTraceCacheSpan(env.DB, row).pipe(Effect.catch(() => Effect.void));
-  void Effect.runPromise(persistence);
-};
-
 const runtimeTraceContextFromRequest = (
   env: Env,
   request: Request,
@@ -70,13 +62,11 @@ const runtimeTraceContextFromRequest = (
   const path = new URL(request.url).pathname;
 
   return {
-    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: request.method,
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path,
-    recordSpan: safeRecordSpan(env),
     requestId,
     rootSpanId,
     routeName,
@@ -97,13 +87,11 @@ const runtimeTraceContextFromWorkflow = (
   const rootSpanId = createSpanId();
 
   return {
-    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: "WORKFLOW",
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path: routeName,
-    recordSpan: safeRecordSpan(env),
     requestId: input.kind === "daily-note-analysis" ? (input.requestId ?? null) : null,
     rootSpanId,
     routeName,

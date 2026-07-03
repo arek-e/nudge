@@ -30,26 +30,12 @@ console.log(`Nudge dev server: ${url}`);
 console.log(
   `Nudge Clerk publishable key: ${process.env.CLERK_PUBLISHABLE_KEY ? "configured" : "missing"}`,
 );
+console.log(`Nudge Convex URL: ${process.env.CONVEX_URL ? "configured" : "using config default"}`);
 console.log(`Nudge Wrangler config: ${configArgs.length ? configArgs[1] : "wrangler.jsonc"}`);
 console.log(`Nudge Wrangler state: ${persistTo}`);
 console.log(`Nudge local logs: ${logDir}`);
 
 await run(["bun", "run", "--cwd", "apps/web", "build"], "build.log");
-await run(
-  [
-    "wrangler",
-    "d1",
-    "migrations",
-    "apply",
-    "DB",
-    "--local",
-    "--cwd",
-    "apps/web",
-    "--persist-to",
-    persistTo,
-  ],
-  "d1-migrations.log",
-);
 await run(
   [
     "wrangler",
@@ -66,6 +52,7 @@ await run(
     "--persist-to",
     persistTo,
     ...clerkVarArgs,
+    ...convexVarArgs(),
     ...braintrustEnvArgs,
     ...wranglerArgs,
   ],
@@ -89,6 +76,15 @@ async function run(command: readonly string[], logName: string) {
   ]);
   log.end();
   if (exitCode !== 0) process.exit(exitCode);
+}
+
+function convexVarArgs() {
+  const entries = [
+    ["CONVEX_RUNTIME_SECRET", process.env.CONVEX_RUNTIME_SECRET],
+    ["CONVEX_URL", process.env.CONVEX_URL],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
 }
 
 function wranglerClerkVarArgs() {
