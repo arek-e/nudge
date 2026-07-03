@@ -1,5 +1,6 @@
 import type { FunctionReturnType } from "convex/server";
 import { ClerkProvider, SignIn, UserButton, useAuth, useClerk } from "@clerk/react";
+import { useSignIn } from "@clerk/react/legacy";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import {
   createRootRoute,
@@ -40,6 +41,11 @@ const convexClient = new ConvexReactClient(convexUrl);
 const clerkPublishableKey = requiredClerkPublishableKey();
 const logoLongSrc =
   import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
+const desktopAuthRequestParam = "desktop_auth";
+const desktopAuthRequestValue = "browser";
+const desktopAuthCallbackParam = "desktop_callback";
+const desktopTicketParam = "desktop_ticket";
+const defaultDesktopAuthCallbackUrl = "nudge://auth/callback";
 
 type ConvexStickyNotesState = FunctionReturnType<typeof api.stickyNotes.list>;
 type StickyNote = ConvexStickyNotesState["notes"][number];
@@ -87,17 +93,249 @@ function AppShell() {
   if (!auth.isLoaded) {
     return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
   }
-  if (!auth.isSignedIn) return <ClerkSignInScreen />;
+
+  const desktopTicket = desktopTicketFromLocation();
+  if (desktopTicket && !auth.isSignedIn)
+    return <DesktopTicketSignInScreen ticket={desktopTicket} />;
+
+  if (isDesktopBrowserAuthRequest()) {
+    if (!auth.isSignedIn) return <ClerkSignInScreen forceRedirectUrl={window.location.href} />;
+    return <DesktopBrowserAuthBridge />;
+  }
+
+  if (!auth.isSignedIn) return isDesktopSurface() ? <DesktopSignInScreen /> : <ClerkSignInScreen />;
   return <AuthenticatedAppShell />;
 }
 
-function ClerkSignInScreen() {
+function ClerkSignInScreen(props: { readonly forceRedirectUrl?: string }) {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <SignIn routing="hash" />
+      {props.forceRedirectUrl ? (
+        <SignIn routing="hash" forceRedirectUrl={props.forceRedirectUrl} />
+      ) : (
+        <SignIn routing="hash" />
+      )}
     </main>
   );
+}
+
+function DesktopSignInScreen() {
+  const [status, setStatus] = useState<"idle" | "opening" | "opened" | "error">("idle");
+
+  const openBrowserSignIn = async () => {
+    if (status === "opening") return;
+    setStatus("opening");
+    try {
+      const url = desktopBrowserAuthUrl();
+      const bridge = window.nudgeDesktop;
+      if (bridge) {
+        const result = await bridge.openExternalAuth(url);
+        if (!result.ok) throw new Error("Could not open the default browser");
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+      setStatus("opened");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="grid w-full max-w-md gap-5 rounded-lg border border-white/10 bg-[#1f2026] p-6 shadow-2xl">
+        <div className="grid gap-2 text-center">
+          <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign in to Nudge</h1>
+          <p className="m-0 text-sm leading-6 text-white/70">
+            Continue in your browser to use your existing Apple or Google login.
+          </p>
+        </div>
+        <button
+          className="min-h-12 rounded-md bg-white px-4 text-sm font-semibold text-[#111] shadow-sm disabled:opacity-60"
+          disabled={status === "opening"}
+          type="button"
+          onClick={openBrowserSignIn}
+        >
+          {status === "opening" ? "Opening browser..." : "Continue in browser"}
+        </button>
+        {status === "opened" ? (
+          <p className="m-0 text-center text-sm leading-6 text-white/70">
+            Finish sign-in in your browser. Nudge will reopen automatically.
+          </p>
+        ) : null}
+        {status === "error" ? (
+          <p className="m-0 text-center text-sm leading-6 text-[#ffb39e]">
+            Browser sign-in could not be opened.
+          </p>
+        ) : null}
+        <details className="grid gap-4 border-t border-white/10 pt-4">
+          <summary className="cursor-pointer text-center text-sm font-semibold text-white/75">
+            Use embedded sign in
+          </summary>
+          <div className="mt-4 flex justify-center">
+            <SignIn routing="hash" />
+          </div>
+        </details>
+      </section>
+    </main>
+  );
+}
+
+function DesktopBrowserAuthBridge() {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const mintDesktopTicket = async () => {
+      const callbackUrl = desktopCallbackUrlFromLocation();
+      if (!callbackUrl || !isDesktopAuthCallbackUrl(callbackUrl)) {
+        if (!cancelled) setErrorMessage("The desktop callback URL is missing or invalid.");
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/auth/desktop-ticket", {
+          credentials: "same-origin",
+          headers: { accept: "application/json" },
+          method: "POST",
+        });
+        if (!response.ok) throw new Error("Could not create a desktop sign-in ticket");
+
+        const payload = await response.json().catch(() => null);
+        const ticket = stringProperty(payload, "ticket");
+        if (!ticket) throw new Error("Desktop sign-in ticket response was invalid");
+
+        const redirectUrl = new URL(callbackUrl);
+        redirectUrl.searchParams.set("ticket", ticket);
+        window.location.href = redirectUrl.toString();
+      } catch (error) {
+        if (!cancelled) setErrorMessage(errorMessageFrom(error, "Desktop sign-in failed."));
+      }
+    };
+
+    void mintDesktopTicket();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="grid w-full max-w-md gap-3 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-normal">Opening Nudge</h1>
+        <p className="m-0 text-sm leading-6 text-white/70">
+          {errorMessage ?? "Returning your signed-in session to the desktop app."}
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function DesktopTicketSignInScreen(props: { readonly ticket: string }) {
+  const { isLoaded, setActive, signIn } = useSignIn();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    let cancelled = false;
+    const completeDesktopSignIn = async () => {
+      try {
+        const result = await signIn.create({
+          strategy: "ticket",
+          ticket: props.ticket,
+        });
+        if (result.status !== "complete" || !result.createdSessionId) {
+          throw new Error("Desktop sign-in ticket did not create a complete session");
+        }
+        await setActive({ session: result.createdSessionId });
+        removeDesktopTicketFromLocation();
+      } catch (error) {
+        if (!cancelled) setErrorMessage(errorMessageFrom(error, "Desktop sign-in failed."));
+      }
+    };
+
+    void completeDesktopSignIn();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, props.ticket, setActive, signIn]);
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="grid w-full max-w-md gap-3 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-normal">Signing in</h1>
+        <p className="m-0 text-sm leading-6 text-white/70">
+          {errorMessage ?? "Completing your browser sign-in."}
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function isDesktopSurface() {
+  return window.nudgeDesktop?.surface === "desktop";
+}
+
+function isDesktopBrowserAuthRequest() {
+  return (
+    new URL(window.location.href).searchParams.get(desktopAuthRequestParam) ===
+    desktopAuthRequestValue
+  );
+}
+
+function desktopBrowserAuthUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.searchParams.delete(desktopTicketParam);
+  url.searchParams.set(desktopAuthRequestParam, desktopAuthRequestValue);
+  url.searchParams.set(desktopAuthCallbackParam, desktopAuthCallbackUrl());
+  return url.toString();
+}
+
+function desktopAuthCallbackUrl() {
+  const callbackUrl = window.nudgeDesktop?.authCallbackUrl;
+  return callbackUrl && isDesktopAuthCallbackUrl(callbackUrl)
+    ? callbackUrl
+    : defaultDesktopAuthCallbackUrl;
+}
+
+function desktopCallbackUrlFromLocation() {
+  return new URL(window.location.href).searchParams.get(desktopAuthCallbackParam);
+}
+
+function desktopTicketFromLocation() {
+  const ticket = new URL(window.location.href).searchParams.get(desktopTicketParam)?.trim();
+  return ticket && ticket.length > 0 ? ticket : null;
+}
+
+function removeDesktopTicketFromLocation() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(desktopTicketParam);
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function isDesktopAuthCallbackUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "nudge:" && url.hostname === "auth" && url.pathname === "/callback";
+  } catch {
+    return false;
+  }
+}
+
+function stringProperty(value: unknown, key: string) {
+  if (!value || typeof value !== "object") return null;
+  const property = Reflect.get(value, key);
+  return typeof property === "string" && property.length > 0 ? property : null;
+}
+
+function errorMessageFrom(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function AuthenticatedAppShell() {
@@ -106,7 +344,248 @@ function AuthenticatedAppShell() {
     return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
   }
 
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <DesktopUpdateToast />
+    </>
+  );
+}
+
+type DesktopUpdatePendingAction = "check" | "download" | "install";
+
+interface DesktopUpdateControls {
+  readonly actionMessage: string | null;
+  readonly checkForUpdate: () => Promise<void>;
+  readonly downloadUpdate: () => Promise<void>;
+  readonly installUpdate: () => Promise<void>;
+  readonly pendingAction: DesktopUpdatePendingAction | null;
+  readonly state: NudgeDesktopUpdateState | null;
+}
+
+function DesktopUpdateToast() {
+  const updates = useDesktopUpdateState();
+  const state = updates.state;
+  if (!state || !shouldShowDesktopUpdateToast(state)) return null;
+
+  const action = desktopUpdateActionForState(state, updates);
+  const progressWidth = `${Math.max(6, Math.min(100, state.downloadPercent ?? 6))}%`;
+  const detail = desktopUpdateDetail(state, updates.actionMessage);
+
+  return (
+    <aside
+      className="fixed right-4 bottom-4 z-50 grid w-[calc(100%-2rem)] max-w-sm gap-3 rounded-lg border border-[#cbd5df] bg-white p-4 text-[#111827] shadow-2xl"
+      role={state.status === "error" ? "alert" : "status"}
+      aria-live="polite"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="m-0 text-sm font-semibold">{desktopUpdateTitle(state)}</p>
+          <p className="m-0 mt-1 text-sm leading-5 text-[#5b6472]">{detail}</p>
+        </div>
+        <span
+          className={`mt-1 size-2.5 shrink-0 rounded-full ${desktopUpdateIndicatorClassName(
+            state.status,
+          )}`}
+          aria-hidden="true"
+        />
+      </div>
+      {state.status === "downloading" ? (
+        <div className="h-1.5 overflow-hidden rounded-full bg-[#e5eaf0]">
+          <div className="h-full rounded-full bg-[#f14f23]" style={{ width: progressWidth }} />
+        </div>
+      ) : null}
+      {action ? (
+        <button
+          className="min-h-10 rounded-md bg-[#111827] px-3 text-sm font-semibold text-white shadow-sm disabled:opacity-60"
+          disabled={updates.pendingAction !== null}
+          type="button"
+          onClick={() => {
+            void action.run();
+          }}
+        >
+          {updates.pendingAction ? "Working" : action.label}
+        </button>
+      ) : null}
+    </aside>
+  );
+}
+
+function useDesktopUpdateState(): DesktopUpdateControls {
+  const [state, setState] = useState<NudgeDesktopUpdateState | null>(null);
+  const [pendingAction, setPendingAction] = useState<DesktopUpdatePendingAction | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bridge = window.nudgeDesktop;
+    if (!bridge) return;
+
+    let cancelled = false;
+    const applyState = (value: unknown) => {
+      const nextState = parseDesktopUpdateState(value);
+      if (!cancelled && nextState) setState(nextState);
+    };
+
+    const unsubscribe = bridge.onUpdateState(applyState);
+    void bridge
+      .getUpdateState()
+      .then(applyState)
+      .catch((error) => {
+        if (!cancelled) setActionMessage(errorMessageFrom(error, "Update state unavailable."));
+      });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const runDesktopUpdateAction = async (
+    pending: DesktopUpdatePendingAction,
+    command: (bridge: NudgeDesktopBridge) => Promise<unknown>,
+  ) => {
+    const bridge = window.nudgeDesktop;
+    if (!bridge || pendingAction) return;
+
+    setPendingAction(pending);
+    setActionMessage(null);
+    try {
+      const result = parseDesktopUpdateActionResult(await command(bridge));
+      if (!result) throw new Error("Desktop update command returned an invalid response.");
+      setState(result.state);
+      if (!result.accepted && result.state.message) setActionMessage(result.state.message);
+    } catch (error) {
+      setActionMessage(errorMessageFrom(error, "Desktop update failed."));
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  return {
+    actionMessage,
+    checkForUpdate: () => runDesktopUpdateAction("check", (bridge) => bridge.checkForUpdate()),
+    downloadUpdate: () => runDesktopUpdateAction("download", (bridge) => bridge.downloadUpdate()),
+    installUpdate: () => runDesktopUpdateAction("install", (bridge) => bridge.installUpdate()),
+    pendingAction,
+    state,
+  };
+}
+
+function shouldShowDesktopUpdateToast(state: NudgeDesktopUpdateState) {
+  return (
+    state.enabled &&
+    (state.status === "available" ||
+      state.status === "downloaded" ||
+      state.status === "downloading" ||
+      state.status === "error")
+  );
+}
+
+function desktopUpdateActionForState(
+  state: NudgeDesktopUpdateState,
+  updates: DesktopUpdateControls,
+) {
+  if (state.status === "available") return { label: "Download", run: updates.downloadUpdate };
+  if (state.status === "downloaded") return { label: "Restart", run: updates.installUpdate };
+  if (state.status === "error" && state.availableVersion)
+    return { label: "Retry download", run: updates.downloadUpdate };
+  if (state.status === "error" && state.canRetry)
+    return { label: "Retry", run: updates.checkForUpdate };
+  return null;
+}
+
+function desktopUpdateTitle(state: NudgeDesktopUpdateState) {
+  switch (state.status) {
+    case "available":
+      return "Update available";
+    case "downloaded":
+      return "Update ready";
+    case "downloading":
+      return "Downloading update";
+    case "error":
+      return "Update failed";
+    default:
+      return "Nudge update";
+  }
+}
+
+function desktopUpdateDetail(state: NudgeDesktopUpdateState, actionMessage: string | null) {
+  if (state.status === "available") {
+    const version = state.availableVersion ?? "a new version";
+    return `Nudge ${version} is ready to download.`;
+  }
+  if (state.status === "downloaded") {
+    const version = state.downloadedVersion ?? state.availableVersion ?? "the update";
+    return `Restart Nudge to install ${version}.`;
+  }
+  if (state.status === "downloading") {
+    return state.downloadPercent === null
+      ? "Downloading the latest version."
+      : `${state.downloadPercent}% downloaded.`;
+  }
+  return state.message ?? actionMessage ?? "Try again when you are back online.";
+}
+
+function desktopUpdateIndicatorClassName(status: NudgeDesktopUpdateStatus) {
+  if (status === "downloaded") return "bg-[#138a46]";
+  if (status === "error") return "bg-[#dc2626]";
+  if (status === "downloading") return "bg-[#f14f23]";
+  return "bg-[#2563eb]";
+}
+
+function parseDesktopUpdateActionResult(value: unknown): NudgeDesktopUpdateActionResult | null {
+  if (!value || typeof value !== "object") return null;
+  const accepted = readObjectProperty(value, "accepted");
+  const completed = readObjectProperty(value, "completed");
+  const state = parseDesktopUpdateState(readObjectProperty(value, "state"));
+  if (typeof accepted !== "boolean" || typeof completed !== "boolean" || !state) return null;
+  return { accepted, completed, state };
+}
+
+function parseDesktopUpdateState(value: unknown): NudgeDesktopUpdateState | null {
+  if (!value || typeof value !== "object") return null;
+
+  const availableVersion = readNullableStringProperty(value, "availableVersion");
+  const canRetry = readObjectProperty(value, "canRetry");
+  const currentVersion = readStringProperty(value, "currentVersion");
+  const downloadedVersion = readNullableStringProperty(value, "downloadedVersion");
+  const downloadPercent = readNullableNumberProperty(value, "downloadPercent");
+  const enabled = readObjectProperty(value, "enabled");
+  const message = readNullableStringProperty(value, "message");
+  const status = readStringProperty(value, "status");
+
+  if (
+    typeof canRetry !== "boolean" ||
+    !currentVersion ||
+    typeof enabled !== "boolean" ||
+    !isDesktopUpdateStatus(status)
+  ) {
+    return null;
+  }
+
+  return {
+    availableVersion,
+    canRetry,
+    currentVersion,
+    downloadedVersion,
+    downloadPercent,
+    enabled,
+    message,
+    status,
+  };
+}
+
+function isDesktopUpdateStatus(value: unknown): value is NudgeDesktopUpdateStatus {
+  return (
+    value === "available" ||
+    value === "checking" ||
+    value === "disabled" ||
+    value === "downloaded" ||
+    value === "downloading" ||
+    value === "error" ||
+    value === "idle" ||
+    value === "up-to-date"
+  );
 }
 
 function NotesScreen() {
@@ -933,6 +1412,16 @@ function readObjectProperty(value: unknown, key: string) {
 function readStringProperty(value: unknown, key: string) {
   const property = readObjectProperty(value, key);
   return typeof property === "string" ? property : undefined;
+}
+
+function readNullableStringProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "string" ? property : null;
+}
+
+function readNullableNumberProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "number" && Number.isFinite(property) ? property : null;
 }
 
 function readUnknownArrayProperty(value: unknown, key: string) {

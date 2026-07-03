@@ -71,6 +71,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify release versions
+        run: bun run release:version:check -- --tag "${{ steps.release.outputs.tag }}"
+
       - name: Verify macOS signing secrets
         if: ${{ steps.release.outputs.allow_unsigned != 'true' }}
         shell: bash
@@ -114,6 +117,8 @@ jobs:
           mkdir -p release-assets
           cp apps/desktop/release/*.dmg release-assets/
           cp apps/desktop/release/*.zip release-assets/
+          cp apps/desktop/release/*.yml release-assets/
+          cp apps/desktop/release/*.blockmap release-assets/
           git archive --format zip --output "release-assets/Nudge-Raycast-extension-${{ steps.release.outputs.tag }}.zip" HEAD \
             apps/raycast \
             packages/surface \

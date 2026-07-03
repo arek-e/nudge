@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { DesktopSignInTokenFactory } from "../auth";
 import type { ResolveRequestApp } from "../request-context";
 import { conversationMessageInputSchema } from "../api-contract";
 import { makeApiHandler, type ApiContext } from "../api-router";
@@ -16,6 +17,7 @@ import { resolveCurrentUser } from "../request-auth";
 export function registerApiRoutes(
   app: Hono<ObservabilityHonoEnv>,
   resolveRequestApp: ResolveRequestApp,
+  createDesktopSignInToken: DesktopSignInTokenFactory,
 ) {
   const apiHandler = makeApiHandler();
 
@@ -36,6 +38,17 @@ export function registerApiRoutes(
     }
 
     const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
+    if (c.req.path === "/api/auth/desktop-ticket" && c.req.method === "POST") {
+      if (auth.authMode !== "clerk" || !auth.user) {
+        return c.json({ error: "Clerk session required" }, 401);
+      }
+      const signInToken = await createDesktopSignInToken({
+        env: appServices.env,
+        userId: auth.user.id,
+      });
+      return c.json(signInToken);
+    }
+
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
     const streamConversationId = conversationStreamPath(c.req.path);
@@ -181,6 +194,8 @@ function apiRouteWideEventFields(path: string) {
     return { routeName: "api.events" };
   } else if (path.startsWith("/api/session")) {
     return { routeName: "api.session" };
+  } else if (path.startsWith("/api/auth/desktop-ticket")) {
+    return { routeName: "api.auth.desktop_ticket" };
   } else if (path.startsWith("/api/export")) {
     return { routeName: "api.export" };
   } else if (path.startsWith("/api/okf")) {

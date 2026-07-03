@@ -3,7 +3,12 @@ import { Layer } from "effect";
 import type { Env } from "./env";
 import type { HonoHandlerContext } from "./request-context";
 import type { NudgeAppRuntime, NudgeOkfSandboxFactory, RunEffect } from "./Services/NudgeApp";
-import { resolveClerkSession, type AuthSessionResolver } from "./auth";
+import {
+  createClerkDesktopSignInToken,
+  resolveClerkSession,
+  type AuthSessionResolver,
+  type DesktopSignInTokenFactory,
+} from "./auth";
 import { resolveDbLayerForEnv } from "./db-layer";
 import {
   makeNudgeAppRuntime,
@@ -31,6 +36,7 @@ import { registerStaticRoutes } from "./routes/static";
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
   readonly dbLayer?: NudgeAppDbLayer;
+  readonly desktopSignInTokenFactory?: DesktopSignInTokenFactory;
   readonly okfSandboxFactory?: NudgeOkfSandboxFactory;
 }
 
@@ -38,6 +44,8 @@ export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<ObservabilityHonoEnv>();
   const okfSandboxFactory = options.okfSandboxFactory ?? defaultOkfSandboxFactory;
   const resolveSession = options.authSessionResolver ?? resolveClerkSession;
+  const desktopSignInTokenFactory =
+    options.desktopSignInTokenFactory ?? createClerkDesktopSignInToken;
   const runtimeMemoMap = Layer.makeMemoMapUnsafe();
   const appRuntimes = new WeakMap<Env, NudgeAppRuntime>();
   const runtimeForEnv = (env: Env) => {
@@ -91,7 +99,7 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
-  registerApiRoutes(app, resolveRequestApp);
+  registerApiRoutes(app, resolveRequestApp, desktopSignInTokenFactory);
 
   app.onError((error, c) => {
     const retryAfterSeconds = retryAfterSecondsFor(error);

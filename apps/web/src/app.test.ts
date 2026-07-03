@@ -1266,6 +1266,51 @@ describe("web app", () => {
     });
   });
 
+  test("desktop browser auth rejects anonymous sessions", async () => {
+    const app = createApp({
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async () => {
+        throw new Error("unexpected desktop token mint");
+      },
+    });
+
+    const response = await app.request(
+      "/api/auth/desktop-ticket",
+      { headers: anonymousHeaders, method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Clerk session required" });
+  });
+
+  test("desktop browser auth mints a short-lived Clerk sign-in ticket", async () => {
+    const calls: Array<{ readonly appVersion: string; readonly userId: string }> = [];
+    const app = createApp({
+      authSessionResolver: async () => ({
+        user: {
+          email: "lana@example.com",
+          id: "auth-user-1",
+          name: "Lana",
+        },
+      }),
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async ({ env: requestEnv, userId }) => {
+        calls.push({ appVersion: requestEnv.APP_VERSION, userId });
+        return { expiresInSeconds: 120, ticket: "test-desktop-ticket" };
+      },
+    });
+
+    const response = await app.request("/api/auth/desktop-ticket", { method: "POST" }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      expiresInSeconds: 120,
+      ticket: "test-desktop-ticket",
+    });
+    expect(calls).toEqual([{ appVersion: "test-version", userId: "auth-user-1" }]);
+  });
+
   test("custom integrations can export and delete the current user's data", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
