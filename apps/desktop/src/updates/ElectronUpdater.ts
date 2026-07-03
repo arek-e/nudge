@@ -1,5 +1,9 @@
-import { autoUpdater } from "electron-updater";
+import { createRequire } from "node:module";
 import { Context, Effect, Layer } from "effect";
+
+const requireElectronUpdater = createRequire(import.meta.url);
+const electronUpdater: typeof import("electron-updater") =
+  requireElectronUpdater("electron-updater");
 
 export type ElectronUpdaterEventName =
   | "checking-for-update"
@@ -34,13 +38,13 @@ export const ElectronUpdaterLive = Layer.effect(
       checkForUpdates: Effect.tryPromise({
         catch: updateErrorFromUnknown,
         try: async () => {
-          await autoUpdater.checkForUpdates();
+          await getAutoUpdater().checkForUpdates();
         },
       }),
       downloadUpdate: Effect.tryPromise({
         catch: updateErrorFromUnknown,
         try: async () => {
-          await autoUpdater.downloadUpdate();
+          await getAutoUpdater().downloadUpdate();
         },
       }),
       on: (eventName, listener) =>
@@ -50,16 +54,16 @@ export const ElectronUpdaterLive = Layer.effect(
       quitAndInstall: Effect.try({
         catch: updateErrorFromUnknown,
         try: () => {
-          autoUpdater.quitAndInstall(false, true);
+          getAutoUpdater().quitAndInstall(false, true);
         },
       }),
       setAutoDownload: (value) =>
         Effect.sync(() => {
-          autoUpdater.autoDownload = value;
+          getAutoUpdater().autoDownload = value;
         }),
       setAutoInstallOnAppQuit: (value) =>
         Effect.sync(() => {
-          autoUpdater.autoInstallOnAppQuit = value;
+          getAutoUpdater().autoInstallOnAppQuit = value;
         }),
     }),
   ),
@@ -71,24 +75,28 @@ function registerElectronUpdaterListener(
 ) {
   switch (eventName) {
     case "checking-for-update":
-      autoUpdater.on("checking-for-update", () => listener(null));
+      getAutoUpdater().on("checking-for-update", () => listener(null));
       break;
     case "download-progress":
-      autoUpdater.on("download-progress", (progress) => listener(progress));
+      getAutoUpdater().on("download-progress", (progress) => listener(progress));
       break;
     case "error":
-      autoUpdater.on("error", (error) => listener(error));
+      getAutoUpdater().on("error", (error) => listener(error));
       break;
     case "update-available":
-      autoUpdater.on("update-available", (info) => listener(info));
+      getAutoUpdater().on("update-available", (info) => listener(info));
       break;
     case "update-downloaded":
-      autoUpdater.on("update-downloaded", (info) => listener(info));
+      getAutoUpdater().on("update-downloaded", (info) => listener(info));
       break;
     case "update-not-available":
-      autoUpdater.on("update-not-available", (info) => listener(info));
+      getAutoUpdater().on("update-not-available", (info) => listener(info));
       break;
   }
+}
+
+function getAutoUpdater() {
+  return electronUpdater.autoUpdater;
 }
 
 function updateErrorFromUnknown(error: unknown) {
