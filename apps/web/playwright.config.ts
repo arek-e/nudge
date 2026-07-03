@@ -34,6 +34,7 @@ export default defineConfig({
           `wrangler d1 migrations apply DB --local --persist-to ${shellQuote(persistTo)}`,
           [
             "wrangler dev",
+            "--config wrangler.local.jsonc",
             `--port ${devPort}`,
             `--inspector-port ${inspectorPort}`,
             `--persist-to ${shellQuote(persistTo)}`,
