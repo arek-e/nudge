@@ -144,9 +144,9 @@ export const requestObservability = (): AppMiddleware => {
         {
           attributes: {
             "http.request.method": c.req.method,
-            "vesta.environment": c.env.ENVIRONMENT ?? "unknown",
-            "vesta.request_id": id,
-            "vesta.version": c.env.APP_VERSION ?? "0.0.0",
+            "nudge.environment": c.env.ENVIRONMENT ?? "unknown",
+            "nudge.request_id": id,
+            "nudge.version": c.env.APP_VERSION ?? "0.0.0",
             "url.path": path,
           },
           name: `${c.req.method} ${path}`,

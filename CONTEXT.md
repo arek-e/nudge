@@ -5,12 +5,20 @@ Nudge is an adaptive operating layer for personal work, relationships, memory, a
 ## Language
 
 **Nudge Engine**:
-The durable runtime that owns Nudge' API, reasoning, persistence, review boundaries, and integrations. App Surfaces call the Engine instead of reimplementing product behavior locally.
+The durable runtime that owns Nudge's API, reasoning, persistence, review boundaries, and integrations. App Surfaces call the Engine instead of reimplementing product behavior locally.
 _Avoid_: Backend as product language, duplicating Engine rules in clients
 
 **App Surface**:
-A platform-specific user interface for Nudge, such as web, iOS, future macOS, Raycast, or Siri. App Surfaces may adapt presentation and OS integration, but they should keep durable behavior behind the Nudge Engine.
+A platform-specific user interface for Nudge, such as web, Electron desktop, SwiftUI iOS, Raycast, or Siri. App Surfaces may adapt presentation and OS integration, but they should keep durable behavior behind the Nudge Engine.
 _Avoid_: Treating each app as its own product logic fork
+
+**Shared Surface Logic**:
+Presentation-adjacent product behavior reused by React App Surfaces, especially web and Electron, while durable behavior and agent decisions stay behind the Nudge Engine.
+_Avoid_: Rebuilding capture, editor, review, or Convex wiring separately per surface
+
+**Agent Loop**:
+The Engine-run cycle that turns Captures and Context into source-linked Syntheses, Proposals, Reviews, Commitments, and Outcomes.
+_Avoid_: Client-side agent rules, silent autonomous action
 
 **Primitive**:
 A general building block that can be composed into many user-facing loops without locking Nudge into one niche workflow.

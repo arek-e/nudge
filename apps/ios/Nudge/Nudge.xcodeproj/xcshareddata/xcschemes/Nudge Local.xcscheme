@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "1A0004012C00000000000001"
-               BuildableName = "Vesta.app"
-               BlueprintName = "Vesta"
-               ReferencedContainer = "container:Vesta.xcodeproj">
+               BuildableName = "Nudge.app"
+               BlueprintName = "Nudge"
+               ReferencedContainer = "container:Nudge.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -43,9 +43,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1A0004012C00000000000001"
-            BuildableName = "Vesta.app"
-            BlueprintName = "Vesta"
-            ReferencedContainer = "container:Vesta.xcodeproj">
+            BuildableName = "Nudge.app"
+            BlueprintName = "Nudge"
+            ReferencedContainer = "container:Nudge.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -60,9 +60,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1A0004012C00000000000001"
-            BuildableName = "Vesta.app"
-            BlueprintName = "Vesta"
-            ReferencedContainer = "container:Vesta.xcodeproj">
+            BuildableName = "Nudge.app"
+            BlueprintName = "Nudge"
+            ReferencedContainer = "container:Nudge.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

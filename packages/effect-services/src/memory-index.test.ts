@@ -98,7 +98,7 @@ describe("MemoryIndex", () => {
 
     expect(result.indexed.indexedChunkIds).toEqual([result.memory.chunks[0]?.id]);
     expect(requests[0]?.url).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
     );
     expect(requests[0]?.url).not.toContain(user.id);
     expect(requests[0]?.body).toMatchObject({
@@ -148,7 +148,7 @@ describe("MemoryIndex", () => {
       {
         method: "DELETE",
         url: expect.stringMatching(
-          /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
+          /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
         ),
       },
     ]);

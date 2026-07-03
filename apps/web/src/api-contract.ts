@@ -79,6 +79,21 @@ export const proposalRecordSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const proposalExplanationSchema = z.object({
+  source: z.object({
+    label: z.string(),
+    signalIds: z.array(z.string()),
+    type: z.literal("signals"),
+  }),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  nextAction: z.string(),
+});
+
+export const proposalWithExplanationSchema = proposalRecordSchema.extend({
+  explanation: proposalExplanationSchema,
+});
+
 export const reviewRecordSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -88,6 +103,22 @@ export const reviewRecordSchema = z.object({
   editedBody: z.string().optional(),
   editedBodyDocument: z.unknown().optional(),
   createdAt: z.string(),
+});
+
+export const agentReceiptSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  changed: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+  signalIds: z.array(z.string()),
+  why: z.string(),
+});
+
+export const reviewInboxItemSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  kind: z.literal("proposal"),
+  proposal: proposalWithExplanationSchema,
 });
 
 export const commitmentRecordSchema = z.object({
@@ -317,35 +348,6 @@ export const conversationToolEventSchema = z.object({
 
 export const conversationToolSchema = z.enum(["listRecentSignals", "retrieveMemory"]);
 
-const nudgeHarnessCapabilitySchema = z.object({
-  id: z.string(),
-  kind: z.enum(["read", "draft", "reviewGated", "workflow", "subagent"]),
-  label: z.string(),
-  status: z.enum(["active", "planned"]),
-});
-
-const nudgeHarnessCapabilityGroupsSchema = z.object({
-  read: z.array(nudgeHarnessCapabilitySchema),
-  draft: z.array(nudgeHarnessCapabilitySchema),
-  reviewGated: z.array(nudgeHarnessCapabilitySchema),
-  workflow: z.array(nudgeHarnessCapabilitySchema),
-  subagent: z.array(nudgeHarnessCapabilitySchema),
-});
-
-const nudgeHarnessRegistrySchema = z.object({
-  identity: z.object({
-    agentName: z.literal("Nudge Agent"),
-    durableFrontDoor: z.literal("UserAgentSession"),
-  }),
-  capabilities: nudgeHarnessCapabilityGroupsSchema,
-});
-
-const nudgeHarnessTurnSchema = z.object({
-  intent: z.literal("loopIntake"),
-  activeCapabilities: nudgeHarnessCapabilityGroupsSchema,
-  activeCapabilityIds: z.array(z.string()),
-});
-
 export const conversationMetadataSchema = z.object({
   conversationId: z.string(),
   userId: z.string(),
@@ -356,7 +358,6 @@ export const conversationMetadataSchema = z.object({
     name: z.literal("think"),
     runtime: z.literal("cloudflare-agents"),
   }),
-  harness: nudgeHarnessRegistrySchema,
   skills: z.array(z.enum(["intake-loop", "review-commitment", "close-loop"])),
   subAgents: z.array(z.enum(["loopIntakeThink"])),
   tools: z.array(conversationToolSchema),
@@ -412,11 +413,12 @@ export const conversationMessageResponseSchema = z.object({
     runtime: z.literal("cloudflare-agents"),
   }),
   reply: z.string(),
-  activeHarness: nudgeHarnessTurnSchema,
-  agentActionsApplied: z.array(z.enum(["draftLoopIntake"])),
+  receipt: agentReceiptSchema.nullable().optional(),
   skillsApplied: z.array(z.enum(["intake-loop"])),
   subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
-  usedTools: z.array(z.enum(["retrieveMemory"])),
+  usedTools: z.array(
+    z.enum(["appendSignal", "createSynthesis", "generateProposals", "retrieveMemory"]),
+  ),
   workflowHooks: z.array(z.enum(["dailyDigest"])),
 });
 
@@ -660,11 +662,22 @@ export const apiContract = {
     generate: oc
       .route({ method: "POST", path: "/proposals/generate" })
       .input(proposalsInputSchema)
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
     list: oc
       .route({ method: "GET", path: "/proposals" })
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
+  },
+  reviewInbox: {
+    list: oc
+      .route({ method: "GET", path: "/review-inbox" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }))
+      .output(
+        z.object({
+          items: z.array(reviewInboxItemSchema),
+          receipts: z.array(agentReceiptSchema),
+        }),
+      ),
   },
   commitments: {
     list: oc

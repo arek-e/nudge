@@ -5,18 +5,22 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Effect } from "effect";
 import {
   Db,
-  type AgentRunRecord,
   type DbService,
   type EventRecord,
   type JournalDocumentRecord,
+  type ProposalRecord,
+  type SynthesisRecord,
+  type UserDataExport,
 } from "@nudge/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
   MemoryIndex,
+  NoteAnalysisWorkflows,
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
+  type SaveJournalCaptureInput,
 } from "@nudge/effect-services";
 import type { RequestSession } from "./request-context";
 import type { RunEffect } from "./Services/NudgeApp";
@@ -33,6 +37,10 @@ import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 function readSandboxSmokeError(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return "OKF sandbox smoke failed";
+}
+
+function errorFromUnknown(error: unknown, fallbackMessage: string) {
+  return error instanceof Error ? error : new Error(fallbackMessage);
 }
 
 const reasoningVoiceLogPrefixes = [
@@ -59,6 +67,27 @@ interface CalendarDayActivity {
   readonly noteCount: number;
   readonly signalCount: number;
 }
+
+interface AgentReceiptPayload {
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
+}
+
+interface ProposalExplanation {
+  readonly source: {
+    readonly label: string;
+    readonly signalIds: string[];
+    readonly type: "signals";
+  };
+  readonly reason: string;
+  readonly confidence: number;
+  readonly nextAction: string;
+}
+
+const agentReceiptType = "agent.receipt";
+const agentReceiptSource = "nudge_engine";
 
 function localDateInTimeZone(isoDate: string, timeZone: string) {
   const date = new Date(isoDate);
@@ -105,6 +134,137 @@ function buildCalendarDays(input: {
     upsertCalendarDay(days, localDateInTimeZone(event.occurredAt, input.timeZone), { signals: 1 });
   }
   return [...days.values()].sort((left, right) => left.localDate.localeCompare(right.localDate));
+}
+
+function sourceLabel(signalIds: ReadonlyArray<string>) {
+  return `${signalIds.length} signal${signalIds.length === 1 ? "" : "s"}`;
+}
+
+function proposalSource(signalIds: ReadonlyArray<string>): ProposalExplanation["source"] {
+  return {
+    label: sourceLabel(signalIds),
+    signalIds: [...signalIds],
+    type: "signals",
+  };
+}
+
+function nextActionForProposal(kind: ProposalRecord["kind"]) {
+  switch (kind) {
+    case "clarify":
+      return "Answer or edit this clarification.";
+    case "follow_up":
+      return "Review this follow-up proposal.";
+    case "commit":
+      return "Accept, edit, or reject this commitment.";
+    case "ignore":
+      return "Confirm whether Nudge should ignore this.";
+  }
+}
+
+function confidenceForProposal(proposal: ProposalRecord, synthesis: SynthesisRecord | undefined) {
+  const sourceCount = synthesis?.sourceSignalIds.length ?? 0;
+  if (proposal.kind === "follow_up" && sourceCount > 0) return 0.82;
+  if (proposal.kind === "commit" && sourceCount > 0) return 0.78;
+  if (sourceCount > 0) return 0.7;
+  return 0.52;
+}
+
+function buildProposalExplanation(
+  proposal: ProposalRecord,
+  synthesesById: ReadonlyMap<string, SynthesisRecord>,
+): ProposalExplanation {
+  const synthesis = synthesesById.get(proposal.synthesisId);
+  const signalIds = synthesis ? [...synthesis.sourceSignalIds] : [];
+  return {
+    source: proposalSource(signalIds),
+    reason: proposal.rationale,
+    confidence: confidenceForProposal(proposal, synthesis),
+    nextAction: nextActionForProposal(proposal.kind),
+  };
+}
+
+function synthesesByIdFrom(exported: Pick<UserDataExport, "syntheses">) {
+  return new Map(exported.syntheses.map((synthesis) => [synthesis.id, synthesis]));
+}
+
+function readReceiptPayload(value: unknown): AgentReceiptPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const action = Reflect.get(value, "action");
+  const changed = Reflect.get(value, "changed");
+  const signalIds = Reflect.get(value, "signalIds");
+  const why = Reflect.get(value, "why");
+  if (
+    typeof action !== "string" ||
+    !changed ||
+    typeof changed !== "object" ||
+    !Array.isArray(signalIds) ||
+    !signalIds.every((signalId) => typeof signalId === "string") ||
+    typeof why !== "string"
+  ) {
+    return null;
+  }
+  return {
+    action,
+    changed: Object.fromEntries(Object.entries(changed)),
+    signalIds,
+    why,
+  };
+}
+
+function toReceiptResponse(event: EventRecord) {
+  const payload = readReceiptPayload(event.payload);
+  if (!payload) return null;
+  return {
+    id: event.id,
+    action: payload.action,
+    changed: payload.changed,
+    createdAt: event.createdAt,
+    signalIds: [...payload.signalIds],
+    why: payload.why,
+  };
+}
+
+function listReceiptResponses(exported: Pick<UserDataExport, "events">, limit: number) {
+  return exported.events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === agentReceiptType)
+    .sort(
+      (left, right) =>
+        right.event.createdAt.localeCompare(left.event.createdAt) || right.index - left.index,
+    )
+    .flatMap(({ event }) => {
+      const receipt = toReceiptResponse(event);
+      return receipt ? [receipt] : [];
+    })
+    .slice(0, limit);
+}
+
+async function recordAgentReceipt(
+  context: ApiContext,
+  input: {
+    readonly action: string;
+    readonly changed: Readonly<Record<string, unknown>>;
+    readonly idempotencyKey: string;
+    readonly signalIds: ReadonlyArray<string>;
+    readonly why: string;
+  },
+) {
+  await context.runEffect(
+    context.db.appendEvent({
+      idempotencyKey: `agent-receipt:${input.idempotencyKey}`,
+      occurredAt: new Date().toISOString(),
+      payload: {
+        action: input.action,
+        changed: input.changed,
+        signalIds: [...input.signalIds],
+        why: input.why,
+      },
+      schemaVersion: 1,
+      source: agentReceiptSource,
+      type: agentReceiptType,
+      userId: context.user.id,
+    }),
+  );
 }
 
 export interface ApiContext {
@@ -160,31 +320,14 @@ export const apiRouter = api.router({
       return { actions: [...actions], ...(latestRuns[0] ? { latestRun: latestRuns[0] } : {}) };
     }),
     updateStatus: api.actions.updateStatus.handler(async ({ context, input }) => {
-      const action = await context.runEffect(
-        context.db.updateExtractedItemStatus({
+      const reviewed = await context.runEffect(
+        NoteAnalysisWorkflows.reviewExtractedItemStatus({
           itemId: input.itemId,
           status: input.status,
           userId: context.user.id,
         }),
       );
-      await context.runEffect(
-        context.db.recordItemEvent({
-          eventType:
-            input.status === "completed"
-              ? "completed"
-              : input.status === "dismissed"
-                ? "dismissed"
-                : input.status === "archived"
-                  ? "archived"
-                  : input.status === "accepted"
-                    ? "accepted"
-                    : "edited",
-          itemId: action.id,
-          payload: { status: input.status },
-          userId: context.user.id,
-        }),
-      );
-      return { action };
+      return { action: reviewed.action };
     }),
   },
   agentRuns: {
@@ -236,6 +379,8 @@ export const apiRouter = api.router({
         input.conversationId,
         "/metadata",
         conversationMetadataSchema,
+        {},
+        context.traceHeaders,
       );
     }),
     listRecentSignals: api.conversations.listRecentSignals.handler(async ({ context, input }) => {
@@ -248,6 +393,8 @@ export const apiRouter = api.router({
         input.conversationId,
         url,
         listRecentSignalsToolResponseSchema,
+        {},
+        context.traceHeaders,
       );
     }),
     retrieveMemory: api.conversations.retrieveMemory.handler(async ({ context, input }) => {
@@ -261,6 +408,8 @@ export const apiRouter = api.router({
         input.conversationId,
         url,
         retrieveMemoryToolResponseSchema,
+        {},
+        context.traceHeaders,
       );
     }),
     sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
@@ -275,6 +424,7 @@ export const apiRouter = api.router({
           body: JSON.stringify({ message: input.message }),
           method: "POST",
         },
+        context.traceHeaders,
       );
     }),
   },
@@ -418,146 +568,34 @@ export const apiRouter = api.router({
       return { document };
     }),
     save: api.journal.save.handler(async ({ context, input }) => {
+      const indexPendingMemory = dailyNoteMemoryIndexer(context);
       return runApiEffect(
         context,
         Effect.gen(function* () {
-          yield* context.db.ensureUser(context.user);
-          const result = yield* context.db.upsertJournalDocument({
+          const saveResult = yield* NoteAnalysisWorkflows.saveJournalCapture({
+            aiModel: context.aiModel,
             bodyText: input.bodyText,
             ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+            ...(indexPendingMemory ? { indexPendingMemory } : {}),
             localDate: input.localDate,
+            ...(context.traceHeaders?.["x-request-id"] !== undefined
+              ? { requestId: context.traceHeaders["x-request-id"] }
+              : {}),
+            scheduleAnalysis: dailyNoteAnalysisScheduler(context),
             title: input.title,
-            userId: context.user.id,
+            ...(context.traceHeaders?.traceparent !== undefined
+              ? { traceparent: context.traceHeaders.traceparent }
+              : {}),
+            user: context.user,
           });
-          const noteResult = yield* context.db.upsertDailyNote({
-            bodyText: input.bodyText,
-            ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
-            localDate: input.localDate,
-            title: input.title,
-            userId: context.user.id,
-          });
-          let analysisRun: AgentRunRecord | null = null;
-          if (result.revision.changedText.trim().length > 0) {
-            analysisRun = yield* context.db.startAgentRun({
-              metadata: {
-                localDate: input.localDate,
-                provider: "cloudflare-think",
-              },
-              model: context.aiModel,
-              sourceId: noteResult.revision.id,
-              sourceType: "note_revision",
-              status: "queued",
-              triggerType: "note_inactivity",
-              userId: context.user.id,
-            });
-            const queuedRun = analysisRun;
-            yield* Effect.promise(() =>
-              context.recordSpan(
-                "daily_note.analysis_workflow.create",
-                {
-                  attributes: {
-                    "vesta.ai.source_type": "note_revision",
-                    "vesta.ai.system": "cloudflare-think",
-                    "workflow.name": "daily-note-analysis",
-                  },
-                  kind: "client",
-                },
-                () =>
-                  context.dailyAnalysisWorkflow.create({
-                    id: `daily-note-analysis-${noteResult.revision.id}`,
-                    params: {
-                      changedText: result.revision.changedText,
-                      documentId: result.document.id,
-                      kind: "daily-note-analysis",
-                      localDate: result.document.localDate,
-                      noteId: noteResult.note.id,
-                      revisionId: noteResult.revision.id,
-                      runId: queuedRun.id,
-                      requestId: context.traceHeaders?.["x-request-id"],
-                      title: result.document.title,
-                      traceparent: context.traceHeaders?.traceparent,
-                      userDisplayName: context.user.displayName,
-                      userId: context.user.id,
-                      workflowVersion: 1,
-                    },
-                  }),
-              ),
-            );
-            yield* context.db.upsertMemoryDocument({
-              bodyText: noteResult.note.bodyText,
-              localDate: noteResult.note.localDate,
-              sourceId: noteResult.note.id,
-              sourceType: "daily_note",
-              title: noteResult.note.title,
-              userId: context.user.id,
-            });
-            yield* context.db.upsertMemoryDocument({
-              bodyText: noteResult.revision.changedText,
-              localDate: noteResult.note.localDate,
-              sourceId: noteResult.revision.id,
-              sourceType: "note_revision",
-              title: `${noteResult.note.title} delta`,
-              userId: context.user.id,
-            });
-            yield* context.db.upsertMemoryDocument({
-              bodyText: result.revision.changedText,
-              localDate: result.document.localDate,
-              sourceId: result.revision.id,
-              sourceType: "journal_revision",
-              title: result.document.title,
-              userId: context.user.id,
-            });
-            const turbopuffer = context.turbopuffer;
-            if (turbopuffer) {
-              yield* Effect.promise(() =>
-                context.recordSpan(
-                  "memory.index_pending",
-                  {
-                    attributes: {
-                      "vesta.memory_index.provider": "turbopuffer",
-                      "turbopuffer.region": turbopuffer.region,
-                    },
-                    kind: "client",
-                  },
-                  async () => {
-                    await runMemoryIndex(
-                      context.runEffect,
-                      turbopuffer,
-                      Effect.gen(function* () {
-                        const memoryIndex = yield* MemoryIndex;
-                        return yield* memoryIndex.indexPending({ limit: 20, user: context.user });
-                      }),
-                    ).catch((error: unknown) => {
-                      const safeError =
-                        error instanceof Error ? error : new Error("Memory index failed");
-                      console.warn(
-                        JSON.stringify({
-                          event: "memory_index_failed",
-                          logKind: "wide_event",
-                          provider: "turbopuffer",
-                          region: turbopuffer.region,
-                          errorType: safeError.name,
-                        }),
-                      );
-                    });
-                  },
-                ),
-              );
-            }
-          }
 
           return apiEffectResult(
-            { ...result, ...(analysisRun ? { analysisRun } : {}) },
-            analysisRun
-              ? {
-                  aiErrorCode: null,
-                  aiModel: context.aiModel,
-                  aiRunId: analysisRun.id,
-                  aiSourceType: "note_revision",
-                  aiSystem: "cloudflare-think",
-                  noteLocalDate: input.localDate,
-                }
-              : undefined,
+            {
+              document: saveResult.document,
+              revision: saveResult.revision,
+              ...(saveResult.analysisRun ? { analysisRun: saveResult.analysisRun } : {}),
+            },
+            saveResult.wideEvent,
           );
         }),
       );
@@ -612,7 +650,7 @@ export const apiRouter = api.router({
     generate: api.proposals.generate.handler(async ({ context, input }) => {
       const proposals = await context.recordSpan(
         "proposals.generate",
-        { attributes: { "vesta.frame_key": input.frameKey } },
+        { attributes: { "nudge.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -622,16 +660,60 @@ export const apiRouter = api.router({
             }),
           ),
       );
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
+      await Promise.all(
+        proposals.map((proposal) => {
+          const explanation = buildProposalExplanation(proposal, synthesesById);
+          return recordAgentReceipt(context, {
+            action: "proposal.generated",
+            changed: {
+              proposalId: proposal.id,
+              status: proposal.status,
+              title: proposal.title,
+            },
+            idempotencyKey: `proposal.generated:${proposal.id}`,
+            signalIds: explanation.source.signalIds,
+            why: explanation.reason,
+          });
+        }),
+      );
 
-      return { proposals: proposals.map(toProposalResponse) };
+      return {
+        proposals: proposals.map((proposal) => toProposalWithExplanation(proposal, synthesesById)),
+      };
     }),
     list: api.proposals.list.handler(async ({ context, input }) => {
       const proposals = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.listPendingProposals({ limit: input.limit ?? 20, user: context.user }),
       );
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
 
-      return { proposals: proposals.map(toProposalResponse) };
+      return {
+        proposals: proposals.map((proposal) => toProposalWithExplanation(proposal, synthesesById)),
+      };
+    }),
+  },
+  reviewInbox: {
+    list: api.reviewInbox.list.handler(async ({ context, input }) => {
+      const exported = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exported);
+      const pendingProposals = exported.proposals
+        .filter((proposal) => proposal.status === "pending")
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, input.limit);
+
+      return {
+        items: pendingProposals.map((proposal) => ({
+          id: proposal.id,
+          createdAt: proposal.createdAt,
+          kind: "proposal",
+          proposal: toProposalWithExplanation(proposal, synthesesById),
+        })),
+        receipts: listReceiptResponses(exported, input.limit),
+      };
     }),
   },
   commitments: {
@@ -646,7 +728,20 @@ export const apiRouter = api.router({
   },
   reviews: {
     create: api.reviews.create.handler(async ({ context, input }) => {
-      return runWorkflow(
+      const exportedBeforeReview = await context.runEffect(context.db.exportUserData(context.user));
+      const synthesesById = synthesesByIdFrom(exportedBeforeReview);
+      const proposal = exportedBeforeReview.proposals.find(
+        (candidate) => candidate.id === input.proposalId,
+      );
+      const explanation = proposal
+        ? buildProposalExplanation(proposal, synthesesById)
+        : {
+            source: proposalSource([]),
+            reason: "Review decision recorded.",
+            confidence: 0.5,
+            nextAction: "Review saved.",
+          };
+      const review = await runWorkflow(
         context.runEffect,
         PrimitiveWorkflows.reviewProposal({
           decision: input.decision,
@@ -659,6 +754,18 @@ export const apiRouter = api.router({
           user: context.user,
         }),
       );
+      await recordAgentReceipt(context, {
+        action: `review.${review.decision}`,
+        changed: {
+          decision: review.decision,
+          proposalId: review.proposalId,
+          reviewId: review.id,
+        },
+        idempotencyKey: `review.${review.id}`,
+        signalIds: explanation.source.signalIds,
+        why: explanation.reason,
+      });
+      return review;
     }),
   },
   outcomes: {
@@ -686,7 +793,7 @@ export const apiRouter = api.router({
     create: api.syntheses.create.handler(async ({ context, input }) => {
       return context.recordSpan(
         "syntheses.create",
-        { attributes: { "vesta.frame_key": input.frameKey } },
+        { attributes: { "nudge.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -700,7 +807,7 @@ export const apiRouter = api.router({
     latest: api.syntheses.latest.handler(async ({ context, input }) => {
       return context.recordSpan(
         "syntheses.latest",
-        { attributes: { "vesta.frame_key": input.frameKey } },
+        { attributes: { "nudge.frame_key": input.frameKey } },
         () =>
           runWorkflow(
             context.runEffect,
@@ -771,6 +878,16 @@ function toProposalResponse(proposal: {
   return proposal;
 }
 
+function toProposalWithExplanation(
+  proposal: ProposalRecord,
+  synthesesById: ReadonlyMap<string, SynthesisRecord>,
+) {
+  return {
+    ...toProposalResponse(proposal),
+    explanation: buildProposalExplanation(proposal, synthesesById),
+  };
+}
+
 interface ApiEffectResult<A> {
   readonly result: A;
   readonly wideEvent?: Record<string, unknown>;
@@ -794,6 +911,82 @@ async function runApiEffect<A, E>(
 
 function runWorkflow<A, E>(runEffect: RunEffect, workflow: Effect.Effect<A, E, Db>) {
   return runEffect(workflow);
+}
+
+function dailyNoteAnalysisScheduler(
+  context: ApiContext,
+): NonNullable<SaveJournalCaptureInput["scheduleAnalysis"]> {
+  return (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        await context.recordSpan(
+          "daily_note.analysis_workflow.create",
+          {
+            attributes: {
+              "nudge.ai.source_type": "note_revision",
+              "nudge.ai.system": "cloudflare-think",
+              "workflow.name": "daily-note-analysis",
+            },
+            kind: "client",
+          },
+          async () => {
+            await context.dailyAnalysisWorkflow.create({
+              id: `daily-note-analysis-${input.params.revisionId}`,
+              params: input.params,
+            });
+          },
+        );
+      },
+      catch: (error) => errorFromUnknown(error, "Daily note analysis scheduling failed"),
+    });
+}
+
+function dailyNoteMemoryIndexer(
+  context: ApiContext,
+): SaveJournalCaptureInput["indexPendingMemory"] | undefined {
+  const turbopuffer = context.turbopuffer;
+  if (!turbopuffer) return undefined;
+
+  return (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        await context.recordSpan(
+          "memory.index_pending",
+          {
+            attributes: {
+              "nudge.memory_index.provider": "turbopuffer",
+              "turbopuffer.region": turbopuffer.region,
+            },
+            kind: "client",
+          },
+          async () => {
+            await runMemoryIndex(
+              context.runEffect,
+              turbopuffer,
+              Effect.gen(function* () {
+                const memoryIndex = yield* MemoryIndex;
+                return yield* memoryIndex.indexPending({
+                  limit: input.limit,
+                  user: input.user,
+                });
+              }),
+            ).catch((error: unknown) => {
+              const safeError = errorFromUnknown(error, "Memory index failed");
+              console.warn(
+                JSON.stringify({
+                  event: "memory_index_failed",
+                  logKind: "wide_event",
+                  provider: "turbopuffer",
+                  region: turbopuffer.region,
+                  errorType: safeError.name,
+                }),
+              );
+            });
+          },
+        );
+      },
+      catch: (error) => errorFromUnknown(error, "Daily note memory indexing failed"),
+    });
 }
 
 function runMemoryIndex<A, E>(

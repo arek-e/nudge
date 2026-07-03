@@ -18,7 +18,7 @@ const binaryExtensions = new Set([
   ".png",
   ".webp",
 ]);
-const skippedDirectories = new Set([".git", ".wrangler", "dist", "node_modules", "tmp"]);
+const skippedDirectories = new Set([".git", ".wrangler", "dist", "node_modules", "release", "tmp"]);
 const skippedFiles = new Set(["bun.lock"]);
 
 describe("Nudge branding", () => {

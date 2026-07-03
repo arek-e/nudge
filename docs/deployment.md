@@ -23,11 +23,13 @@ bun run deploy
 `bun run deploy` targets the `production` Wrangler environment. Use the explicit scripts when checking environment-specific behavior:
 
 ```bash
+bun run db:migrations:apply:staging
 bun run deploy:staging
+bun run db:migrations:apply:remote
 bun run deploy:production
 ```
 
-The staging Worker is `nudge-web-staging` at `https://app.staging.explorenudge.com`, with `https://nudge-web-staging.teampitch.workers.dev` retained as the Cloudflare account fallback. The production Worker is `nudge-web` at `https://app.explorenudge.com`, with `https://nudge-web.teampitch.workers.dev` retained as the Cloudflare account fallback.
+The staging Worker is `nudge-web-staging` at `https://nudge-web-staging.teampitch.workers.dev`. The production Worker remains `nudge-web` at `https://nudge-web.teampitch.workers.dev`.
 
 The web deploy script injects client-side Convex and Clerk settings before the Vite build:
 
@@ -40,10 +42,11 @@ The web deploy script injects client-side Convex and Clerk settings before the V
 
 Before the first staging deploy, provision the staging Cloudflare resources named in `apps/web/wrangler.jsonc` or let Wrangler resolve/create supported resources where available:
 
-- R2: `nudge-staging-media`, `nudge-staging-okf-files`
+- D1: `nudge-staging`
+- R2: `nudge-staging-media`, `nudge-staging-okf-files`, `nudge-staging-trace-artifacts`
 - Workflow: `daily-digest-workflow-staging`
 
-The iOS app has matching shared Xcode schemes: `Vesta Local`, `Vesta Staging`, and `Vesta Production`. The local scheme installs as `app.vesta.ios.local` and points at the local Worker plus the dev Convex deployment. The staging scheme installs as `app.vesta.ios.staging`, uses the `AppIconStaging` beta icon, and points at the staging Worker, staging Clerk app, and staging Convex deployment. The production scheme installs as `app.vesta.ios`, uses the normal `AppIcon`, and points at the production Worker and production Convex deployment.
+The iOS app has matching shared Xcode schemes: `Nudge Local`, `Nudge Staging`, and `Nudge Production`. The local scheme installs as `app.nudge.ios.local` and points at the local Worker plus the dev Convex deployment. The staging scheme installs as `app.nudge.ios.staging`, uses the `AppIconStaging` beta icon, and points at the staging Worker, staging Clerk app, and staging Convex deployment. The production scheme installs as `app.nudge.ios`, uses the normal `AppIcon`, and points at the production Worker and production Convex deployment.
 
 Production Clerk still uses the existing Clerk development instance. Run `clerk deploy` from an interactive terminal to create the production Clerk instance; it requires a production domain, DNS access, and Apple/Google OAuth credentials.
 
@@ -63,9 +66,10 @@ The workflow:
 
 1. Computes a tag, defaulting to UTC CalVer `vYYYY.MM.DD.HHMM`.
 2. Generates GitHub release notes from merged changes since the previous tag.
-3. Runs the normal production deploy with `APP_VERSION=<tag>`.
-4. Creates and pushes the Git tag.
-5. Creates a GitHub Release with the generated notes.
+3. Optionally applies remote D1 migrations.
+4. Runs the normal production deploy with `APP_VERSION=<tag>`.
+5. Creates and pushes the Git tag.
+6. Creates a GitHub Release with the generated notes.
 
 Required repository secrets:
 
@@ -94,8 +98,8 @@ Preferred rollback paths:
 After rollback, verify:
 
 ```bash
-curl https://app.explorenudge.com/health
-bun run logs:tail
+curl https://nudge-web.teampitch.workers.dev/health
+curl https://app.explorenudge.com/api/version
 ```
 
 ## Pull Requests

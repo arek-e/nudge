@@ -84,14 +84,14 @@ struct SettingsScreen: View {
                     SettingsRow(
                         icon: "server.rack",
                         title: "Environment",
-                        value: VestaEnvironmentConfig.current.displayName,
+                        value: NudgeEnvironmentConfig.current.displayName,
                         tint: .accentInsight
                     )
                     SettingsDivider()
                     SettingsRow(
                         icon: "network",
                         title: "Engine",
-                        value: VestaAPI.configuredEngineURL,
+                        value: NudgeAPI.configuredEngineURL,
                         tint: .accentReference
                     )
                     SettingsDivider()

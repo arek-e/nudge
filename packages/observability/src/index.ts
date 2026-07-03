@@ -182,19 +182,19 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "service.name": stringField(event, "service", "nudge-web"),
     "service.version": stringField(event, "version", "0.0.0"),
     "deployment.environment.name": stringField(event, "environment", "unknown"),
-    "vesta.request_id": nullableStringField(event, "requestId"),
-    "vesta.outcome": nullableStringField(event, "outcome"),
-    "vesta.duration_ms": numberField(event, "durationMs"),
-    "vesta.sample_reason": nullableStringField(event, "sampleReason"),
-    "vesta.debug_kind": path?.startsWith("/api/agent-runs/")
+    "nudge.request_id": nullableStringField(event, "requestId"),
+    "nudge.outcome": nullableStringField(event, "outcome"),
+    "nudge.duration_ms": numberField(event, "durationMs"),
+    "nudge.sample_reason": nullableStringField(event, "sampleReason"),
+    "nudge.debug_kind": path?.startsWith("/api/agent-runs/")
       ? "agent_run_poll"
       : aiSystem
         ? "ai"
         : "http",
-    "vesta.ai.system": aiSystem,
-    "vesta.ai.model": aiModel,
-    "vesta.ai.run_id": nullableStringField(event, "aiRunId"),
-    "vesta.ai.error_code": nullableStringField(event, "aiErrorCode"),
+    "nudge.ai.system": aiSystem,
+    "nudge.ai.model": aiModel,
+    "nudge.ai.run_id": nullableStringField(event, "aiRunId"),
+    "nudge.ai.error_code": nullableStringField(event, "aiErrorCode"),
     "exception.type": errorType,
     "exception.message": nullableStringField(event, "errorMessage"),
   } satisfies WideEvent;

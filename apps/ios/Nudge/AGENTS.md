@@ -43,7 +43,7 @@ This project does not currently have a native XCTest target. Existing iOS verifi
 - Before handoff after iOS state, dependency, or view changes, verify the app with:
 
 ```sh
-xcodebuild -skipMacroValidation -project apps/ios/Nudge/Nudge.xcodeproj -scheme Nudge -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' build
+xcodebuild -skipMacroValidation -project apps/ios/Nudge/Nudge.xcodeproj -scheme 'Nudge Staging' -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' build
 ```
 
 Plain `xcodebuild` may stop until Xcode trusts the TCA macro packages. In Xcode, accept the macro trust prompt for Point-Free/TCA dependencies.

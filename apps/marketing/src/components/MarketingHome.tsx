@@ -7,46 +7,23 @@ import {
   MarketingNudgeWord,
   MarketingProofGrid,
 } from "@nudge/ui/marketing";
-
-const appHref = "https://app.explorenudge.com";
-
-const proofPoints = [
-  "sticky note -> reminder",
-  "loose thought -> task",
-  "nothing sends without approval",
-];
-const heroCopy =
-  "Capture rough thoughts fast. nudge reads them, finds the action, and turns them into reminders, drafts, tasks, and follow-ups you can approve or edit.";
-const ctaReassurance = "Drop the note now. Decide what moves later.";
-const proofLabel = "messy note in, useful action out";
-const noteLines = [
-  "follow up with Sam about launch date",
-  "ask if invoice is blocked",
-  "remind me friday",
-];
-const noteActions = [
-  {
-    detail: "Sam gets a draft you can edit first.",
-    label: "draft reply",
-    source: "from: launch date",
-  },
-  {
-    detail: "Friday reminder waits for approval.",
-    label: "create reminder",
-    source: "from: remind me friday",
-  },
-  {
-    detail: "Invoice check becomes a follow-up.",
-    label: "schedule follow-up",
-    source: "from: invoice blocked",
-  },
-];
+import {
+  answerEngineHighlights,
+  ctaReassurance,
+  heroCopy,
+  marketingSite,
+  noteActions,
+  noteLines,
+  productivityUseCases,
+  proofLabel,
+  proofPoints,
+} from "../marketing-content";
 
 export function MarketingHome() {
   return (
-    <main className="marketing-page bg-page h-svh overflow-clip">
+    <main className="marketing-page bg-page min-h-svh overflow-x-clip">
       <section
-        className="relative isolate grid h-full grid-rows-[auto_minmax(0,1fr)_auto] p-[clamp(1.1rem,2.4vw,2rem)] max-[560px]:p-4"
+        className="relative isolate grid h-svh grid-rows-[auto_minmax(0,1fr)_auto] overflow-clip p-[clamp(1.1rem,2.4vw,2rem)] max-[560px]:p-4"
         aria-labelledby="hero-title"
       >
         <MarketingHeroArtwork />
@@ -66,7 +43,7 @@ export function MarketingHome() {
               <MarketingActionLink href="/faq" variant="nav">
                 FAQ
               </MarketingActionLink>
-              <MarketingActionLink href={appHref} variant="header">
+              <MarketingActionLink href={marketingSite.appHref} variant="header">
                 Open nudge
               </MarketingActionLink>
             </nav>
@@ -98,7 +75,7 @@ export function MarketingHome() {
               className="mt-[1.8rem] flex flex-wrap gap-[0.8rem] max-[860px]:w-full max-[860px]:justify-center max-[560px]:mt-[1.1rem] max-[560px]:gap-[0.6rem] [@media(max-width:560px)_and_(max-height:720px)]:mt-[0.85rem] [@media(max-width:560px)_and_(max-height:720px)]:gap-[0.5rem]"
               data-slot="marketing-hero-actions"
             >
-              <MarketingActionLink href={appHref} variant="primary">
+              <MarketingActionLink href={marketingSite.appHref} variant="primary">
                 try nudge
               </MarketingActionLink>
               <MarketingActionLink href="#note-action" variant="secondary">
@@ -144,6 +121,81 @@ export function MarketingHome() {
           </p>
           <MarketingProofGrid items={proofPoints} />
         </section>
+      </section>
+      <section
+        className="border-t border-[rgba(26,39,53,0.12)] px-[clamp(1.1rem,2.4vw,2rem)] py-[clamp(3.2rem,8vw,6.5rem)]"
+        aria-labelledby="answer-title"
+        data-slot="marketing-answer-summary"
+      >
+        <div className="mx-auto grid w-[min(76rem,100%)] gap-[clamp(2rem,5vw,4rem)]">
+          <div className="grid max-w-[48rem] gap-4">
+            <p className="section-kicker m-0 text-[0.66rem] font-[650] tracking-normal text-[rgba(26,39,53,0.46)] uppercase">
+              AI productivity app
+            </p>
+            <h2
+              className="text-logo-ink m-0 text-[clamp(2.1rem,4.4vw,4.2rem)] leading-[0.98] font-[560] tracking-normal text-balance"
+              id="answer-title"
+            >
+              Capture first. Review the next step later.
+            </h2>
+            <p className="m-0 max-w-[42rem] text-[clamp(1rem,1.45vw,1.18rem)] leading-[1.62] text-pretty text-[rgba(26,39,53,0.72)]">
+              nudge is built for the gap between a quick note and the action it implies. It keeps
+              the messy source visible, then drafts the next step so you can decide what is worth
+              doing.
+            </p>
+          </div>
+
+          <div
+            className="grid grid-cols-3 gap-3 max-[860px]:grid-cols-1"
+            data-slot="marketing-answer-cards"
+            role="list"
+          >
+            {answerEngineHighlights.map((item) => (
+              <article
+                className="grid gap-3 rounded-[0.5rem] border border-[rgba(26,39,53,0.14)] bg-[rgba(255,253,248,0.72)] p-[clamp(1rem,2vw,1.35rem)]"
+                data-slot="marketing-answer-card"
+                key={item.title}
+                role="listitem"
+              >
+                <h3 className="text-logo-ink m-0 text-[1.04rem] leading-[1.2] font-[620] tracking-normal">
+                  {item.title}
+                </h3>
+                <p className="m-0 text-[0.94rem] leading-[1.58] text-pretty text-[rgba(26,39,53,0.72)]">
+                  {item.body}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section
+        className="border-t border-[rgba(26,39,53,0.12)] px-[clamp(1.1rem,2.4vw,2rem)] py-[clamp(2.8rem,7vw,5.8rem)]"
+        aria-labelledby="use-cases-title"
+        data-slot="marketing-use-cases"
+      >
+        <div className="mx-auto grid w-[min(76rem,100%)] grid-cols-[minmax(0,0.72fr)_minmax(18rem,1fr)] gap-[clamp(2rem,7vw,6rem)] max-[860px]:grid-cols-1">
+          <div className="grid content-start gap-4">
+            <p className="section-kicker m-0 text-[0.66rem] font-[650] tracking-normal text-[rgba(26,39,53,0.46)] uppercase">
+              Useful for
+            </p>
+            <h2
+              className="text-logo-ink m-0 max-w-[12ch] text-[clamp(2rem,4vw,3.65rem)] leading-[1] font-[560] tracking-normal text-balance"
+              id="use-cases-title"
+            >
+              Notes that should become something.
+            </h2>
+          </div>
+          <ul className="m-0 grid gap-0 border-t border-[rgba(26,39,53,0.16)] p-0">
+            {productivityUseCases.map((useCase) => (
+              <li
+                className="list-none border-b border-[rgba(26,39,53,0.16)] py-[1rem] text-[clamp(1rem,1.5vw,1.18rem)] leading-[1.52] text-pretty text-[rgba(26,39,53,0.76)]"
+                key={useCase}
+              >
+                {useCase}
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
     </main>
   );

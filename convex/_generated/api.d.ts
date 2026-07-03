@@ -12,6 +12,8 @@ import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server
 import type * as authPolicy from "../authPolicy.js";
 import type * as documents from "../documents.js";
 import type * as spikePolicy from "../spikePolicy.js";
+import type * as stickyNotePolicy from "../stickyNotePolicy.js";
+import type * as stickyNotes from "../stickyNotes.js";
 import type * as store from "../store.js";
 import type * as storePolicy from "../storePolicy.js";
 import type * as users from "../users.js";
@@ -21,6 +23,8 @@ declare const fullApi: ApiFromModules<{
   authPolicy: typeof authPolicy;
   documents: typeof documents;
   spikePolicy: typeof spikePolicy;
+  stickyNotePolicy: typeof stickyNotePolicy;
+  stickyNotes: typeof stickyNotes;
   store: typeof store;
   storePolicy: typeof storePolicy;
   users: typeof users;

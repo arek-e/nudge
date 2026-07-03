@@ -2,7 +2,7 @@
 
 Nudge is a private daily operating layer for modern life. It helps a person notice what changed, remember what matters, decide what deserves attention, and act at the right time without surrendering control.
 
-The name is intentionally plain: a small, timely prompt toward what matters next. That is the product posture: not a generic chatbot, not a sales CRM, and not an autonomous operator, but a private operating layer for the user's commitments, relationships, reflections, and routines.
+The name comes from the Roman Nudge: household guardian spirits associated with protection, continuity, memory, and the everyday life of a home. That is the product posture: not a generic chatbot, not a sales CRM, and not an autonomous operator, but a trusted guardian for the user's commitments, relationships, reflections, and routines.
 
 ## Promise
 
@@ -34,9 +34,9 @@ Design cues:
 
 Visual directions:
 
-- clear prompts, subtle motion, grounded daily context, and source-linked evidence
+- hearth, doorway, guardian, small flame, arch, shrine, or protective circle
 - warm ivory, terracotta, muted gold, black olive, stone gray
-- humanist wordmark with a direct, quiet, action-oriented feel
+- modern serif or humanist wordmark with subtle Roman/architectural influence
 
 ## Core Product Concepts
 

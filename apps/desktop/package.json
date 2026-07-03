@@ -1,0 +1,81 @@
+{
+  "name": "@nudge/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b tsconfig.json --force",
+    "dev": "bun run build && electron .",
+    "dist:mac": "bun run build && electron-builder --mac --publish never",
+    "dist:mac:unsigned": "bun run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish never -c.mac.identity=null -c.mac.notarize=false",
+    "start": "electron .",
+    "test": "bun test ./src",
+    "test:e2e": "VITE_NUDGE_ANONYMOUS_UI=1 bun run --cwd ../web build && bun run build && NUDGE_DESKTOP_E2E=1 bun test ./src/desktop-e2e.test.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "electron": "catalog:",
+    "electron-builder": "catalog:",
+    "typescript": "catalog:"
+  },
+  "build": {
+    "appId": "app.nudge.desktop",
+    "productName": "Nudge",
+    "copyright": "Copyright © 2026 TeamPitch",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist/main.js"
+    },
+    "artifactName": "Nudge-${version}-${arch}.${ext}",
+    "protocols": [
+      {
+        "name": "Nudge",
+        "schemes": [
+          "nudge"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "gatekeeperAssess": false,
+      "hardenedRuntime": true,
+      "icon": "build/icon.png",
+      "notarize": true,
+      "x64ArchFiles": "**/node_modules/@msgpackr-extract/**/*.node",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "arek-e",
+        "repo": "nudge"
+      }
+    ]
+  }
+}

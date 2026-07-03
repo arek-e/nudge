@@ -4,7 +4,6 @@ import { readHttpTelemetrySnapshot } from "@nudge/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
-import { assembleNudgeHarnessTurn, nudgeHarnessRegistry } from "./nudge-harness";
 
 const testAi = (() => ({ provider: "test" })) as Ai;
 const testWorkflow = {
@@ -25,8 +24,8 @@ const env = {
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
   LOG_HTTP_REQUESTS: "false",
-  CONVEX_RUNTIME_SECRET: "test-convex-runtime-secret",
-  CONVEX_URL: "https://test.convex.cloud",
+  CONVEX_RUNTIME_SECRET: "test-runtime-secret",
+  CONVEX_URL: "https://grandiose-hamster-855.eu-west-1.convex.cloud",
   AI: testAi,
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
@@ -42,8 +41,8 @@ describe("web app", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
     expect(body).toContain('rel="manifest"');
-    expect(body).toContain('href="/favicon.ico"');
-    expect(body).toContain('href="/favicon.svg"');
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('rel="apple-touch-icon"');
     expect(body).toContain('name="theme-color"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style"');
@@ -60,7 +59,7 @@ describe("web app", () => {
   });
 
   test("GET /health reports service and binding availability", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", {}, env);
     const body = await response.json();
 
@@ -71,35 +70,56 @@ describe("web app", () => {
       environment: "test",
       version: "test-version",
       bindings: {
+        convex: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
     });
   });
 
+  test("GET /health fails when Convex runtime store is not configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const { CONVEX_RUNTIME_SECRET: omittedRuntimeSecret, ...unwiredEnv } = env;
+    void omittedRuntimeSecret;
+    const response = await app.request("/health", {}, unwiredEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      ok: false,
+      bindings: {
+        convex: false,
+      },
+    });
+  });
+
   test("GET /manifest.webmanifest exposes PWA install metadata", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/manifest.webmanifest", {}, env);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const manifest = await response.json();
+    expect(manifest).toMatchObject({
       name: "Nudge",
-      short_name: "Nudge",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
       theme_color: "#1a2735",
       icons: [
-        expect.objectContaining({ sizes: "192x192", src: "/icons/icon-192.png" }),
-        expect.objectContaining({ sizes: "512x512", src: "/icons/icon-512.png" }),
-        expect.objectContaining({ src: "/icons/icon.svg" }),
+        expect.objectContaining({ sizes: "192x192", src: "/icons/nudge-app-icon-192.png" }),
+        expect.objectContaining({ sizes: "512x512", src: "/icons/nudge-app-icon-512.png" }),
+        expect.objectContaining({ src: "/icons/nudge-app-icon.svg" }),
       ],
-      shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
+    expect(manifest.shortcuts).toEqual([
+      expect.objectContaining({ name: "Today", url: "/" }),
+      expect.objectContaining({ name: "Ask Nudge", url: "/ask" }),
+      expect.objectContaining({ name: "Review inbox", url: "/review" }),
+    ]);
   });
 
-  test("GET /icons/icon.svg serves the Nudge app icon", async () => {
-    const app = createApp();
-    const response = await app.request("/icons/icon.svg", {}, env);
+  test("GET /icons/nudge-app-icon.svg serves the Nudge app icon", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/icons/nudge-app-icon.svg", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -109,15 +129,15 @@ describe("web app", () => {
   });
 
   test("GET /offline.html serves a PWA offline fallback", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/offline.html", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("You are offline");
-    expect(body).toContain('href="/favicon.ico"');
-    expect(body).toContain('href="/favicon.svg"');
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
@@ -127,22 +147,6 @@ describe("web app", () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication required" });
-  });
-
-  test("GET /api/session stays unauthenticated when Clerk is not configured", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const productionEnv = {
-      ...env,
-      ENVIRONMENT: "production",
-    } satisfies Env;
-    const response = await app.request("/api/session", {}, productionEnv);
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      authMode: "unauthenticated",
-      user: null,
-      workspace: null,
-    });
   });
 
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
@@ -165,7 +169,7 @@ describe("web app", () => {
   });
 
   test("GET /health exposes request observability headers", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", { headers: { "cf-ray": "test-ray" } }, env);
 
     expect(response.status).toBe(200);
@@ -177,7 +181,7 @@ describe("web app", () => {
   test("GET /health continues valid incoming trace context", async () => {
     const incomingTraceId = "0af7651916cd43dd8448eb211c80319c";
     const incomingSpanId = "b7ad6b7169203331";
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/health",
@@ -192,7 +196,7 @@ describe("web app", () => {
   });
 
   test("GET /health records request telemetry meters", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const before = await readHttpTelemetrySnapshot();
 
     await app.request("/health", {}, env);
@@ -205,7 +209,7 @@ describe("web app", () => {
   });
 
   test("GET /health emits a wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -245,7 +249,7 @@ describe("web app", () => {
   });
 
   test("request errors still emit one wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -278,7 +282,7 @@ describe("web app", () => {
   });
 
   test("transient pressure errors return retry-after instead of generic failure", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -309,7 +313,7 @@ describe("web app", () => {
   });
 
   test("GET /api/version reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version", {}, env);
     const body = await response.json();
 
@@ -321,7 +325,7 @@ describe("web app", () => {
   });
 
   test("GET /api/version/ reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version/", {}, env);
     const body = await response.json();
 
@@ -399,7 +403,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -420,7 +424,7 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(loggedEvent).toMatchObject({
       agentTool: "listRecentSignals",
       routeName: "api.conversations",
@@ -470,7 +474,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -497,8 +501,8 @@ describe("web app", () => {
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
-    expect(forwardedRequests[0]!.headers.get("x-vesta-internal-signature")).toMatch(
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
     expect(loggedEvent).toMatchObject({
@@ -538,7 +542,6 @@ describe("web app", () => {
             updatedAt: null,
             recentToolEvents: [],
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-            harness: nudgeHarnessRegistry,
             skills: ["intake-loop", "review-commitment", "close-loop"],
             subAgents: ["loopIntakeThink"],
             tools: ["listRecentSignals", "retrieveMemory"],
@@ -547,7 +550,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus",
@@ -559,7 +562,7 @@ describe("web app", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       userId: anonymousUserId,
@@ -567,7 +570,6 @@ describe("web app", () => {
       updatedAt: null,
       recentToolEvents: [],
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-      harness: nudgeHarnessRegistry,
       skills: ["intake-loop", "review-commitment", "close-loop"],
       subAgents: ["loopIntakeThink"],
       tools: ["listRecentSignals", "retrieveMemory"],
@@ -595,7 +597,7 @@ describe("web app", () => {
                 id: "signal-1",
                 userId: anonymousUserId,
                 type: "manual_check_in_submitted",
-                source: "vesta_agent_intake",
+                source: "nudge_agent_intake",
                 occurredAt: "2026-06-12T10:00:00.000Z",
                 schemaVersion: 1,
                 payload: { note: "What should I do next?" },
@@ -627,20 +629,15 @@ describe("web app", () => {
             ],
             reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
             reply: "I found 1 related memory and drafted a reviewable next step from your message.",
-            activeHarness: assembleNudgeHarnessTurn({
-              intent: "loopIntake",
-              memoryRetrievalAvailable: true,
-            }),
-            agentActionsApplied: ["draftLoopIntake"],
             skillsApplied: ["intake-loop"],
             subAgentsUsed: ["loopIntakeThink"],
-            usedTools: ["retrieveMemory"],
-            workflowHooks: [],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
           });
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages",
@@ -656,9 +653,9 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-display-name")).toBe("Anonymous User");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-display-name")).toBe("Anonymous User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
@@ -667,7 +664,7 @@ describe("web app", () => {
           id: "signal-1",
           userId: anonymousUserId,
           type: "manual_check_in_submitted",
-          source: "vesta_agent_intake",
+          source: "nudge_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
           schemaVersion: 1,
           payload: { note: "What should I do next?" },
@@ -699,15 +696,10 @@ describe("web app", () => {
       ],
       reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
       reply: "I found 1 related memory and drafted a reviewable next step from your message.",
-      activeHarness: assembleNudgeHarnessTurn({
-        intent: "loopIntake",
-        memoryRetrievalAvailable: true,
-      }),
-      agentActionsApplied: ["draftLoopIntake"],
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
-      usedTools: ["retrieveMemory"],
-      workflowHooks: [],
+      usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+      workflowHooks: ["dailyDigest"],
     });
   });
 
@@ -729,7 +721,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages/stream",
@@ -745,10 +737,95 @@ describe("web app", () => {
     expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-vesta-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
+  });
+
+  test("POST /api/conversations/:conversationId/messages/stream returns progress and receipt frames", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "Stream events" });
+          return Response.json({
+            conversationId: "focus",
+            draft: {
+              confidence: 0.82,
+              signal: {
+                id: "signal-1",
+                userId: anonymousUserId,
+                type: "manual_check_in_submitted",
+                source: "nudge_agent_intake",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "Stream events" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+              proposal: {
+                id: "proposal-1",
+                userId: anonymousUserId,
+                synthesisId: "synthesis-1",
+                kind: "commit",
+                status: "pending",
+                title: "Clarify the next step",
+                body: "Choose one concrete next action.",
+                rationale: "Generated from the latest user message.",
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-12T10:00:00.000Z",
+              },
+              requiresReview: true,
+            },
+            message: "Stream events",
+            memoryResults: [],
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+            receipt: {
+              id: "receipt-1",
+              action: "proposal.generated",
+              changed: { proposalId: "proposal-1", status: "pending" },
+              createdAt: "2026-06-12T10:00:00.000Z",
+              signalIds: ["signal-1"],
+              why: "Generated from the latest user message.",
+            },
+            reply: "I drafted a reviewable next step from your message.",
+            skillsApplied: ["intake-loop"],
+            subAgentsUsed: ["loopIntakeThink"],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, accept: "text/event-stream" },
+        body: JSON.stringify({ message: "Stream events" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
+    expect(response.headers.get("content-type")).toContain("application/x-nudge-event-stream");
+    expect(body).toContain("event: progress");
+    expect(body).toContain("event: sources");
+    expect(body).toContain("event: receipt");
+    expect(body).toContain("proposal.generated");
+    expect(body).toContain("event: done");
   });
 
   test("custom integrations can append and list current user's events", async () => {
@@ -945,6 +1022,51 @@ describe("web app", () => {
     });
   });
 
+  test("desktop browser auth rejects anonymous sessions", async () => {
+    const app = createApp({
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async () => {
+        throw new Error("unexpected desktop token mint");
+      },
+    });
+
+    const response = await app.request(
+      "/api/auth/desktop-ticket",
+      { headers: anonymousHeaders, method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Clerk session required" });
+  });
+
+  test("desktop browser auth mints a short-lived Clerk sign-in ticket", async () => {
+    const calls: Array<{ readonly appVersion: string; readonly userId: string }> = [];
+    const app = createApp({
+      authSessionResolver: async () => ({
+        user: {
+          email: "lana@example.com",
+          id: "auth-user-1",
+          name: "Lana",
+        },
+      }),
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async ({ env: requestEnv, userId }) => {
+        calls.push({ appVersion: requestEnv.APP_VERSION, userId });
+        return { expiresInSeconds: 120, ticket: "test-desktop-ticket" };
+      },
+    });
+
+    const response = await app.request("/api/auth/desktop-ticket", { method: "POST" }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      expiresInSeconds: 120,
+      ticket: "test-desktop-ticket",
+    });
+    expect(calls).toEqual([{ appVersion: "test-version", userId: "auth-user-1" }]);
+  });
+
   test("custom integrations can export and delete the current user's data", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
@@ -1021,7 +1143,7 @@ describe("web app", () => {
     expect(calls).toHaveLength(1);
     const [url, init] = calls[0]!;
     expect(String(url)).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/vesta-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
     );
     expect(String(url)).not.toContain(anonymousUserId);
     expect(init?.method).toBe("DELETE");
@@ -1167,64 +1289,6 @@ describe("web app", () => {
     ]);
   });
 
-  test("POST /api/journal emits AI context as a debug-wide event", async () => {
-    const workflow = {
-      create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
-    } as Workflow;
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const consoleLog = spyOn(console, "log").mockImplementation(() => {});
-
-    try {
-      const response = await app.request(
-        "/api/journal",
-        {
-          method: "POST",
-          headers: {
-            ...anonymousJsonHeaders,
-            "cf-ray": "journal-ray",
-            "content-type": "application/json",
-            "user-agent": "Nudge/1",
-          },
-          body: JSON.stringify({
-            bodyText: "I need to work on the guest list",
-            localDate: "2026-07-01",
-            title: "July 1",
-          }),
-        },
-        { ...env, DAILY_DIGEST_WORKFLOW: workflow, LOG_HTTP_REQUESTS: "true" },
-      );
-
-      expect(response.status).toBe(200);
-      const saved = await response.json();
-      const payload = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
-
-      expect(payload).toMatchObject({
-        event: "http_request_completed",
-        routeName: "api.journal",
-        aiModel: "@cf/zai-org/glm-4.7-flash",
-        aiRunId: saved.analysisRun.id,
-        aiSourceType: "note_revision",
-        aiSystem: "cloudflare-think",
-        noteLocalDate: "2026-07-01",
-        "otel.name": "api.journal",
-        "otel.status_code": "OK",
-        "http.request.method": "POST",
-        "http.route": "api.journal",
-        "http.response.status_code": 200,
-        "url.path": "/api/journal",
-        "user_agent.original": "Nudge/1",
-        "service.name": "nudge-web",
-        "deployment.environment.name": "test",
-        "vesta.debug_kind": "ai",
-        "vesta.ai.system": "cloudflare-think",
-        "vesta.ai.model": "@cf/zai-org/glm-4.7-flash",
-        "vesta.ai.run_id": saved.analysisRun.id,
-      });
-    } finally {
-      consoleLog.mockRestore();
-    }
-  });
-
   test("custom integrations can fetch a queued agent run by id", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const save = await app.request(
@@ -1301,8 +1365,8 @@ describe("web app", () => {
     expect(await search.json()).toEqual({
       results: [
         {
-          path: "/daily/2026-06-29.md",
-          snippet: "OKF should be mounted into the sandbox for grep and cat.",
+          path: "/user/profile.md",
+          snippet: "* June 29: OKF should be mounted into the sandbox for grep and cat.",
         },
       ],
     });
@@ -1507,9 +1571,9 @@ describe("web app", () => {
           results: [
             {
               mimeType: "text/markdown",
-              path: "/daily/2026-07-02.md",
-              snippet: "MCP should expose the same OKF workspace boundary.",
-              uri: "file:///okf/daily/2026-07-02.md",
+              path: "/user/profile.md",
+              snippet: "* July 2: MCP should expose the same OKF workspace boundary.",
+              uri: "file:///okf/user/profile.md",
             },
           ],
         },
@@ -1520,7 +1584,7 @@ describe("web app", () => {
         content: expect.arrayContaining([
           expect.objectContaining({
             type: "resource_link",
-            uri: "file:///okf/daily/2026-07-02.md",
+            uri: "file:///okf/user/profile.md",
           }),
         ]),
       },

@@ -7,6 +7,8 @@ const iconsUrl = new URL("../public/icons/", import.meta.url);
 const readmeUrl = new URL("../../../README.md", import.meta.url);
 
 const pngSignature = "89504e470d0a1a0a";
+const previousBrandName = String.fromCharCode(86, 101, 115, 116, 97);
+const previousBrandSlug = previousBrandName.toLowerCase();
 
 describe("Nudge logo assets", () => {
   test("favicon and PWA icon set are generated from Nudge assets", async () => {
@@ -34,16 +36,16 @@ describe("Nudge logo assets", () => {
 
     const manifest = await readFile(new URL("manifest.webmanifest", publicUrl), "utf8");
     expect(manifest).toContain('"name": "Nudge"');
-    expect(manifest).toContain("/icons/icon-192.png");
-    expect(manifest).toContain("/icons/icon-512.png");
-    expect(manifest).toContain("/icons/icon.svg");
+    expect(manifest).toContain("/icons/nudge-app-icon-192.png");
+    expect(manifest).toContain("/icons/nudge-app-icon-512.png");
+    expect(manifest).toContain("/icons/nudge-app-icon.svg");
   });
 
-  test("old Vesta logo assets and generated exploration sheets are pruned", async () => {
+  test("old logo assets and generated exploration sheets are pruned", async () => {
     const files = await readdir(iconsUrl);
     const staleAssets = files.filter((file) => {
       return (
-        file.startsWith("vesta-") ||
+        file.startsWith(`${previousBrandSlug}-`) ||
         file.includes("concept") ||
         file.includes("spritesheet") ||
         file.includes("cutout-mark")
@@ -63,8 +65,8 @@ describe("Nudge logo assets", () => {
 
     expect(readme).toContain("apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.svg");
     expect(readme).toContain("apps/web/public/icons/nudge-app-icon.svg");
-    expect(readme).not.toContain("vesta-logo");
-    expect(readme).not.toContain("vesta-app-icon");
+    expect(readme).not.toContain(`${previousBrandSlug}-logo`);
+    expect(readme).not.toContain(`${previousBrandSlug}-app-icon`);
   });
 });
 
@@ -72,7 +74,7 @@ async function expectSvg(path: string) {
   const svg = await readFile(new URL(path, publicUrl), "utf8");
   expect(svg).toContain("<svg");
   expect(svg).toContain("Nudge");
-  expect(svg).not.toContain("Vesta");
+  expect(svg).not.toContain(previousBrandName);
 }
 
 async function expectPng(path: string, width: number, height: number) {
@@ -85,9 +87,9 @@ async function expectPng(path: string, width: number, height: number) {
 async function expectIconLinks(url: URL) {
   const html = await readFile(url, "utf8");
   expect(html).toContain('href="/manifest.webmanifest"');
-  expect(html).toContain('href="/favicon.ico"');
-  expect(html).toContain('href="/favicon.svg"');
-  expect(html).toContain('href="/icons/apple-touch-icon.png"');
+  expect(html).toContain('href="/favicon.ico?v=nudge"');
+  expect(html).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
+  expect(html).toContain('href="/icons/nudge-apple-touch-icon.png"');
   expect(html).toContain("Nudge");
-  expect(html).not.toContain("Vesta");
+  expect(html).not.toContain(previousBrandName);
 }

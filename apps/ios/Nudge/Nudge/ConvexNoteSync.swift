@@ -6,7 +6,7 @@ import GRDB
 
 enum ConvexNoteSyncConfig {
     static var deploymentURL: String {
-        VestaEnvironmentConfig.current.convexDeploymentURL
+        NudgeEnvironmentConfig.current.convexDeploymentURL
     }
 }
 

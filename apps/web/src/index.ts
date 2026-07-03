@@ -6,13 +6,16 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db, type AgentRunOutputRecord } from "@nudge/db";
+import { Db } from "@nudge/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
   MemoryIndex,
+  NoteAnalysisWorkflows,
   PrimitiveWorkflows,
   workflowStepName,
+  type DailyNoteAnalysisExtractedItemInput,
+  type DailyNoteAnalysisWorkflowParams,
   type WorkflowVersion,
 } from "@nudge/effect-services";
 import {
@@ -39,11 +42,6 @@ import {
   dailyNoteAnalysisResponseError,
 } from "./daily-note-analysis";
 import { resolveDbLayerForEnv } from "./db-layer";
-import {
-  assembleNudgeHarnessTurn,
-  nudgeHarnessRegistry,
-  type NudgeHarnessTurn,
-} from "./nudge-harness";
 
 const app = createApp();
 const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText });
@@ -139,8 +137,6 @@ type RecentToolEvent = UserAgentSessionState["recentToolEvents"][number];
 
 const recentToolEvent = (event: RecentToolEvent) => event;
 
-const agentRunOutput = (output: Pick<AgentRunOutputRecord, "outputId" | "outputType">) => output;
-
 interface NudgeUserRef {
   readonly displayName: string;
   readonly id: string;
@@ -168,6 +164,15 @@ interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
     readonly title: string;
   } | null;
   readonly fallbackReply: string;
+}
+
+interface AgentReceiptView {
+  readonly id: string;
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
 }
 
 const thinkExtractedItemSchema = z.object({
@@ -207,6 +212,21 @@ type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> &
   readonly provider: "cloudflare-think";
 };
 
+function dailyNoteAnalysisItemsFrom(
+  items: ThinkDailyNoteExtraction["items"],
+): ReadonlyArray<DailyNoteAnalysisExtractedItemInput> {
+  return items.map((item) => ({
+    body: item.body,
+    ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
+    ...(item.dueAt !== undefined ? { dueAt: item.dueAt } : {}),
+    ...(item.eventEndsAt !== undefined ? { eventEndsAt: item.eventEndsAt } : {}),
+    ...(item.eventStartsAt !== undefined ? { eventStartsAt: item.eventStartsAt } : {}),
+    kind: item.kind,
+    ...(item.remindAt !== undefined ? { remindAt: item.remindAt } : {}),
+    title: item.title,
+  }));
+}
+
 const reasoningHarness = {
   name: "think",
   runtime: "cloudflare-agents",
@@ -220,39 +240,6 @@ const initialUserAgentSessionState = {
   updatedAt: null,
   userId: null,
 } satisfies UserAgentSessionState;
-
-const activeCapabilityIds = (
-  turn: NudgeHarnessTurn,
-  kind: keyof NudgeHarnessTurn["activeCapabilities"],
-) => turn.activeCapabilities[kind].map((capability) => capability.id);
-
-const normalizeDedupe = (text: string) =>
-  text
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-|-$/g, "")
-    .slice(0, 96);
-
-const weekRangeFor = (localDate: string) => {
-  const date = new Date(`${localDate}T00:00:00.000Z`);
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const start = new Date(date);
-  start.setUTCDate(date.getUTCDate() + mondayOffset);
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  return { end: end.toISOString().slice(0, 10), start: start.toISOString().slice(0, 10) };
-};
-
-const dailySummaryFrom = (input: {
-  readonly items: ReadonlyArray<{ readonly kind: string; readonly title: string }>;
-  readonly noteText: string;
-}) => {
-  const actionText = input.items.length
-    ? input.items.map((item) => `${item.kind}: ${item.title}`).join("; ")
-    : "No extracted actions.";
-  return [`Actions: ${actionText}`, `Context: ${input.noteText.slice(0, 500)}`].join("\n");
-};
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   initialState = initialUserAgentSessionState;
@@ -281,7 +268,6 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json({
       ok: true,
       role: "user-agent-session",
-      harness: nudgeHarnessRegistry,
       reasoningHarness,
       skills: ["intake-loop", "review-commitment", "close-loop"],
       subAgents: ["loopIntakeThink"],
@@ -292,10 +278,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private resolveUser(request: Request) {
-    const id = request.headers.get("x-vesta-user-id");
+    const id = request.headers.get("x-nudge-user-id");
     if (!id) return null;
     return {
-      displayName: request.headers.get("x-vesta-user-display-name") ?? "Nudge User",
+      displayName: request.headers.get("x-nudge-user-display-name") ?? "Nudge User",
       id,
     };
   }
@@ -307,7 +293,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   ) {
     const secret = this.env.AGENT_INTERNAL_SECRET;
     if (!secret) return true;
-    const providedSignature = request.headers.get("x-vesta-internal-signature");
+    const providedSignature = request.headers.get("x-nudge-internal-signature");
     if (!providedSignature) return false;
     const expectedSignature = await signAgentRequest(secret, user.id, conversationId);
     return providedSignature === expectedSignature;
@@ -323,7 +309,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async metadata(request: Request) {
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -338,7 +324,6 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       updatedAt: state.updatedAt,
       recentToolEvents: state.recentToolEvents,
       reasoningHarness,
-      harness: nudgeHarnessRegistry,
       skills: ["intake-loop", "review-commitment", "close-loop"],
       subAgents: ["loopIntakeThink"],
       tools: ["listRecentSignals", "retrieveMemory"],
@@ -353,7 +338,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       "nudge-agent",
       "agent.list_recent_signals",
     );
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -406,7 +391,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       "nudge-agent",
       "agent.retrieve_memory",
     );
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -470,7 +455,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       "nudge-agent",
       "agent.reply",
     );
-    const conversationId = request.headers.get("x-vesta-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
     if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
@@ -481,11 +466,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const previous = this.state ?? initialUserAgentSessionState;
     const now = new Date();
     const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
-    const activeHarness = assembleNudgeHarnessTurn({
-      intent: "loopIntake",
-      memoryRetrievalAvailable: recentMemoryRetrievalsAt !== null,
-    });
-    const memoryResults = activeHarness.activeCapabilityIds.includes("retrieveMemory")
+    const memoryResults = recentMemoryRetrievalsAt
       ? await this.retrieveMemoryResults(user, message, 5, traceContext)
       : [];
     const intake = await this.subAgent(LoopIntakeThinkAgent, "current-state");
@@ -515,13 +496,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       userId: user.id,
     });
 
-    return { activeHarness, conversationId, draft, intake, memoryResults, message, user };
+    return { conversationId, draft, intake, memoryResults, message, user };
   }
 
   private async reply(request: Request) {
     const prepared = await this.prepareReply(request);
     if (prepared instanceof Response) return prepared;
-    const { activeHarness, conversationId, draft, memoryResults, message } = prepared;
+    const { conversationId, draft, memoryResults, message } = prepared;
 
     return Response.json({
       conversationId,
@@ -529,13 +510,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       memoryResults,
       message,
       reasoningHarness,
+      receipt: draft.receipt,
       reply: draft.reply,
-      activeHarness,
-      agentActionsApplied: activeCapabilityIds(activeHarness, "draft"),
       skillsApplied: ["intake-loop"],
-      subAgentsUsed: activeCapabilityIds(activeHarness, "subagent"),
-      usedTools: activeCapabilityIds(activeHarness, "read"),
-      workflowHooks: activeCapabilityIds(activeHarness, "workflow"),
+      subAgentsUsed: ["loopIntakeThink"],
+      usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+      workflowHooks: ["dailyDigest"],
     });
   }
 
@@ -582,10 +562,10 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
         extraction = await runBraintrustSpan(
           {
             attributes: {
-              "vesta.ai.changed_text_chars": changedText.length,
-              "vesta.ai.local_date": localDate,
-              "vesta.ai.revision_id": String(body.revisionId ?? ""),
-              "vesta.ai.system": "cloudflare-think",
+              "nudge.ai.changed_text_chars": changedText.length,
+              "nudge.ai.local_date": localDate,
+              "nudge.ai.revision_id": String(body.revisionId ?? ""),
+              "nudge.ai.system": "cloudflare-think",
             },
             name: "journal.interpret.extract_daily_note",
             type: "task",
@@ -732,7 +712,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return result.toTextStreamResponse({
       headers: {
         "cache-control": "no-cache",
-        "x-vesta-conversation-id": input.conversationId,
+        "x-nudge-conversation-id": input.conversationId,
       },
     });
   }
@@ -757,19 +737,97 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   }
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
-    const result = await runRuntimeDbEffect(
+    const occurredAt = new Date().toISOString();
+    const signal = await runRuntimeDbEffect(
       this.env,
       input.traceContext,
-      PrimitiveWorkflows.draftLoopIntake({
-        conversationId: input.conversationId,
-        message: input.message,
+      PrimitiveWorkflows.appendSignal({
+        idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+        occurredAt,
+        payload: { note: input.message },
+        schemaVersion: 1,
+        source: "nudge_agent_intake",
+        type: "manual_check_in_submitted",
         user: input.user,
       }),
     );
+    await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
+    );
+    const proposals = await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
+    );
+    const proposal = proposals[0];
+    let receipt: AgentReceiptView | null = null;
+    if (proposal) {
+      const changed = {
+        proposalId: proposal.id,
+        status: proposal.status,
+        title: proposal.title,
+      };
+      const receiptSignal = await runRuntimeDbEffect(
+        this.env,
+        input.traceContext,
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent-receipt:proposal.generated:${proposal.id}`,
+          occurredAt: new Date().toISOString(),
+          payload: {
+            action: "proposal.generated",
+            changed,
+            signalIds: [signal.id],
+            why: proposal.rationale,
+          },
+          schemaVersion: 1,
+          source: "nudge_agent_session",
+          type: "agent.receipt",
+          user: input.user,
+        }),
+      );
+      receipt = {
+        id: receiptSignal.id,
+        action: "proposal.generated",
+        changed,
+        createdAt: receiptSignal.createdAt,
+        signalIds: [signal.id],
+        why: proposal.rationale,
+      };
+    }
 
     return {
-      draft: result.draft,
-      reply: result.draft
+      draft: proposal
+        ? {
+            confidence: 0.82,
+            proposal: {
+              id: proposal.id,
+              userId: proposal.userId,
+              synthesisId: proposal.synthesisId,
+              kind: proposal.kind,
+              status: proposal.status,
+              title: proposal.title,
+              body: proposal.body,
+              rationale: proposal.rationale,
+              createdAt: proposal.createdAt,
+              updatedAt: proposal.updatedAt,
+            },
+            requiresReview: true,
+            signal: {
+              id: signal.id,
+              userId: signal.userId,
+              type: signal.type,
+              source: signal.source,
+              occurredAt: signal.occurredAt,
+              schemaVersion: signal.schemaVersion,
+              payload: signal.payload,
+              createdAt: signal.createdAt,
+            },
+          }
+        : null,
+      receipt,
+      reply: proposal
         ? input.memoryResults.length > 0
           ? `I found ${input.memoryResults.length} related memory and drafted a reviewable next step from your message.`
           : "I drafted a reviewable next step from your message."
@@ -798,22 +856,6 @@ export interface DailyDigestWorkflowParams {
   kind?: "daily-digest";
   userId: string;
   requestedBy: "api" | "cron";
-  workflowVersion?: WorkflowVersion;
-}
-
-export interface DailyNoteAnalysisWorkflowParams {
-  changedText: string;
-  documentId: string;
-  kind: "daily-note-analysis";
-  localDate: string;
-  noteId: string;
-  requestId?: string;
-  revisionId: string;
-  runId: string;
-  title: string;
-  traceparent?: string;
-  userDisplayName: string;
-  userId: string;
   workflowVersion?: WorkflowVersion;
 }
 
@@ -858,12 +900,9 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
         await runRuntimeDbEffect(
           this.env,
           traceContext,
-          Effect.gen(function* () {
-            const database = yield* Db;
-            yield* database.markAgentRunRunning({
-              runId: input.runId,
-              userId: input.userId,
-            });
+          NoteAnalysisWorkflows.markAnalysisRunRunning({
+            runId: input.runId,
+            userId: input.userId,
           }),
         );
       },
@@ -891,10 +930,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
               headers: {
                 "content-type": "application/json",
                 ...traceHeadersFromContext(traceContext),
-                "x-vesta-conversation-id": "journal",
-                ...(internalSignature ? { "x-vesta-internal-signature": internalSignature } : {}),
-                "x-vesta-user-display-name": input.userDisplayName,
-                "x-vesta-user-id": input.userId,
+                "x-nudge-conversation-id": "journal",
+                ...(internalSignature ? { "x-nudge-internal-signature": internalSignature } : {}),
+                "x-nudge-user-display-name": input.userDisplayName,
+                "x-nudge-user-id": input.userId,
               },
               method: "POST",
             }),
@@ -919,118 +958,36 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
         workflowStepName(workflowVersion, "daily-note-analysis-persist-results"),
         durableWorkflowStepConfig,
         async () => {
-          const extractedItems = await Promise.all(
-            extraction.items.map(async (extracted) =>
-              runRuntimeDbEffect(
-                this.env,
-                traceContext,
-                Effect.gen(function* () {
-                  const database = yield* Db;
-                  const item = yield* database.upsertExtractedItem({
-                    body: extracted.body,
-                    confidence: extracted.confidence ?? 0.74,
-                    dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
-                    ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
-                    ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
-                    ...(extracted.eventStartsAt ? { eventStartsAt: extracted.eventStartsAt } : {}),
-                    kind: extracted.kind,
-                    metadata: { extractor: "cloudflare-think" },
-                    ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
-                    sourceNoteId: input.noteId,
-                    sourceRevisionId: input.revisionId,
-                    status: "proposed",
-                    title: extracted.title,
-                    userId: input.userId,
-                  });
-                  yield* database.recordItemEvent({
-                    eventType: "created",
-                    itemId: item.id,
-                    payload: { sourceRevisionId: input.revisionId },
-                    userId: input.userId,
-                  });
-                  yield* database.upsertMemoryDocument({
-                    bodyText: `${item.title}\n${item.body}`,
-                    localDate: input.localDate,
-                    sourceId: item.id,
-                    sourceType: "extracted_item",
-                    title: item.title,
-                    userId: input.userId,
-                  });
-                  return item;
-                }),
-              ),
-            ),
-          );
-          const dailySummary = await runRuntimeDbEffect(
+          const persisted = await runRuntimeDbEffect(
             this.env,
             traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              return yield* database.upsertSummaryDocument({
-                body:
-                  extraction.dailySummary ??
-                  dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
-                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                periodEnd: input.localDate,
-                periodStart: input.localDate,
-                periodType: "day",
-                sourceItemIds: extractedItems.map((item) => item.id),
-                sourceNoteIds: [input.noteId],
-                status: "ready",
-                title: `${input.localDate} summary`,
-                userId: input.userId,
-              });
-            }),
-          );
-          const week = weekRangeFor(input.localDate);
-          const weeklySummary = await runRuntimeDbEffect(
-            this.env,
-            traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              return yield* database.upsertSummaryDocument({
-                body: `Week so far: ${dailySummary.body}`,
-                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                periodEnd: week.end,
-                periodStart: week.start,
-                periodType: "week",
-                sourceItemIds: extractedItems.map((item) => item.id),
-                sourceNoteIds: [input.noteId],
-                status: "ready",
-                title: `${week.start} week summary`,
-                userId: input.userId,
-              });
-            }),
-          );
-          await runRuntimeDbEffect(
-            this.env,
-            traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              yield* database.completeAgentRun({
-                outputs: [
-                  ...extractedItems.map((item) =>
-                    agentRunOutput({ outputId: item.id, outputType: "extracted_item" }),
-                  ),
-                  agentRunOutput({ outputId: dailySummary.id, outputType: "summary" }),
-                  agentRunOutput({ outputId: weeklySummary.id, outputType: "summary" }),
-                ],
-                runId: input.runId,
-                status: "completed",
-                userId: input.userId,
-              });
+            NoteAnalysisWorkflows.persistAnalysisResults({
+              changedText: input.changedText,
+              extraction: {
+                ...(extraction.dailySummary !== undefined
+                  ? { dailySummary: extraction.dailySummary }
+                  : {}),
+                items: dailyNoteAnalysisItemsFrom(extraction.items),
+                model: extraction.model,
+                provider: extraction.provider,
+              },
+              localDate: input.localDate,
+              noteId: input.noteId,
+              revisionId: input.revisionId,
+              runId: input.runId,
+              userId: input.userId,
             }),
           );
           console.info(
             JSON.stringify({
               event: "daily_note_ai_extract_completed",
-              itemCount: extractedItems.length,
+              itemCount: persisted.itemCount,
               logKind: "wide_event",
               model: extraction.model,
               provider: "cloudflare-think",
             }),
           );
-          return { itemCount: extractedItems.length, ok: true, userId: input.userId };
+          return { itemCount: persisted.itemCount, ok: true, userId: input.userId };
         },
       );
     } catch (error) {
@@ -1043,14 +1000,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
           await runRuntimeDbEffect(
             this.env,
             traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              yield* database.completeAgentRun({
-                errorCode,
-                runId: input.runId,
-                status: "failed",
-                userId: input.userId,
-              });
+            NoteAnalysisWorkflows.markAnalysisRunFailed({
+              errorCode,
+              runId: input.runId,
+              userId: input.userId,
             }),
           );
           console.warn(

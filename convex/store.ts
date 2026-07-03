@@ -1,4 +1,3 @@
-// oxlint-disable no-underscore-dangle -- Convex document ids are exposed as _id.
 import { v } from "convex/values";
 import type { Doc, TableNames } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";

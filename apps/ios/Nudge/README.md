@@ -17,11 +17,11 @@ Native SwiftUI App Surface for logging spoken captures into the Nudge Engine.
 | ------------------ | ------------ | ----------------------- | ---------------- | ------------------------------------------------- | ------------------------------------------------------- |
 | `Nudge Local`      | `Debug`      | `app.nudge.ios.local`   | `AppIcon`        | `http://localhost:8787`                           | `https://grandiose-hamster-855.eu-west-1.convex.cloud`  |
 | `Nudge Staging`    | `Staging`    | `app.nudge.ios.staging` | `AppIconStaging` | `https://nudge-web-staging.teampitch.workers.dev` | `https://abundant-retriever-130.eu-west-1.convex.cloud` |
-| `Nudge Production` | `Release`    | `app.nudge.ios`         | `AppIcon`        | `https://app.explorenudge.com`                    | `https://friendly-lion-904.eu-west-1.convex.cloud`      |
+| `Nudge Production` | `Release`    | `app.nudge.ios`         | `AppIcon`        | `https://nudge-web.teampitch.workers.dev`         | `https://friendly-lion-904.eu-west-1.convex.cloud`      |
 
 Settings shows the active environment and Engine URL on-device. Use `Nudge Staging` for physical iPhone QA unless you explicitly need to test the local simulator flow.
 
-The staging iOS build has a separate bundle id, beta app icon, Engine endpoint, Clerk app, and Convex deployment. Use `Nudge Production` only when you want the app to talk to the production Worker and production Convex deployment.
+The staging iOS build has a separate bundle id, Engine endpoint, Clerk app, and Convex deployment. Use `Nudge Production` only when you want the app to talk to the production Worker and production Convex deployment.
 
 Production Clerk still uses the existing Clerk development instance until `clerk deploy` is completed with a production domain, DNS access, and OAuth credentials.
 

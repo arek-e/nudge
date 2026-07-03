@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; data ownership updated by ADR 0016.
 
 Current state: `UserAgentSession` exists, conversation requests are request/response, and `LoopIntakeThinkAgent` uses Think for note/message interpretation. Deeper sub-agent orchestration and streaming are still future slices.
 

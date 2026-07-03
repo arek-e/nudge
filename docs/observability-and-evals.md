@@ -7,21 +7,24 @@ Useful commands:
 ```bash
 bun run logs:tail
 bun run logs:tail:pretty
+bun run traces:recent
 ```
 
-The JSON tail is the agent-readable path for now. It lets an implementation agent inspect request ids, route names, status, duration, outcome, deployment environment, version, and safe error fields while debugging or improving the app. Requests also emit `traceparent` headers and forward trace metadata into Cloudflare Agent, Workflow, and Convex runtime calls so Cloudflare logs, Convex logs, and future OTLP exports can be correlated.
+The JSON tail is the agent-readable path for now. It lets an implementation agent inspect request ids, route names, status, duration, outcome, deployment environment, version, and safe error fields while debugging or improving the app.
 
-Current observability does not use a Nudge-owned D1 trace cache. Wrangler-managed infrastructure is limited to runtime logs/traces, product bindings, and artifact storage that product features explicitly use:
+Trace/event persistence uses Wrangler-managed infrastructure:
 
-- Cloudflare Worker logs and traces are enabled in `wrangler.jsonc`.
-- Convex receives trace metadata on runtime store calls and emits `convex_runtime_store_call` logs.
-- Braintrust spans wrap request, route, and AI SDK work when `BRAINTRUST_API_KEY` is configured.
+- D1 table `trace_events` stores indexed safe wide-event metadata and the redacted JSON payload.
+- D1 table `trace_spans` stores recent OpenTelemetry-shaped request spans for `/api/traces/recent`.
+- D1 tables `agent_runs`, `eval_runs`, and `eval_case_results` are provisioned for upcoming agent/eval loops.
+- D1 tables `daily_agent_runs` and `daily_agent_run_outputs` track note-analysis runs and generated outputs.
+- R2 bucket `nudge-trace-artifacts` is bound as `TRACE_ARTIFACTS` for larger redacted artifacts.
 
 Current limitations:
 
 - Agent reasoning, prompts, tool traces, and model outputs are only captured as safe summaries.
 - Evals run a small deterministic golden-case suite; they are not yet wired into release gating.
 
-Next observability step: configure an OTLP/log export destination for real agent loops. The export should include safe metadata, tool call summaries, eval case ids, outcome labels, and redacted artifacts. It must not store raw personal content, private prompts, calendar text, relationship memory content, or unredacted consent grants.
+Next observability step: add an agent trace sink for real agent loops. The trace sink should store safe metadata, tool call summaries, eval case ids, outcome labels, and redacted artifacts. It must not store raw personal content, private prompts, calendar text, relationship memory content, or unredacted consent grants.
 
 Next evals step: wire `packages/evals` into CI and deployment checks for agent workflow changes.

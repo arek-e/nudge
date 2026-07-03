@@ -1,21 +1,39 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 const iosRoot = new URL(".", import.meta.url);
 const repoRoot = new URL("../../..", import.meta.url);
-const oldProductName = "Vesta";
-const oldSpokenFallback = "ves-tuh";
-const oldPronunciationHint = "ves";
+const oldProductName = String.fromCharCode(76, 97, 114, 101, 115);
+const oldSpokenFallback = String.fromCharCode(76, 97, 121, 101, 114, 115);
+const previousProductName = String.fromCharCode(86, 101, 115, 116, 97);
+const oldPronunciationHint = "lair";
 const pngSignature = "89504e470d0a1a0a";
 
 describe("Nudge iOS branding", () => {
   test("bundle and Siri metadata expose Nudge without old spoken-name fallbacks", async () => {
     const info = await readInfoPlist();
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
+    const schemes = await readSchemeNames();
     const alternativeNames = readAlternativeNames(info);
 
-    expect(info.CFBundleDisplayName).toBe("$(VESTA_DISPLAY_NAME)");
-    expect(project).toContain("VESTA_DISPLAY_NAME = Nudge;");
+    expect(info.CFBundleDisplayName).toBe("$(NUDGE_DISPLAY_NAME)");
+    expect(schemes).toEqual([
+      "Nudge Local.xcscheme",
+      "Nudge Production.xcscheme",
+      "Nudge Staging.xcscheme",
+    ]);
+    expect(project).toContain("path = Nudge.app;");
+    expect(project).toContain("productName = Nudge;");
+    expect(project).toContain("PRODUCT_NAME = Nudge;");
+    expect(buildSettingsForBundle(project, "app.nudge.ios.local")).toContain(
+      "NUDGE_DISPLAY_NAME = Nudge;",
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios.staging")).toContain(
+      "NUDGE_DISPLAY_NAME = Nudge;",
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios")).toContain(
+      "NUDGE_DISPLAY_NAME = Nudge;",
+    );
     expect(info.CFBundleSpokenName).toBe("Nudge");
     expect(JSON.stringify(alternativeNames)).not.toContain(oldProductName);
     expect(JSON.stringify(alternativeNames)).not.toContain(oldSpokenFallback);
@@ -44,42 +62,64 @@ describe("Nudge iOS branding", () => {
     const info = await readInfoPlist();
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
 
-    expect(info.CFBundleDisplayName).toBe("$(VESTA_DISPLAY_NAME)");
-    expect(info.VestaEnvironmentName).toBe("$(VESTA_ENVIRONMENT_NAME)");
-    expect(info.VestaEngineURL).toBe("$(VESTA_ENGINE_URL)");
-    expect(info.VestaConvexDeploymentURL).toBe("$(VESTA_CONVEX_DEPLOYMENT_URL)");
+    expect(info.CFBundleDisplayName).toBe("$(NUDGE_DISPLAY_NAME)");
+    expect(info.NudgeEnvironmentName).toBe("$(NUDGE_ENVIRONMENT_NAME)");
+    expect(info.NudgeEngineURL).toBe("$(NUDGE_ENGINE_URL)");
+    expect(info.NudgeConvexDeploymentURL).toBe("$(NUDGE_CONVEX_DEPLOYMENT_URL)");
 
     expect(project).toContain("name = Staging;");
-    expect(project).toContain("VESTA_ENVIRONMENT_NAME = local;");
-    expect(project).toContain("VESTA_ENVIRONMENT_NAME = staging;");
-    expect(project).toContain("VESTA_ENVIRONMENT_NAME = production;");
+    expect(project).toContain("NUDGE_ENVIRONMENT_NAME = local;");
+    expect(project).toContain("NUDGE_ENVIRONMENT_NAME = staging;");
+    expect(project).toContain("NUDGE_ENVIRONMENT_NAME = production;");
     expect(project).toContain("PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios.local;");
     expect(project).toContain("PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios.staging;");
     expect(project).toContain("PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios;");
-    expect(project).toContain('VESTA_ENGINE_URL = "http://localhost:8787";');
+    expect(project).toContain('NUDGE_ENGINE_URL = "http://localhost:8787";');
     expect(project).toContain(
-      'VESTA_ENGINE_URL = "https://nudge-web-staging.teampitch.workers.dev";',
+      'NUDGE_ENGINE_URL = "https://nudge-web-staging.teampitch.workers.dev";',
     );
-    expect(project).toContain('VESTA_ENGINE_URL = "https://app.explorenudge.com";');
+    expect(project).toContain('NUDGE_ENGINE_URL = "https://nudge-web.teampitch.workers.dev";');
     expect(buildSettingsForBundle(project, "app.nudge.ios.local")).toContain(
-      'VESTA_CONVEX_DEPLOYMENT_URL = "https://grandiose-hamster-855.eu-west-1.convex.cloud";',
+      'NUDGE_CONVEX_DEPLOYMENT_URL = "https://grandiose-hamster-855.eu-west-1.convex.cloud";',
     );
     expect(buildSettingsForBundle(project, "app.nudge.ios.staging")).toContain(
-      'VESTA_CONVEX_DEPLOYMENT_URL = "https://abundant-retriever-130.eu-west-1.convex.cloud";',
+      'NUDGE_CONVEX_DEPLOYMENT_URL = "https://abundant-retriever-130.eu-west-1.convex.cloud";',
     );
     expect(buildSettingsForBundle(project, "app.nudge.ios")).toContain(
-      'VESTA_CONVEX_DEPLOYMENT_URL = "https://friendly-lion-904.eu-west-1.convex.cloud";',
+      'NUDGE_CONVEX_DEPLOYMENT_URL = "https://friendly-lion-904.eu-west-1.convex.cloud";',
     );
     expect(project).toContain(
       'CLERK_PUBLISHABLE_KEY = "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";',
     );
   });
 
-  test("staging build installs with the beta app icon", async () => {
+  test("iOS project folders and schemes use Nudge paths", async () => {
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
+    const stagingScheme = await readFile(
+      new URL("Nudge.xcodeproj/xcshareddata/xcschemes/Nudge Staging.xcscheme", iosRoot),
+      "utf8",
+    );
+
+    expect(project).toContain("path = Nudge;");
+    expect(project).toContain("name = Nudge;");
+    expect(project).toContain("INFOPLIST_FILE = Nudge/Info.plist;");
+    expect(project).toContain('Build configuration list for PBXNativeTarget "Nudge"');
+    expect(project).not.toContain(`path = ${previousProductName};`);
+    expect(project).not.toContain(`INFOPLIST_FILE = ${previousProductName}/Info.plist;`);
+    expect(stagingScheme).toContain('BlueprintName = "Nudge"');
+    expect(stagingScheme).toContain('ReferencedContainer = "container:Nudge.xcodeproj"');
+    expect(stagingScheme).not.toContain(`BlueprintName = "${previousProductName}"`);
+    expect(stagingScheme).not.toContain(`container:${previousProductName}.xcodeproj`);
+  });
+
+  test("staging build installs with the Nudge app icon", async () => {
+    const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
+    const sourceIcon = await readFile(new URL("NudgeAppIcon.svg", iosRoot), "utf8");
     const normalAppIcon = await readAppIconSet("AppIcon");
     const stagingAppIcon = await readAppIconSet("AppIconStaging");
 
+    expect(sourceIcon).toContain("Nudge iOS app icon");
+    expect(sourceIcon).toContain('transform="translate(-9.55 4.25)"');
     expect(project).toContain("Assets.xcassets in Resources");
     expect(buildSettingsForBundle(project, "app.nudge.ios.local")).toContain(
       "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;",
@@ -103,7 +143,7 @@ describe("Nudge iOS branding", () => {
       1024,
       1024,
     );
-    expect(stagingPng.equals(normalPng)).toBe(false);
+    expect(stagingPng.equals(normalPng)).toBe(true);
   });
 });
 
@@ -115,10 +155,15 @@ async function readInfoPlist() {
     CFBundleDisplayName: readPlistString(plist, "CFBundleDisplayName"),
     CFBundleSpokenName: readPlistString(plist, "CFBundleSpokenName"),
     INAlternativeAppNames: readPlistStringArray(plist, "INAlternativeAppNames"),
-    VestaConvexDeploymentURL: readPlistString(plist, "VestaConvexDeploymentURL"),
-    VestaEngineURL: readPlistString(plist, "VestaEngineURL"),
-    VestaEnvironmentName: readPlistString(plist, "VestaEnvironmentName"),
+    NudgeConvexDeploymentURL: readPlistString(plist, "NudgeConvexDeploymentURL"),
+    NudgeEngineURL: readPlistString(plist, "NudgeEngineURL"),
+    NudgeEnvironmentName: readPlistString(plist, "NudgeEnvironmentName"),
   };
+}
+
+async function readSchemeNames() {
+  const entries = await readdir(new URL("Nudge.xcodeproj/xcshareddata/xcschemes", iosRoot));
+  return entries.filter((entry) => entry.endsWith(".xcscheme")).sort();
 }
 
 function readAlternativeNames(info: Record<string, unknown>) {

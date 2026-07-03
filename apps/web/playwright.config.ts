@@ -33,6 +33,7 @@ export default defineConfig({
           `CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} VITE_CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} bun run build`,
           [
             "wrangler dev",
+            "--config wrangler.local.jsonc",
             `--port ${devPort}`,
             `--inspector-port ${inspectorPort}`,
             `--persist-to ${shellQuote(persistTo)}`,

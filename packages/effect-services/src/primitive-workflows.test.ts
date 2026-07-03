@@ -137,7 +137,7 @@ describe("PrimitiveWorkflows", () => {
       expect.objectContaining({
         userId: user.id,
         type: "manual_check_in_submitted",
-        source: "vesta_agent_intake",
+        source: "nudge_agent_intake",
         payload: { note: "Travel this week and follow up with work" },
       }),
     );

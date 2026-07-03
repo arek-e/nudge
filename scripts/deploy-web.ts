@@ -56,7 +56,7 @@ const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : 
 const deployEnvironment = env ?? "production";
 const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
   production: {
-    VITE_CLERK_PUBLISHABLE_KEY: "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
     VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
   },
   staging: {

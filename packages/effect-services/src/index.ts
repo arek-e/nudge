@@ -16,31 +16,8 @@ import {
 
 export * from "./okf";
 export * from "./agent-prompts";
-
-export interface DurableWorkflowStepConfig<Timeout extends number | string = number | string> {
-  readonly retries?: {
-    readonly limit: number;
-    readonly delay: number | string;
-    readonly backoff?: "constant" | "linear" | "exponential";
-  };
-  readonly timeout?: Timeout;
-  readonly sensitive?: "output";
-}
-
-export const durableWorkflowStepConfig = {
-  retries: {
-    limit: 5,
-    delay: 1_000,
-    backoff: "exponential",
-  },
-  timeout: "10 minutes",
-} satisfies DurableWorkflowStepConfig<"10 minutes">;
-
-export const currentWorkflowVersion = 1;
-
-export type WorkflowVersion = typeof currentWorkflowVersion;
-
-export const workflowStepName = (version: WorkflowVersion, name: string) => `v${version}.${name}`;
+export * from "./daily-note-workflows";
+export * from "./workflow-config";
 
 export interface LoopIntakeDraftInput {
   readonly conversationId: string;
@@ -90,7 +67,7 @@ const sha256Hex = (value: string) =>
   });
 
 const memoryNamespaceForUser = (userId: string) =>
-  Effect.map(sha256Hex(userId), (hash) => `vesta-user-${hash.slice(0, 48)}`);
+  Effect.map(sha256Hex(userId), (hash) => `nudge-user-${hash.slice(0, 48)}`);
 
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
@@ -461,7 +438,7 @@ export const PrimitiveWorkflows = {
         occurredAt: input.occurredAt ?? new Date().toISOString(),
         payload: { note: input.message },
         schemaVersion: 1,
-        source: "vesta_agent_intake",
+        source: "nudge_agent_intake",
         type: "manual_check_in_submitted",
         user: input.user,
       });

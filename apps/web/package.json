@@ -29,6 +29,7 @@
     "@nudge/effect-services": "workspace:*",
     "@nudge/evals": "workspace:*",
     "@nudge/observability": "workspace:*",
+    "@nudge/surface": "workspace:*",
     "@nudge/ui": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",

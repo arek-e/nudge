@@ -241,14 +241,14 @@ enum JSONValue: Decodable {
 }
 
 struct NudgeEnvironmentConfig: Equatable {
-    static let convexDeploymentURLInfoKey = "VestaConvexDeploymentURL"
+    static let convexDeploymentURLInfoKey = "NudgeConvexDeploymentURL"
     static let displayNameInfoKey = "CFBundleDisplayName"
-    static let engineURLInfoKey = "VestaEngineURL"
-    static let environmentNameInfoKey = "VestaEnvironmentName"
+    static let engineURLInfoKey = "NudgeEngineURL"
+    static let environmentNameInfoKey = "NudgeEnvironmentName"
     static let developmentConvexDeploymentURL = "https://grandiose-hamster-855.eu-west-1.convex.cloud"
     static let localEngineURL = "http://localhost:8787"
     static let productionConvexDeploymentURL = "https://friendly-lion-904.eu-west-1.convex.cloud"
-    static let productionEngineURL = "https://app.explorenudge.com"
+    static let productionEngineURL = "https://nudge-web.teampitch.workers.dev"
     static let stagingConvexDeploymentURL = "https://abundant-retriever-130.eu-west-1.convex.cloud"
     static let stagingEngineURL = "https://nudge-web-staging.teampitch.workers.dev"
 
@@ -262,13 +262,13 @@ struct NudgeEnvironmentConfig: Equatable {
         let environment = ProcessInfo.processInfo.environment
         return evaluate(
             environmentName: bundleString(environmentNameInfoKey, bundle: bundle)
-                ?? normalizedBuildValue(environment["VESTA_ENVIRONMENT_NAME"]),
+                ?? normalizedBuildValue(environment["NUDGE_ENVIRONMENT_NAME"]),
             displayName: bundleString(displayNameInfoKey, bundle: bundle)
-                ?? normalizedBuildValue(environment["VESTA_DISPLAY_NAME"]),
+                ?? normalizedBuildValue(environment["NUDGE_DISPLAY_NAME"]),
             engineURL: bundleString(engineURLInfoKey, bundle: bundle)
-                ?? normalizedBuildValue(environment["VESTA_ENGINE_URL"]),
+                ?? normalizedBuildValue(environment["NUDGE_ENGINE_URL"]),
             convexDeploymentURL: bundleString(convexDeploymentURLInfoKey, bundle: bundle)
-                ?? normalizedBuildValue(environment["VESTA_CONVEX_DEPLOYMENT_URL"])
+                ?? normalizedBuildValue(environment["NUDGE_CONVEX_DEPLOYMENT_URL"])
         )
     }
 
@@ -294,9 +294,9 @@ struct NudgeEnvironmentConfig: Equatable {
     private static func fallbackDisplayName(for name: String) -> String {
         switch name {
         case "local":
-            "Nudge Local"
+            "Nudge"
         case "staging":
-            "Nudge Staging"
+            "Nudge"
         default:
             "Nudge"
         }
@@ -335,8 +335,6 @@ struct NudgeEnvironmentConfig: Equatable {
 enum NudgeAPI {
     static let engineURLKey = "nudge.engineURL"
     private static let legacyEngineURLKey = "nudge.backendURL"
-    private static let vestaEngineURLKey = "vesta.engineURL"
-    private static let vestaBackendURLKey = "vesta.backendURL"
     private static let staleLocalEngineURLs = Set([
         "http://127.0.0.1:8787",
         "http://192.168.76.133:8787",
@@ -345,22 +343,13 @@ enum NudgeAPI {
     static var defaultEngineURL: String {
         NudgeEnvironmentConfig.current.engineURL
     }
+
     static var configuredEngineURL: String {
         let defaults = UserDefaults.standard
         if let engineURL = defaults.string(forKey: engineURLKey) {
             return normalizedEngineURL(engineURL, defaults: defaults)
         }
         if let legacyURL = defaults.string(forKey: legacyEngineURLKey) {
-            let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
-            defaults.set(engineURL, forKey: engineURLKey)
-            return engineURL
-        }
-        if let legacyURL = defaults.string(forKey: vestaEngineURLKey) {
-            let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
-            defaults.set(engineURL, forKey: engineURLKey)
-            return engineURL
-        }
-        if let legacyURL = defaults.string(forKey: vestaBackendURLKey) {
             let engineURL = normalizedEngineURL(legacyURL, defaults: defaults)
             defaults.set(engineURL, forKey: engineURLKey)
             return engineURL

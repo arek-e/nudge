@@ -15,7 +15,7 @@ enum CaptureDraftResetSelftest {
             engineURL: nil,
             convexDeploymentURL: nil
         )
-        assert(stagingEnvironment.displayName == "Nudge Staging")
+        assert(stagingEnvironment.displayName == "Nudge")
         assert(stagingEnvironment.engineURL == "https://nudge-web-staging.teampitch.workers.dev")
         assert(stagingEnvironment.convexDeploymentURL == "https://abundant-retriever-130.eu-west-1.convex.cloud")
         let localEnvironment = NudgeEnvironmentConfig.evaluate(
@@ -32,7 +32,7 @@ enum CaptureDraftResetSelftest {
             engineURL: nil,
             convexDeploymentURL: nil
         )
-        assert(productionEnvironment.engineURL == "https://app.explorenudge.com")
+        assert(productionEnvironment.engineURL == "https://nudge-web.teampitch.workers.dev")
         assert(productionEnvironment.convexDeploymentURL == "https://friendly-lion-904.eu-west-1.convex.cloud")
         defaults.set("anon_550e8400-e29b-41d4-a716-446655440000", forKey: NudgeInstallIdentity.userIDKey)
         assert(NudgeInstallIdentity.currentUserID(defaults: defaults) == "anon_550e8400-e29b-41d4-a716-446655440000")

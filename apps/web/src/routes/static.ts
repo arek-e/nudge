@@ -2,6 +2,7 @@ import type { Handler, Hono } from "hono";
 import { type ObservabilityHonoEnv, wideEventFields } from "../observability";
 
 const nudgeAppIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="nudge-app-icon-title nudge-app-icon-desc"><title id="nudge-app-icon-title">Nudge app icon</title><desc id="nudge-app-icon-desc">A rounded orange N mark on a warm background.</desc><rect width="256" height="256" fill="#fffaf6"/><path fill="#f14f23" d="M79.6 28.4c-24.9 0-38.4 20.7-37.2 54.6.7 21.1 4.8 31.1-3.6 59.8-9.3 31.8.2 63.8 27.1 75 26.2 10.9 46.6-3.8 43.6-32.3-1.4-13.5 2-23.5 11.7-23.8 8.6-.3 15.2 11.1 24.2 25.5 14.2 22.8 31.4 34.8 56.7 31.9 25.8-2.9 37.1-24.7 33.3-57.2-3-26.1-3.3-42.4.9-66.1 6.7-38.3-9.4-67.2-37.1-67.5-25.5-.3-39.5 18.8-39.9 51.3-.3 21.4-5.1 33.7-14.5 35.2-10.1 1.7-18-11.9-27.8-31.1-15.3-29.9-20.6-55.3-37.4-55.3Z"/></svg>`;
+const nudgeFaviconVersion = "nudge";
 
 export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
   const versionHandler: Handler<ObservabilityHonoEnv> = (c) => {
@@ -28,19 +29,19 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
       categories: ["productivity", "lifestyle"],
       icons: [
         {
-          src: "/icons/icon-192.png",
+          src: "/icons/nudge-app-icon-192.png",
           sizes: "192x192",
           type: "image/png",
           purpose: "any maskable",
         },
         {
-          src: "/icons/icon-512.png",
+          src: "/icons/nudge-app-icon-512.png",
           sizes: "512x512",
           type: "image/png",
           purpose: "any maskable",
         },
         {
-          src: "/icons/icon.svg",
+          src: "/icons/nudge-app-icon.svg",
           sizes: "any",
           type: "image/svg+xml",
           purpose: "any maskable",
@@ -52,7 +53,21 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
           short_name: "Today",
           description: "Open today's operating loop.",
           url: "/",
-          icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+          icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
+        {
+          name: "Ask Nudge",
+          short_name: "Ask",
+          description: "Ask Nudge to read context and draft reviewable proposals.",
+          url: "/ask",
+          icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
+        {
+          name: "Review inbox",
+          short_name: "Review",
+          description: "Review proposals and recent agent receipts.",
+          url: "/review",
+          icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
         },
       ],
     });
@@ -68,9 +83,9 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Nudge" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" href="/favicon.ico?v=${nudgeFaviconVersion}" sizes="any" />
+    <link rel="icon" href="/icons/nudge-app-icon.svg?v=${nudgeFaviconVersion}" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/nudge-apple-touch-icon.png" />
     <title>Nudge Offline</title>
   </head>
   <body><main><p>Nudge</p><h1>You are offline</h1><p>Reconnect to sync your daily operating loop and talk to Nudge.</p></main></body>
@@ -81,8 +96,12 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     c.header("content-type", "image/svg+xml; charset=utf-8");
     return c.body(nudgeAppIconSvg);
   });
+  app.get("/icons/nudge-app-icon.svg", wideEventFields({ routeName: "pwa.icon.nudge" }), (c) => {
+    c.header("content-type", "image/svg+xml; charset=utf-8");
+    return c.body(nudgeAppIconSvg);
+  });
 
-  app.get("/", wideEventFields({ routeName: "today" }), (c) => {
+  const appShellHandler: Handler<ObservabilityHonoEnv> = (c) => {
     return c.html(`<!doctype html>
 <html lang="en">
   <head>
@@ -94,9 +113,9 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" href="/favicon.ico?v=${nudgeFaviconVersion}" sizes="any" />
+    <link rel="icon" href="/icons/nudge-app-icon.svg?v=${nudgeFaviconVersion}" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/nudge-apple-touch-icon.png" />
     <title>Nudge Daily Operating Loop</title>
     <style>
       :root {
@@ -274,6 +293,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
       <section class="card" aria-labelledby="proposals-title">
         <h2 id="proposals-title">Agent proposals</h2>
+        <p class="summary"><a class="button secondary" href="/ask">Ask Nudge</a> <a class="button secondary" href="/review">Review inbox</a></p>
         <ul id="proposals"><li>Loading proposals...</li></ul>
         <p id="proposal-status" role="status"></p>
       </section>
@@ -396,21 +416,43 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     </script>
   </body>
 </html>`);
-  });
+  };
+
+  for (const route of [
+    "/",
+    "/ask",
+    "/chat",
+    "/review",
+    "/actions",
+    "/journey",
+    "/insights",
+    "/settings",
+  ]) {
+    app.get(
+      route,
+      wideEventFields({ routeName: route === "/" ? "today" : `spa.${route.slice(1)}` }),
+      appShellHandler,
+    );
+  }
 
   app.get("/health", wideEventFields({ routeName: "health" }), (c) => {
     const env = c.env;
+    const convexConfigured = Boolean(env.CONVEX_URL && env.CONVEX_RUNTIME_SECRET);
 
-    return c.json({
-      ok: true,
-      service: "nudge-web",
-      environment: env.ENVIRONMENT ?? "unknown",
-      version: env.APP_VERSION ?? "0.0.0",
-      bindings: {
-        dailyDigestWorkflow: Boolean(env.DAILY_DIGEST_WORKFLOW),
-        userAgentSession: Boolean(env.USER_AGENT_SESSION),
+    return c.json(
+      {
+        ok: convexConfigured,
+        service: "nudge-web",
+        environment: env.ENVIRONMENT ?? "unknown",
+        version: env.APP_VERSION ?? "0.0.0",
+        bindings: {
+          convex: convexConfigured,
+          dailyDigestWorkflow: Boolean(env.DAILY_DIGEST_WORKFLOW),
+          userAgentSession: Boolean(env.USER_AGENT_SESSION),
+        },
       },
-    });
+      convexConfigured ? 200 : 503,
+    );
   });
 
   app.get("/__test/error", wideEventFields({ routeName: "test.error" }), (c) => {
@@ -419,7 +461,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     }
 
     if (c.req.query("kind") === "transient") {
-      throw new Error("database is locked");
+      throw new Error("D1_ERROR: database is locked");
     }
     throw new Error("test failure");
   });
