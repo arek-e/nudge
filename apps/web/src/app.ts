@@ -108,7 +108,11 @@ export function createApp(options: CreateAppOptions = {}) {
     const proxyRequest = new Request(targetUrl.toString(), proxyInit);
     const response = await fetch(proxyRequest);
 
-    return new Response(response.body, response);
+    return new Response(response.body, {
+      headers: new Headers(response.headers),
+      status: response.status,
+      statusText: response.statusText,
+    });
   });
 
   registerStaticRoutes(app);
