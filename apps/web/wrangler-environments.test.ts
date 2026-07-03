@@ -15,10 +15,6 @@ describe("Nudge Worker environments", () => {
     expect(wrangler).toContain('"name": "nudge-web"');
     expect(wrangler).toContain('"ENVIRONMENT": "staging"');
     expect(wrangler).toContain('"ENVIRONMENT": "production"');
-    expect(wrangler).toContain(
-      '"CONVEX_URL": "https://abundant-retriever-130.eu-west-1.convex.cloud"',
-    );
-    expect(wrangler).toContain('"CONVEX_URL": "https://friendly-lion-904.eu-west-1.convex.cloud"');
     expect(wrangler).toContain('"database_name": "nudge-staging"');
     expect(wrangler).toContain('"database_name": "nudge-production"');
     expect(wrangler).toContain('"bucket_name": "nudge-staging-media"');
@@ -37,8 +33,6 @@ describe("Nudge Worker environments", () => {
     expect(deployScript).toContain(
       'VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud"',
     );
-    expect(deployScript).toContain("const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;");
-    expect(deployScript).toContain("`--var CONVEX_URL:${serverConvexUrl}`");
     expect(deployScript).toContain(
       'VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg"',
     );
@@ -47,5 +41,17 @@ describe("Nudge Worker environments", () => {
     );
     expect(clientEntry).toContain("import.meta.env.VITE_NUDGE_LOGO_LONG_SRC");
     expect(deployScript).toContain("VITE_CLERK_PUBLISHABLE_KEY");
+  });
+
+  test("local dev uses a config that skips the optional sandbox container", async () => {
+    const devScript = await readFile(new URL("scripts/dev-web.ts", repoRoot), "utf8");
+    const localWrangler = await readFile(new URL("wrangler.local.jsonc", webRoot), "utf8");
+
+    expect(devScript).toContain('["--config", "wrangler.local.jsonc"]');
+    expect(devScript).toContain('args.includes("--remote")');
+    expect(localWrangler).not.toContain('"containers"');
+    expect(localWrangler).not.toContain('"OKF_SANDBOX"');
+    expect(localWrangler).toContain('"USER_AGENT_SESSION"');
+    expect(localWrangler).toContain('"DAILY_DIGEST_WORKFLOW"');
   });
 });

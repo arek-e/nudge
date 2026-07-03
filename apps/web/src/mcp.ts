@@ -166,35 +166,97 @@ function createNudgeMcpServer(input: {
       description: "Create a pending proposal for user review. This never commits the proposal.",
       inputSchema: {
         body: z.string().min(1).max(10_000),
+        confidence: z.number().min(0).max(1).optional(),
         frameKey: z.string().min(1).default("current_state"),
         kind: z.enum(["clarify", "follow_up", "commit", "ignore"]),
+        nextAction: z.string().min(1).max(500).optional(),
         rationale: z.string().min(1).max(2_000),
+        reason: z.string().min(1).max(2_000).optional(),
+        sourceSignalIds: z.array(z.string().min(1)).default([]),
         title: z.string().min(1).max(200),
       },
       outputSchema: {
         proposal: proposalOutputSchema,
+        receipt: agentReceiptOutputSchema,
         requiresReview: z.literal(true),
       },
     },
-    async ({ body, frameKey, kind, rationale, title }) => {
+    async ({
+      body,
+      confidence,
+      frameKey,
+      kind,
+      nextAction,
+      rationale,
+      reason,
+      sourceSignalIds,
+      title,
+    }) => {
       const { synthesis } = await input.runEffect(
         PrimitiveWorkflows.latestSynthesis({ frameKey, user: input.user }),
       );
+      const signalIds =
+        sourceSignalIds.length > 0 ? sourceSignalIds : [...synthesis.sourceSignalIds];
+      const proposalReason = reason ?? rationale;
       const proposal = await input.runEffect(
         input.db.appendProposal({
           body,
           kind,
-          rationale,
+          rationale: proposalReason,
           synthesisId: synthesis.id,
           title,
           userId: input.user.id,
         }),
       );
+      const explanation = {
+        source: {
+          label: `${signalIds.length} signal${signalIds.length === 1 ? "" : "s"}`,
+          signalIds,
+          type: "signals",
+        },
+        reason: proposalReason,
+        confidence: confidence ?? 0.74,
+        nextAction: nextAction ?? "Review this proposal.",
+      };
+      const receiptEvent = await input.runEffect(
+        input.db.appendEvent({
+          idempotencyKey: `agent-receipt:proposal.generated:${proposal.id}`,
+          occurredAt: new Date().toISOString(),
+          payload: {
+            action: "proposal.generated",
+            changed: {
+              proposalId: proposal.id,
+              status: proposal.status,
+              title: proposal.title,
+            },
+            signalIds,
+            why: proposalReason,
+          },
+          schemaVersion: 1,
+          source: "nudge_mcp",
+          type: "agent.receipt",
+          userId: input.user.id,
+        }),
+      );
+      const receipt = {
+        id: receiptEvent.id,
+        action: "proposal.generated",
+        changed: {
+          proposalId: proposal.id,
+          status: proposal.status,
+          title: proposal.title,
+        },
+        createdAt: receiptEvent.createdAt,
+        signalIds,
+        why: proposalReason,
+      };
       const structuredContent: {
-        readonly proposal: typeof proposal;
+        readonly proposal: typeof proposal & { readonly explanation: typeof explanation };
+        readonly receipt: typeof receipt;
         readonly requiresReview: true;
       } = {
-        proposal,
+        proposal: { ...proposal, explanation },
+        receipt,
         requiresReview: true,
       };
       return {
@@ -210,6 +272,16 @@ function createNudgeMcpServer(input: {
 const proposalOutputSchema = z.object({
   body: z.string(),
   createdAt: z.string(),
+  explanation: z.object({
+    confidence: z.number(),
+    nextAction: z.string(),
+    reason: z.string(),
+    source: z.object({
+      label: z.string(),
+      signalIds: z.array(z.string()),
+      type: z.literal("signals"),
+    }),
+  }),
   id: z.string(),
   kind: z.enum(["clarify", "follow_up", "commit", "ignore"]),
   rationale: z.string(),
@@ -218,6 +290,15 @@ const proposalOutputSchema = z.object({
   title: z.string(),
   updatedAt: z.string(),
   userId: z.string(),
+});
+
+const agentReceiptOutputSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  changed: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+  signalIds: z.array(z.string()),
+  why: z.string(),
 });
 
 const okfFileUri = (path: string) => `file:///okf${path.startsWith("/") ? path : `/${path}`}`;

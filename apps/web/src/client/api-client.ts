@@ -42,9 +42,13 @@ export const apiClient: JsonifiedClient<ContractRouterClient<typeof apiContract>
 
 export async function streamConversationMessage(input: {
   readonly conversationId: string;
+  readonly events?: boolean;
   readonly message: string;
 }) {
-  const headers = await nudgeRequestHeaders({ "content-type": "application/json" });
+  const headers = await nudgeRequestHeaders({
+    ...(input.events ? { accept: "text/event-stream" } : {}),
+    "content-type": "application/json",
+  });
   const response = await fetch(
     `/api/conversations/${encodeURIComponent(input.conversationId)}/messages/stream`,
     {
@@ -58,5 +62,8 @@ export async function streamConversationMessage(input: {
     throw new Error("Could not stream conversation message");
   }
 
-  return response.body;
+  return {
+    body: response.body,
+    contentType: response.headers.get("content-type") ?? "",
+  };
 }

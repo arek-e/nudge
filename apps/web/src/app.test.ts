@@ -117,7 +117,8 @@ describe("web app", () => {
     const response = await app.request("/manifest.webmanifest", {}, env);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const manifest = await response.json();
+    expect(manifest).toMatchObject({
       name: "Nudge",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
@@ -127,8 +128,12 @@ describe("web app", () => {
         expect.objectContaining({ sizes: "512x512", src: "/icons/nudge-app-icon-512.png" }),
         expect.objectContaining({ src: "/icons/nudge-app-icon.svg" }),
       ],
-      shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
+    expect(manifest.shortcuts).toEqual([
+      expect.objectContaining({ name: "Today", url: "/" }),
+      expect.objectContaining({ name: "Ask Nudge", url: "/ask" }),
+      expect.objectContaining({ name: "Review inbox", url: "/review" }),
+    ]);
   });
 
   test("GET /icons/nudge-app-icon.svg serves the Nudge app icon", async () => {
@@ -980,6 +985,91 @@ describe("web app", () => {
     expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
+  });
+
+  test("POST /api/conversations/:conversationId/messages/stream returns progress and receipt frames", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "Stream events" });
+          return Response.json({
+            conversationId: "focus",
+            draft: {
+              confidence: 0.82,
+              signal: {
+                id: "signal-1",
+                userId: anonymousUserId,
+                type: "manual_check_in_submitted",
+                source: "nudge_agent_intake",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "Stream events" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+              proposal: {
+                id: "proposal-1",
+                userId: anonymousUserId,
+                synthesisId: "synthesis-1",
+                kind: "commit",
+                status: "pending",
+                title: "Clarify the next step",
+                body: "Choose one concrete next action.",
+                rationale: "Generated from the latest user message.",
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-12T10:00:00.000Z",
+              },
+              requiresReview: true,
+            },
+            message: "Stream events",
+            memoryResults: [],
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+            receipt: {
+              id: "receipt-1",
+              action: "proposal.generated",
+              changed: { proposalId: "proposal-1", status: "pending" },
+              createdAt: "2026-06-12T10:00:00.000Z",
+              signalIds: ["signal-1"],
+              why: "Generated from the latest user message.",
+            },
+            reply: "I drafted a reviewable next step from your message.",
+            skillsApplied: ["intake-loop"],
+            subAgentsUsed: ["loopIntakeThink"],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, accept: "text/event-stream" },
+        body: JSON.stringify({ message: "Stream events" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
+    expect(response.headers.get("content-type")).toContain("application/x-nudge-event-stream");
+    expect(body).toContain("event: progress");
+    expect(body).toContain("event: sources");
+    expect(body).toContain("event: receipt");
+    expect(body).toContain("proposal.generated");
+    expect(body).toContain("event: done");
   });
 
   test("custom integrations can append and list current user's events", async () => {

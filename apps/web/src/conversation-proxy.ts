@@ -1,5 +1,8 @@
 import { z } from "zod";
 import type { NudgeUser } from "./Services/NudgeApp";
+import { conversationMessageResponseSchema } from "./api-contract";
+
+type ConversationMessageResponse = z.infer<typeof conversationMessageResponseSchema>;
 
 export async function proxyConversationRequest<Schema extends z.ZodType>(
   agentSessions: DurableObjectNamespace,
@@ -53,7 +56,25 @@ export async function proxyConversationStream(
   conversationId: string,
   message: string,
   traceHeaders: Readonly<Record<string, string>> = {},
+  accept?: string,
 ): Promise<Response> {
+  if (accept?.includes("text/event-stream")) {
+    const response = await proxyConversationRequest(
+      agentSessions,
+      internalSecret,
+      user,
+      conversationId,
+      "/messages",
+      conversationMessageResponseSchema,
+      {
+        body: JSON.stringify({ message }),
+        method: "POST",
+      },
+      traceHeaders,
+    );
+    return conversationMessageEventStream(response);
+  }
+
   const agentId = agentSessions.idFromName(`${user.id}:${conversationId}`);
   const agent = agentSessions.get(agentId);
   const internalSignature = internalSecret
@@ -63,6 +84,7 @@ export async function proxyConversationStream(
     new Request("https://nudge.local/messages/stream", {
       body: JSON.stringify({ message }),
       headers: {
+        ...(accept ? { accept } : {}),
         "content-type": "application/json",
         ...traceHeaders,
         "x-nudge-conversation-id": conversationId,
@@ -81,6 +103,44 @@ export async function proxyConversationStream(
   }
 
   return response;
+}
+
+function conversationMessageEventStream(input: ConversationMessageResponse) {
+  const frames = [
+    sseFrame("progress", {
+      id: "read-context",
+      kind: "tool",
+      label: "Reading workspace context",
+      status: "complete",
+    }),
+    sseFrame("sources", {
+      memoryResults: input.memoryResults.map((result) => ({
+        sourceId: result.sourceId,
+        sourceType: result.sourceType,
+      })),
+      signalIds: input.draft ? [input.draft.signal.id] : [],
+    }),
+    sseFrame("progress", {
+      id: "draft-proposal",
+      kind: "tool",
+      label: "Drafting review proposal",
+      status: input.draft ? "complete" : "error",
+    }),
+    ...(input.receipt ? [sseFrame("receipt", input.receipt)] : []),
+    sseFrame("token", { text: input.reply }),
+    sseFrame("done", { ok: true }),
+  ];
+  return new Response(frames.join(""), {
+    headers: {
+      "cache-control": "no-cache",
+      "content-type": "application/x-nudge-event-stream; charset=utf-8",
+      "x-nudge-conversation-id": input.conversationId,
+    },
+  });
+}
+
+function sseFrame(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 async function signAgentRequest(secret: string, userId: string, conversationId: string) {

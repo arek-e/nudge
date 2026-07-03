@@ -18,6 +18,7 @@ export interface Env {
   CLERK_SECRET_KEY?: string;
   CONVEX_RUNTIME_SECRET?: string;
   CONVEX_URL?: string;
+  NUDGE_DB_DRIVER?: string;
   AI: Ai;
   EXTRACTION_MODEL?: string;
   THINK_MODEL: string;

@@ -55,6 +55,20 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
           url: "/",
           icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
         },
+        {
+          name: "Ask Nudge",
+          short_name: "Ask",
+          description: "Ask Nudge to read context and draft reviewable proposals.",
+          url: "/ask",
+          icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
+        {
+          name: "Review inbox",
+          short_name: "Review",
+          description: "Review proposals and recent agent receipts.",
+          url: "/review",
+          icons: [{ src: "/icons/nudge-app-icon-192.png", sizes: "192x192", type: "image/png" }],
+        },
       ],
     });
   });
@@ -87,7 +101,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     return c.body(nudgeAppIconSvg);
   });
 
-  app.get("/", wideEventFields({ routeName: "today" }), (c) => {
+  const appShellHandler: Handler<ObservabilityHonoEnv> = (c) => {
     return c.html(`<!doctype html>
 <html lang="en">
   <head>
@@ -279,6 +293,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
 
       <section class="card" aria-labelledby="proposals-title">
         <h2 id="proposals-title">Agent proposals</h2>
+        <p class="summary"><a class="button secondary" href="/ask">Ask Nudge</a> <a class="button secondary" href="/review">Review inbox</a></p>
         <ul id="proposals"><li>Loading proposals...</li></ul>
         <p id="proposal-status" role="status"></p>
       </section>
@@ -401,15 +416,34 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
     </script>
   </body>
 </html>`);
-  });
+  };
+
+  for (const route of [
+    "/",
+    "/ask",
+    "/chat",
+    "/review",
+    "/actions",
+    "/journey",
+    "/insights",
+    "/settings",
+  ]) {
+    app.get(
+      route,
+      wideEventFields({ routeName: route === "/" ? "today" : `spa.${route.slice(1)}` }),
+      appShellHandler,
+    );
+  }
 
   app.get("/health", wideEventFields({ routeName: "health" }), (c) => {
     const env = c.env;
     const convexConfigured = Boolean(env.CONVEX_URL && env.CONVEX_RUNTIME_SECRET);
+    const runtimeStoreConfigured =
+      env.NUDGE_DB_DRIVER === "d1" ? Boolean(env.DB) : convexConfigured;
 
     return c.json(
       {
-        ok: convexConfigured,
+        ok: runtimeStoreConfigured,
         service: "nudge-web",
         environment: env.ENVIRONMENT ?? "unknown",
         version: env.APP_VERSION ?? "0.0.0",
@@ -420,7 +454,7 @@ export function registerStaticRoutes(app: Hono<ObservabilityHonoEnv>) {
           userAgentSession: Boolean(env.USER_AGENT_SESSION),
         },
       },
-      convexConfigured ? 200 : 503,
+      runtimeStoreConfigured ? 200 : 503,
     );
   });
 

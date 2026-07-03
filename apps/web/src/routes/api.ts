@@ -40,18 +40,28 @@ export function registerApiRoutes(
       runWithRequestSpan(c, { ...input, name }, task);
     const streamConversationId = conversationStreamPath(c.req.path);
     if (streamConversationId && c.req.method === "POST") {
-      const input = conversationMessageInputSchema.safeParse(await c.req.json().catch(() => null));
+      const input = conversationMessageInputSchema.safeParse(
+        await c.req.raw
+          .clone()
+          .json()
+          .catch(() => null),
+      );
       if (!input.success) {
         return c.json({ error: "Invalid conversation message" }, 400);
       }
-      return proxyConversationStream(
+      const response = await proxyConversationStream(
         appServices.agentSessions,
         appServices.agentInternalSecret,
         user,
         streamConversationId,
         input.data.message,
         requestTraceHeaders(c),
+        c.req.header("accept"),
       );
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        return response;
+      }
+      return responseWithMutableHeaders(response);
     }
 
     if (c.req.path === "/api/media" && c.req.method === "POST") {
@@ -121,6 +131,14 @@ export function registerApiRoutes(
   });
 }
 
+function responseWithMutableHeaders(response: Response) {
+  return new Response(response.body, {
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 function apiRouteWideEventFields(path: string) {
   if (path.startsWith("/api/captures")) {
     return { routeName: "api.captures" };
@@ -147,6 +165,8 @@ function apiRouteWideEventFields(path: string) {
     return { routeName: "api.syntheses" };
   } else if (path.startsWith("/api/proposals")) {
     return { routeName: "api.proposals" };
+  } else if (path.startsWith("/api/review-inbox")) {
+    return { routeName: "api.review-inbox" };
   } else if (path.startsWith("/api/commitments")) {
     return { routeName: "api.commitments" };
   } else if (path.startsWith("/api/reviews")) {

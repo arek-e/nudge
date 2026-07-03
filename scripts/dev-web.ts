@@ -17,6 +17,8 @@ const ip = "0.0.0.0";
 const url = `http://${ip}:${port}`;
 const persistTo = wranglerPersistTo(repoRoot);
 const clerkVarArgs = wranglerClerkVarArgs();
+const wranglerArgs = process.argv.slice(2);
+const configArgs = wranglerLocalConfigArgs(wranglerArgs);
 const braintrustEnvFile = `${repoRoot}.env.braintrust`;
 const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
   ? ["--env-file", braintrustEnvFile]
@@ -28,6 +30,7 @@ console.log(`Nudge dev server: ${url}`);
 console.log(
   `Nudge Clerk publishable key: ${process.env.CLERK_PUBLISHABLE_KEY ? "configured" : "missing"}`,
 );
+console.log(`Nudge Wrangler config: ${configArgs.length ? configArgs[1] : "wrangler.jsonc"}`);
 console.log(`Nudge Wrangler state: ${persistTo}`);
 console.log(`Nudge local logs: ${logDir}`);
 
@@ -53,6 +56,7 @@ await run(
     "dev",
     "--cwd",
     "apps/web",
+    ...configArgs,
     "--ip",
     ip,
     "--port",
@@ -63,7 +67,7 @@ await run(
     persistTo,
     ...clerkVarArgs,
     ...braintrustEnvArgs,
-    ...process.argv.slice(2),
+    ...wranglerArgs,
   ],
   "wrangler-dev.log",
 );
@@ -95,6 +99,20 @@ function wranglerClerkVarArgs() {
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
 
   return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
+}
+
+function wranglerLocalConfigArgs(args: readonly string[]) {
+  const hasExplicitConfig = args.some(
+    (arg, index) =>
+      arg === "--config" ||
+      arg === "-c" ||
+      arg.startsWith("--config=") ||
+      args[index - 1] === "--config" ||
+      args[index - 1] === "-c",
+  );
+  const usesRemoteDev = args.includes("--remote");
+
+  return hasExplicitConfig || usesRemoteDev ? [] : ["--config", "wrangler.local.jsonc"];
 }
 
 async function tee(
