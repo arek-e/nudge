@@ -111,6 +111,9 @@ jobs:
       - name: Build Raycast extension
         run: bun run raycast:build
 
+      - name: Prepare Raycast release package
+        run: bun scripts/prepare-raycast-release.ts
+
       - name: Collect release assets
         shell: bash
         run: |
@@ -119,13 +122,8 @@ jobs:
           cp apps/desktop/release/*.zip release-assets/
           cp apps/desktop/release/*.yml release-assets/
           cp apps/desktop/release/*.blockmap release-assets/
-          git archive --format zip --output "release-assets/Nudge-Raycast-extension-${{ steps.release.outputs.tag }}.zip" HEAD \
-            apps/raycast \
-            packages/surface \
-            package.json \
-            bun.lock \
-            tsconfig.base.json \
-            tsconfig.json
+          raycast_asset="$GITHUB_WORKSPACE/release-assets/Nudge-Raycast-build-${{ steps.release.outputs.tag }}.zip"
+          (cd apps/raycast/dist && zip -qry "$raycast_asset" .)
 
       - name: Upload GitHub Release assets
         uses: softprops/action-gh-release@v2
