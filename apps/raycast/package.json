@@ -9,7 +9,7 @@
   "author": "teampitch",
   "type": "module",
   "scripts": {
-    "build": "ray build",
+    "build": "ray build -e dist -o dist",
     "dev": "ray develop",
     "publish": "ray publish",
     "test": "bun test ./src",

@@ -51,8 +51,9 @@ bun install
 bun run raycast:dev
 ```
 
-Tagged GitHub Releases also upload `Nudge-Raycast-extension-<tag>.zip`.
-Publish with `bun run raycast:publish` when the Store listing is ready.
+Tagged GitHub Releases also upload `Nudge-Raycast-build-<tag>.zip` as an
+internal compiled QA artifact. It is not a one-click installer. Publish with
+`bun run raycast:publish` when the Store or private organization listing is ready.
 
 ### iOS
 

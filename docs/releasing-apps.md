@@ -9,13 +9,13 @@ Each tagged app release uploads:
 
 - `Nudge-<version>-universal.dmg`
 - `Nudge-<version>-universal.zip`
-- `Nudge-Raycast-extension-<tag>.zip`
+- `Nudge-Raycast-build-<tag>.zip`
 
 The macOS artifacts are built from `apps/desktop` with Electron Builder. The
-Raycast extension ZIP contains the Raycast package plus the shared
-`packages/surface` dependency. The workflow runs `ray build` before creating the
-ZIP so the uploaded source bundle has already passed Raycast's production build
-validation.
+Raycast build ZIP is built from `apps/raycast/dist` after `ray build -e dist`
+and contains the compiled commands, `package.json`, assets, and a README. It is
+an internal QA artifact and does not include TypeScript source, tests, or source
+maps.
 
 ## Required GitHub Secrets
 
@@ -61,6 +61,11 @@ The public Raycast Store listing is not live yet. Local development install:
 bun install
 bun run raycast:dev
 ```
+
+Tagged GitHub Releases upload `Nudge-Raycast-build-<tag>.zip` as an internal QA
+artifact. It is not a normal double-click installer, and it is not the supported
+local install path because Raycast development mode expects the source
+workspace.
 
 Publish through Raycast when the extension is ready:
 
