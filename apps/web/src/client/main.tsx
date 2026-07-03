@@ -31,6 +31,7 @@ import {
 } from "@nudge/ui";
 import { api } from "../../../../convex/_generated/api";
 import { apiClient, setSessionTokenResolver, streamConversationMessage } from "./api-client";
+import { QuickCaptureSurface } from "./QuickCaptureSurface";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
@@ -72,6 +73,11 @@ const reviewRoute = createRoute({
   path: "/review",
   component: ReviewScreen,
 });
+const quickCaptureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/quick-capture",
+  component: QuickCaptureScreen,
+});
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -79,7 +85,13 @@ const settingsRoute = createRoute({
 });
 
 const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, askRoute, reviewRoute, settingsRoute]),
+  routeTree: rootRoute.addChildren([
+    indexRoute,
+    askRoute,
+    reviewRoute,
+    quickCaptureRoute,
+    settingsRoute,
+  ]),
 });
 
 declare module "@tanstack/react-router" {
@@ -1124,6 +1136,59 @@ function NewNoteComposer() {
       onBodyTextChange={setBodyText}
       onChange={setColor}
       onSubmit={() => createNote.mutate()}
+    />
+  );
+}
+
+function QuickCaptureScreen() {
+  const [note, setNote] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const closeQuickCapture = async () => {
+    const bridge = window.nudgeDesktopQuickCapture;
+    if (bridge) {
+      await bridge.close();
+      return;
+    }
+    window.close();
+  };
+  const submitQuickCapture = useMutation({
+    mutationFn: async () => {
+      const value = note.trim();
+      if (!value) throw new Error("Write a note first.");
+      return await apiClient.quickCaptures.submit({
+        idempotencyKey: `quick-capture:${crypto.randomUUID()}`,
+        note: value,
+      });
+    },
+    onError: (error) => {
+      setStatusMessage(errorMessageFrom(error, "Capture failed."));
+    },
+    onSuccess: (result) => {
+      setNote("");
+      setStatusMessage(result.processingStatus === "drafted" ? "Drafted for review" : "Captured");
+      const bridge = window.nudgeDesktopQuickCapture;
+      if (bridge) void bridge.submitted();
+    },
+  });
+
+  useEffect(() => {
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") void closeQuickCapture();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  return (
+    <QuickCaptureSurface
+      disabled={submitQuickCapture.isPending}
+      note={note}
+      statusMessage={statusMessage}
+      onClose={() => {
+        void closeQuickCapture();
+      }}
+      onNoteChange={setNote}
+      onSubmit={() => submitQuickCapture.mutate()}
     />
   );
 }

@@ -136,6 +136,10 @@ describe("Desktop app", () => {
 
     expect(mainSource).toContain("contextIsolation: true");
     expect(mainSource).toContain("nodeIntegration: false");
+    expect(mainSource).toContain("globalShortcut.register");
+    expect(mainSource).toContain('const quickCaptureShortcut = "CommandOrControl+Shift+N"');
+    expect(mainSource).toContain('title: "Quick Capture"');
+    expect(mainSource).toContain('desktopWebAppRouteUrl("/quick-capture")');
     expect(mainSource).toContain(
       "additionalArguments: [`--nudge-app-version=${app.getVersion()}`]",
     );
@@ -146,8 +150,11 @@ describe("Desktop app", () => {
     expect(mainSource).toContain('ipcMain.handle("nudge:update-check"');
     expect(mainSource).toContain('ipcMain.handle("nudge:update-download"');
     expect(mainSource).toContain('ipcMain.handle("nudge:update-install"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:quick-capture-close"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:quick-capture-submitted"');
     expect(mainSource).toContain('app.on("open-url"');
     expect(mainSource).toContain('app.on("second-instance"');
+    expect(mainSource).toContain('app.on("will-quit"');
     expect(mainSource).toContain("desktopWebAppUrlForAuthTicket");
     expect(mainSource).toContain("makeDesktopUpdatesLayer");
     expect(mainSource).toContain("resolveDesktopAutoUpdatesEnabled");
@@ -165,6 +172,9 @@ describe("Desktop app", () => {
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-check")');
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-download")');
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-install")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:quick-capture-close")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:quick-capture-submitted")');
+    expect(preloadSource).toContain("nudgeDesktopQuickCapture");
     expect(preloadSource).toContain('ipcRenderer.on("nudge:update-state"');
     expect(preloadSource).toContain("contextBridge.exposeInMainWorld");
   });

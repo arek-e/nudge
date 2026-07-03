@@ -540,6 +540,22 @@ export const voiceLogResponseSchema = z.object({
   route: voiceLogRouteSchema,
   spokenResponse: z.string(),
 });
+const quickCaptureInputSchema = z.object({
+  idempotencyKey: z.string().min(1).max(256).optional(),
+  note: z.string().trim().min(1).max(5_000),
+  occurredAt: z.string().datetime().optional(),
+});
+export const quickCaptureResponseSchema = z.object({
+  capture: eventRecordSchema,
+  draft: z
+    .object({
+      confidence: z.number().min(0).max(1),
+      proposal: proposalRecordSchema,
+      requiresReview: z.literal(true),
+    })
+    .nullable(),
+  processingStatus: z.enum(["captured", "drafted"]),
+});
 
 export const apiContract = {
   actions: {
@@ -594,6 +610,12 @@ export const apiContract = {
       .route({ method: "POST", path: "/captures" })
       .input(eventInputSchema)
       .output(eventRecordSchema),
+  },
+  quickCaptures: {
+    submit: oc
+      .route({ method: "POST", path: "/quick-captures" })
+      .input(quickCaptureInputSchema)
+      .output(quickCaptureResponseSchema),
   },
   calendar: {
     days: oc

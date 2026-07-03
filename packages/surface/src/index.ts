@@ -103,6 +103,19 @@ export interface SurfaceActionStatusInput {
   readonly status: SurfaceActionReviewStatus;
 }
 
+export interface SurfaceProposalRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly synthesisId: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly title: string;
+  readonly body: string;
+  readonly rationale: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface SurfaceJournalDocument {
   readonly id: string;
   readonly userId: string;
@@ -180,6 +193,22 @@ export interface SurfaceRefreshContext {
   readonly signals: ReadonlyArray<SurfaceEventRecord>;
 }
 
+export interface SurfaceQuickCaptureInput {
+  readonly note: string;
+  readonly idempotencyKey?: string;
+  readonly occurredAt?: string;
+}
+
+export interface SurfaceQuickCaptureResponse {
+  readonly capture: SurfaceEventRecord;
+  readonly draft: {
+    readonly confidence: number;
+    readonly proposal: SurfaceProposalRecord;
+    readonly requiresReview: true;
+  } | null;
+  readonly processingStatus: "captured" | "drafted";
+}
+
 export interface SurfaceEngineClient {
   readonly appendManualCapture: (input: {
     readonly note: string;
@@ -192,6 +221,9 @@ export interface SurfaceEngineClient {
   readonly sendConversationMessage: (
     input: SurfaceConversationMessageInput,
   ) => Promise<SurfaceConversationMessageResponse>;
+  readonly submitQuickCapture: (
+    input: SurfaceQuickCaptureInput,
+  ) => Promise<SurfaceQuickCaptureResponse>;
   readonly updateActionStatus: (input: SurfaceActionStatusInput) => Promise<SurfaceActionItem>;
 }
 
@@ -489,6 +521,68 @@ function actionStatusResponseFrom(value: unknown) {
   return actionItemFrom(action);
 }
 
+function proposalRecordFrom(value: unknown): SurfaceProposalRecord {
+  const id = readStringProperty(value, "id");
+  const userId = readStringProperty(value, "userId");
+  const synthesisId = readStringProperty(value, "synthesisId");
+  const kind = readStringProperty(value, "kind");
+  const status = readStringProperty(value, "status");
+  const title = readStringProperty(value, "title");
+  const body = readStringProperty(value, "body");
+  const rationale = readStringProperty(value, "rationale");
+  const createdAt = readStringProperty(value, "createdAt");
+  const updatedAt = readStringProperty(value, "updatedAt");
+  if (
+    !id ||
+    !userId ||
+    !synthesisId ||
+    !kind ||
+    !status ||
+    !title ||
+    !body ||
+    !rationale ||
+    !createdAt ||
+    !updatedAt
+  ) {
+    throw new Error("Invalid Nudge Engine proposal response");
+  }
+  return { body, createdAt, id, kind, rationale, status, synthesisId, title, updatedAt, userId };
+}
+
+function quickCaptureDraftFrom(value: unknown): SurfaceQuickCaptureResponse["draft"] | undefined {
+  if (value === null) return null;
+  if (typeof value !== "object" || value === null) return undefined;
+  const confidence = readNumberProperty(value, "confidence");
+  const proposal = readObjectProperty(value, "proposal");
+  const requiresReview = readObjectProperty(value, "requiresReview");
+  if (confidence === undefined || proposal === undefined || requiresReview !== true) {
+    return undefined;
+  }
+  return {
+    confidence,
+    proposal: proposalRecordFrom(proposal),
+    requiresReview: true,
+  };
+}
+
+function quickCaptureResponseFrom(value: unknown): SurfaceQuickCaptureResponse {
+  const capture = readObjectProperty(value, "capture");
+  const draft = quickCaptureDraftFrom(readObjectProperty(value, "draft"));
+  const processingStatus = readStringProperty(value, "processingStatus");
+  if (
+    capture === undefined ||
+    draft === undefined ||
+    (processingStatus !== "captured" && processingStatus !== "drafted")
+  ) {
+    throw new Error("Invalid Nudge Engine quick capture response");
+  }
+  return {
+    capture: eventRecordFrom(capture),
+    draft,
+    processingStatus,
+  };
+}
+
 function journalDocumentFrom(value: unknown): SurfaceJournalDocument {
   const id = readStringProperty(value, "id");
   const userId = readStringProperty(value, "userId");
@@ -699,6 +793,24 @@ export function createSurfaceEngineClient(
             bodyText: journalInput.bodyText,
             localDate: journalInput.localDate,
             title: journalInput.title,
+          },
+          method: "POST",
+        }),
+      );
+    },
+    submitQuickCapture: async (quickCaptureInput) => {
+      const note = quickCaptureInput.note.trim();
+      if (!note) throw new Error("Write a note first.");
+      return quickCaptureResponseFrom(
+        await requestJson("/api/quick-captures", {
+          body: {
+            ...(quickCaptureInput.idempotencyKey !== undefined
+              ? { idempotencyKey: quickCaptureInput.idempotencyKey }
+              : {}),
+            note,
+            ...(quickCaptureInput.occurredAt !== undefined
+              ? { occurredAt: quickCaptureInput.occurredAt }
+              : {}),
           },
           method: "POST",
         }),

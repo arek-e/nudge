@@ -224,6 +224,20 @@ function toReceiptResponse(event: EventRecord) {
   };
 }
 
+function quickCaptureSourceFromClient(value: string | undefined) {
+  switch (value) {
+    case "desktop":
+      return "desktop_app";
+    case "ios":
+      return "ios_app";
+    case "raycast":
+      return "raycast_extension";
+    case "web":
+    default:
+      return "web_app";
+  }
+}
+
 function listReceiptResponses(exported: Pick<UserDataExport, "events">, limit: number) {
   return exported.events
     .map((event, index) => ({ event, index }))
@@ -272,6 +286,7 @@ export interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
   readonly aiModel: string;
+  readonly clientSurface?: string;
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
   readonly getOkfSandbox: () => Promise<OkfSandbox | null>;
@@ -442,6 +457,32 @@ export const apiRouter = api.router({
           ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
         }),
       );
+    }),
+  },
+  quickCaptures: {
+    submit: api.quickCaptures.submit.handler(async ({ context, input }) => {
+      const result = await runWorkflow(
+        context.runEffect,
+        PrimitiveWorkflows.draftLoopIntake({
+          conversationId: "quick-capture",
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+          message: input.note,
+          ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt } : {}),
+          source: quickCaptureSourceFromClient(context.clientSurface),
+          user: context.user,
+        }),
+      );
+      return {
+        capture: result.signal,
+        draft: result.draft
+          ? {
+              confidence: result.draft.confidence,
+              proposal: result.draft.proposal,
+              requiresReview: true,
+            }
+          : null,
+        processingStatus: result.draft ? "drafted" : "captured",
+      };
     }),
   },
   dataExport: api.dataExport.handler(async ({ context }) => {

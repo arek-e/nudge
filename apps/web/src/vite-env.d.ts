@@ -39,6 +39,12 @@ interface NudgeDesktopBridge {
   openExternalAuth(url: string): Promise<{ readonly ok: boolean }>;
 }
 
+interface NudgeDesktopQuickCaptureBridge {
+  close(): Promise<{ readonly ok: boolean }>;
+  submitted(): Promise<{ readonly ok: boolean }>;
+}
+
 interface Window {
   readonly nudgeDesktop?: NudgeDesktopBridge;
+  readonly nudgeDesktopQuickCapture?: NudgeDesktopQuickCaptureBridge;
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, Notification, shell } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,10 +27,12 @@ const currentFile = fileURLToPath(import.meta.url);
 const currentDirectory = dirname(currentFile);
 const desktopUpdateStartupDelayMs = 10_000;
 const desktopUpdatePollIntervalMs = 4 * 60 * 60 * 1000;
+const quickCaptureShortcut = "CommandOrControl+Shift+N";
 
 type DesktopUpdatesRuntime = ManagedRuntime.ManagedRuntime<DesktopUpdates, never>;
 
 let mainWindow: BrowserWindow | undefined;
+let quickCaptureWindow: BrowserWindow | undefined;
 let pendingDesktopAuthCallbackUrl: string | undefined;
 let desktopUpdatesRuntime: DesktopUpdatesRuntime | undefined;
 let desktopUpdateStartupTimer: NodeJS.Timeout | undefined;
@@ -77,6 +79,55 @@ function createMainWindow() {
   return browserWindow;
 }
 
+function createQuickCaptureWindow() {
+  const browserWindow = new BrowserWindow({
+    alwaysOnTop: true,
+    backgroundColor: "#eef1f5",
+    frame: false,
+    height: 240,
+    maxHeight: 260,
+    maxWidth: 560,
+    minHeight: 220,
+    minWidth: 480,
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    title: "Quick Capture",
+    webPreferences: {
+      additionalArguments: [`--nudge-app-version=${app.getVersion()}`],
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: join(currentDirectory, "preload.cjs"),
+    },
+    width: 520,
+  });
+  quickCaptureWindow = browserWindow;
+
+  browserWindow.on("blur", () => {
+    if (!browserWindow.webContents.isDevToolsOpened()) browserWindow.hide();
+  });
+
+  browserWindow.on("closed", () => {
+    if (quickCaptureWindow === browserWindow) quickCaptureWindow = undefined;
+  });
+
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (canOpenExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  void browserWindow.loadURL(desktopWebAppRouteUrl("/quick-capture"));
+  return browserWindow;
+}
+
+function desktopWebAppRouteUrl(pathname: string) {
+  const url = new URL(resolveNudgeWebAppUrl(process.env));
+  url.pathname = pathname;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 function registerDesktopAuthProtocolClient() {
   if (process.defaultApp) {
     const appEntryPoint = process.argv[1];
@@ -96,6 +147,41 @@ function focusWindow(window: BrowserWindow) {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+}
+
+function focusQuickCaptureWindow(window: BrowserWindow) {
+  if (window.isDestroyed()) return;
+  window.center();
+  window.show();
+  window.focus();
+  window.webContents.focus();
+}
+
+function openQuickCaptureWindow() {
+  const window = quickCaptureWindow ?? createQuickCaptureWindow();
+  if (window.isVisible()) {
+    window.hide();
+    return;
+  }
+
+  if (window.webContents.isLoading()) {
+    window.once("ready-to-show", () => focusQuickCaptureWindow(window));
+    return;
+  }
+  focusQuickCaptureWindow(window);
+}
+
+function hideQuickCaptureWindow() {
+  const window = quickCaptureWindow;
+  if (!window || window.isDestroyed()) return;
+  window.hide();
+}
+
+function registerQuickCaptureShortcut() {
+  const registered = globalShortcut.register(quickCaptureShortcut, openQuickCaptureWindow);
+  if (!registered) {
+    console.warn(`[quick-capture] failed to register ${quickCaptureShortcut}`);
+  }
 }
 
 function handleDesktopAuthCallbackUrl(value: string) {
@@ -309,6 +395,19 @@ ipcMain.handle("nudge:update-install", async () =>
   runDesktopUpdatesAction((updates) => updates.install()),
 );
 
+ipcMain.handle("nudge:quick-capture-close", () => {
+  hideQuickCaptureWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("nudge:quick-capture-submitted", () => {
+  hideQuickCaptureWindow();
+  if (Notification.isSupported()) {
+    new Notification({ body: "Captured in Nudge.", title: "Quick Capture" }).show();
+  }
+  return { ok: true };
+});
+
 app.on("open-url", (event, url) => {
   event.preventDefault();
   handleDesktopAuthCallbackUrl(url);
@@ -332,6 +431,7 @@ if (!singleInstanceLock) {
     registerDesktopAuthProtocolClient();
     setupDesktopUpdates();
     createMainWindow();
+    registerQuickCaptureShortcut();
 
     if (pendingDesktopAuthCallbackUrl) {
       const callbackUrl = pendingDesktopAuthCallbackUrl;
@@ -346,6 +446,10 @@ if (!singleInstanceLock) {
 }
 
 app.on("before-quit", clearDesktopUpdateTimers);
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

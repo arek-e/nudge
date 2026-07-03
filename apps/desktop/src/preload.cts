@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld("nudgeDesktop", {
   surface: "desktop",
 });
 
+contextBridge.exposeInMainWorld("nudgeDesktopQuickCapture", {
+  close: () => ipcRenderer.invoke("nudge:quick-capture-close"),
+  submitted: () => ipcRenderer.invoke("nudge:quick-capture-submitted"),
+});
+
 function desktopAppVersionFromArguments() {
   const argument = process.argv.find((value) => value.startsWith(desktopAppVersionArgumentPrefix));
   const version = argument?.slice(desktopAppVersionArgumentPrefix.length).trim();
