@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import ts from "typescript";
 
 interface Finding {
@@ -11,12 +11,14 @@ interface Finding {
 
 const sourceRoots = ["apps", "packages"];
 const ignoredDirectories = new Set([".tsbuild", ".wrangler", "build", "dist", "node_modules"]);
+const ignoredFiles = new Set(["routeTree.gen.ts"]);
 
 const findings: Finding[] = [];
 
 function isRuntimeSourceFile(path: string) {
   return (
     (path.endsWith(".ts") || path.endsWith(".tsx")) &&
+    !ignoredFiles.has(basename(path)) &&
     !path.endsWith(".d.ts") &&
     !path.endsWith(".test.ts") &&
     !path.endsWith(".test.tsx")
