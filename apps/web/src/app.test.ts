@@ -1531,8 +1531,8 @@ describe("web app", () => {
     expect(await search.json()).toEqual({
       results: [
         {
-          path: "/daily/2026-06-29.md",
-          snippet: "OKF should be mounted into the sandbox for grep and cat.",
+          path: "/user/profile.md",
+          snippet: "* June 29: OKF should be mounted into the sandbox for grep and cat.",
         },
       ],
     });
@@ -1737,9 +1737,9 @@ describe("web app", () => {
           results: [
             {
               mimeType: "text/markdown",
-              path: "/daily/2026-07-02.md",
-              snippet: "MCP should expose the same OKF workspace boundary.",
-              uri: "file:///okf/daily/2026-07-02.md",
+              path: "/user/profile.md",
+              snippet: "* July 2: MCP should expose the same OKF workspace boundary.",
+              uri: "file:///okf/user/profile.md",
             },
           ],
         },
@@ -1750,7 +1750,7 @@ describe("web app", () => {
         content: expect.arrayContaining([
           expect.objectContaining({
             type: "resource_link",
-            uri: "file:///okf/daily/2026-07-02.md",
+            uri: "file:///okf/user/profile.md",
           }),
         ]),
       },

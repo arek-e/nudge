@@ -3,20 +3,16 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { implement, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Effect } from "effect";
-import {
-  Db,
-  type AgentRunRecord,
-  type DbService,
-  type EventRecord,
-  type JournalDocumentRecord,
-} from "@nudge/db";
+import { Db, type DbService, type EventRecord, type JournalDocumentRecord } from "@nudge/db";
 import {
   buildOkfProjection,
   listOkfDirectory,
   MemoryIndex,
+  NoteAnalysisWorkflows,
   PrimitiveWorkflows,
   readOkfFile,
   searchOkfFiles,
+  type SaveJournalCaptureInput,
 } from "@nudge/effect-services";
 import type { RequestSession } from "./request-context";
 import type { RunEffect } from "./Services/NudgeApp";
@@ -33,6 +29,10 @@ import { smokeTestOkfProjection, type OkfSandbox } from "./okf-sandbox";
 function readSandboxSmokeError(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return "OKF sandbox smoke failed";
+}
+
+function errorFromUnknown(error: unknown, fallbackMessage: string) {
+  return error instanceof Error ? error : new Error(fallbackMessage);
 }
 
 const reasoningVoiceLogPrefixes = [
@@ -161,31 +161,14 @@ export const apiRouter = api.router({
       return { actions: [...actions], ...(latestRuns[0] ? { latestRun: latestRuns[0] } : {}) };
     }),
     updateStatus: api.actions.updateStatus.handler(async ({ context, input }) => {
-      const action = await context.runEffect(
-        context.db.updateExtractedItemStatus({
+      const reviewed = await context.runEffect(
+        NoteAnalysisWorkflows.reviewExtractedItemStatus({
           itemId: input.itemId,
           status: input.status,
           userId: context.user.id,
         }),
       );
-      await context.runEffect(
-        context.db.recordItemEvent({
-          eventType:
-            input.status === "completed"
-              ? "completed"
-              : input.status === "dismissed"
-                ? "dismissed"
-                : input.status === "archived"
-                  ? "archived"
-                  : input.status === "accepted"
-                    ? "accepted"
-                    : "edited",
-          itemId: action.id,
-          payload: { status: input.status },
-          userId: context.user.id,
-        }),
-      );
-      return { action };
+      return { action: reviewed.action };
     }),
   },
   agentRuns: {
@@ -426,146 +409,34 @@ export const apiRouter = api.router({
       return { document };
     }),
     save: api.journal.save.handler(async ({ context, input }) => {
+      const indexPendingMemory = dailyNoteMemoryIndexer(context);
       return runApiEffect(
         context,
         Effect.gen(function* () {
-          yield* context.db.ensureUser(context.user);
-          const result = yield* context.db.upsertJournalDocument({
+          const saveResult = yield* NoteAnalysisWorkflows.saveJournalCapture({
+            aiModel: context.aiModel,
             bodyText: input.bodyText,
             ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+            ...(indexPendingMemory ? { indexPendingMemory } : {}),
             localDate: input.localDate,
+            ...(context.traceHeaders?.["x-request-id"] !== undefined
+              ? { requestId: context.traceHeaders["x-request-id"] }
+              : {}),
+            scheduleAnalysis: dailyNoteAnalysisScheduler(context),
             title: input.title,
-            userId: context.user.id,
+            ...(context.traceHeaders?.traceparent !== undefined
+              ? { traceparent: context.traceHeaders.traceparent }
+              : {}),
+            user: context.user,
           });
-          const noteResult = yield* context.db.upsertDailyNote({
-            bodyText: input.bodyText,
-            ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
-            localDate: input.localDate,
-            title: input.title,
-            userId: context.user.id,
-          });
-          let analysisRun: AgentRunRecord | null = null;
-          if (result.revision.changedText.trim().length > 0) {
-            analysisRun = yield* context.db.startAgentRun({
-              metadata: {
-                localDate: input.localDate,
-                provider: "cloudflare-think",
-              },
-              model: context.aiModel,
-              sourceId: noteResult.revision.id,
-              sourceType: "note_revision",
-              status: "queued",
-              triggerType: "note_inactivity",
-              userId: context.user.id,
-            });
-            const queuedRun = analysisRun;
-            yield* Effect.promise(() =>
-              context.recordSpan(
-                "daily_note.analysis_workflow.create",
-                {
-                  attributes: {
-                    "nudge.ai.source_type": "note_revision",
-                    "nudge.ai.system": "cloudflare-think",
-                    "workflow.name": "daily-note-analysis",
-                  },
-                  kind: "client",
-                },
-                () =>
-                  context.dailyAnalysisWorkflow.create({
-                    id: `daily-note-analysis-${noteResult.revision.id}`,
-                    params: {
-                      changedText: result.revision.changedText,
-                      documentId: result.document.id,
-                      kind: "daily-note-analysis",
-                      localDate: result.document.localDate,
-                      noteId: noteResult.note.id,
-                      revisionId: noteResult.revision.id,
-                      runId: queuedRun.id,
-                      requestId: context.traceHeaders?.["x-request-id"],
-                      title: result.document.title,
-                      traceparent: context.traceHeaders?.traceparent,
-                      userDisplayName: context.user.displayName,
-                      userId: context.user.id,
-                      workflowVersion: 1,
-                    },
-                  }),
-              ),
-            );
-            yield* context.db.upsertMemoryDocument({
-              bodyText: noteResult.note.bodyText,
-              localDate: noteResult.note.localDate,
-              sourceId: noteResult.note.id,
-              sourceType: "daily_note",
-              title: noteResult.note.title,
-              userId: context.user.id,
-            });
-            yield* context.db.upsertMemoryDocument({
-              bodyText: noteResult.revision.changedText,
-              localDate: noteResult.note.localDate,
-              sourceId: noteResult.revision.id,
-              sourceType: "note_revision",
-              title: `${noteResult.note.title} delta`,
-              userId: context.user.id,
-            });
-            yield* context.db.upsertMemoryDocument({
-              bodyText: result.revision.changedText,
-              localDate: result.document.localDate,
-              sourceId: result.revision.id,
-              sourceType: "journal_revision",
-              title: result.document.title,
-              userId: context.user.id,
-            });
-            const turbopuffer = context.turbopuffer;
-            if (turbopuffer) {
-              yield* Effect.promise(() =>
-                context.recordSpan(
-                  "memory.index_pending",
-                  {
-                    attributes: {
-                      "nudge.memory_index.provider": "turbopuffer",
-                      "turbopuffer.region": turbopuffer.region,
-                    },
-                    kind: "client",
-                  },
-                  async () => {
-                    await runMemoryIndex(
-                      context.runEffect,
-                      turbopuffer,
-                      Effect.gen(function* () {
-                        const memoryIndex = yield* MemoryIndex;
-                        return yield* memoryIndex.indexPending({ limit: 20, user: context.user });
-                      }),
-                    ).catch((error: unknown) => {
-                      const safeError =
-                        error instanceof Error ? error : new Error("Memory index failed");
-                      console.warn(
-                        JSON.stringify({
-                          event: "memory_index_failed",
-                          logKind: "wide_event",
-                          provider: "turbopuffer",
-                          region: turbopuffer.region,
-                          errorType: safeError.name,
-                        }),
-                      );
-                    });
-                  },
-                ),
-              );
-            }
-          }
 
           return apiEffectResult(
-            { ...result, ...(analysisRun ? { analysisRun } : {}) },
-            analysisRun
-              ? {
-                  aiErrorCode: null,
-                  aiModel: context.aiModel,
-                  aiRunId: analysisRun.id,
-                  aiSourceType: "note_revision",
-                  aiSystem: "cloudflare-think",
-                  noteLocalDate: input.localDate,
-                }
-              : undefined,
+            {
+              document: saveResult.document,
+              revision: saveResult.revision,
+              ...(saveResult.analysisRun ? { analysisRun: saveResult.analysisRun } : {}),
+            },
+            saveResult.wideEvent,
           );
         }),
       );
@@ -876,6 +747,82 @@ async function runApiEffect<A, E>(
 
 function runWorkflow<A, E>(runEffect: RunEffect, workflow: Effect.Effect<A, E, Db>) {
   return runEffect(workflow);
+}
+
+function dailyNoteAnalysisScheduler(
+  context: ApiContext,
+): NonNullable<SaveJournalCaptureInput["scheduleAnalysis"]> {
+  return (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        await context.recordSpan(
+          "daily_note.analysis_workflow.create",
+          {
+            attributes: {
+              "nudge.ai.source_type": "note_revision",
+              "nudge.ai.system": "cloudflare-think",
+              "workflow.name": "daily-note-analysis",
+            },
+            kind: "client",
+          },
+          async () => {
+            await context.dailyAnalysisWorkflow.create({
+              id: `daily-note-analysis-${input.params.revisionId}`,
+              params: input.params,
+            });
+          },
+        );
+      },
+      catch: (error) => errorFromUnknown(error, "Daily note analysis scheduling failed"),
+    });
+}
+
+function dailyNoteMemoryIndexer(
+  context: ApiContext,
+): SaveJournalCaptureInput["indexPendingMemory"] | undefined {
+  const turbopuffer = context.turbopuffer;
+  if (!turbopuffer) return undefined;
+
+  return (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        await context.recordSpan(
+          "memory.index_pending",
+          {
+            attributes: {
+              "nudge.memory_index.provider": "turbopuffer",
+              "turbopuffer.region": turbopuffer.region,
+            },
+            kind: "client",
+          },
+          async () => {
+            await runMemoryIndex(
+              context.runEffect,
+              turbopuffer,
+              Effect.gen(function* () {
+                const memoryIndex = yield* MemoryIndex;
+                return yield* memoryIndex.indexPending({
+                  limit: input.limit,
+                  user: input.user,
+                });
+              }),
+            ).catch((error: unknown) => {
+              const safeError = errorFromUnknown(error, "Memory index failed");
+              console.warn(
+                JSON.stringify({
+                  event: "memory_index_failed",
+                  logKind: "wide_event",
+                  provider: "turbopuffer",
+                  region: turbopuffer.region,
+                  errorType: safeError.name,
+                }),
+              );
+            });
+          },
+        );
+      },
+      catch: (error) => errorFromUnknown(error, "Daily note memory indexing failed"),
+    });
 }
 
 function runMemoryIndex<A, E>(

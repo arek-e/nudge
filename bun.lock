@@ -26,6 +26,14 @@
         "@cloudflare/sandbox": "catalog:",
         "@cloudflare/think": "catalog:",
         "@modelcontextprotocol/sdk": "catalog:",
+        "@nudge/db": "workspace:*",
+        "@nudge/db-convex": "workspace:*",
+        "@nudge/domain": "workspace:*",
+        "@nudge/effect-services": "workspace:*",
+        "@nudge/evals": "workspace:*",
+        "@nudge/observability": "workspace:*",
+        "@nudge/surface": "workspace:*",
+        "@nudge/ui": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/openapi": "catalog:",
@@ -34,13 +42,6 @@
         "@orpc/zod": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@tanstack/react-router": "catalog:",
-        "@nudge/db": "workspace:*",
-        "@nudge/db-convex": "workspace:*",
-        "@nudge/domain": "workspace:*",
-        "@nudge/effect-services": "workspace:*",
-        "@nudge/evals": "workspace:*",
-        "@nudge/observability": "workspace:*",
-        "@nudge/ui": "workspace:*",
         "agents": "catalog:",
         "ai": "catalog:",
         "braintrust": "3.20.0",
@@ -108,6 +109,9 @@
         "zod": "catalog:",
       },
     },
+    "packages/surface": {
+      "name": "@nudge/surface",
+    },
     "packages/ui": {
       "name": "@nudge/ui",
       "dependencies": {
@@ -122,6 +126,7 @@
       },
       "devDependencies": {
         "@types/react": "catalog:",
+        "react-dom": "catalog:",
       },
     },
   },
@@ -612,6 +617,24 @@
 
     "@nodable/entities": ["@nodable/entities@2.2.0", "", {}, "sha512-9uGyhaQavEUMC8AIddIjau4NsnsXhou+j5sBAGojCM1oxmQpVKTWR/9JxABD6UAv12vpIms55fPZKFQEhG6uBg=="],
 
+    "@nudge/db": ["@nudge/db@workspace:packages/db"],
+
+    "@nudge/db-convex": ["@nudge/db-convex@workspace:packages/db-convex"],
+
+    "@nudge/domain": ["@nudge/domain@workspace:packages/domain"],
+
+    "@nudge/effect-services": ["@nudge/effect-services@workspace:packages/effect-services"],
+
+    "@nudge/evals": ["@nudge/evals@workspace:packages/evals"],
+
+    "@nudge/observability": ["@nudge/observability@workspace:packages/observability"],
+
+    "@nudge/surface": ["@nudge/surface@workspace:packages/surface"],
+
+    "@nudge/ui": ["@nudge/ui@workspace:packages/ui"],
+
+    "@nudge/web": ["@nudge/web@workspace:apps/web"],
+
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
     "@orpc/client": ["@orpc/client@1.14.6", "", { "dependencies": { "@orpc/shared": "1.14.6", "@orpc/standard-server": "1.14.6", "@orpc/standard-server-fetch": "1.14.6", "@orpc/standard-server-peer": "1.14.6" } }, "sha512-Y03NcTtmEJdxcqkKBkdGxqe1IHVpD9IorshG4PaTnz9dQIW+RYI8anRo7o0IlbBlzBICN+Ubo1rnw6bpkhagCQ=="],
@@ -959,22 +982,6 @@
     "@vercel/functions": ["@vercel/functions@1.6.0", "", { "peerDependencies": { "@aws-sdk/credential-provider-web-identity": "*" }, "optionalPeers": ["@aws-sdk/credential-provider-web-identity"] }, "sha512-R6FKQrYT5MZs5IE1SqeCJWxMuBdHawFcCZboKKw8p7s+6/mcd55Gx6tWmyKnQTyrSEA04NH73Tc9CbqpEle8RA=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.2.0", "", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
-
-    "@nudge/db": ["@nudge/db@workspace:packages/db"],
-
-    "@nudge/db-convex": ["@nudge/db-convex@workspace:packages/db-convex"],
-
-    "@nudge/domain": ["@nudge/domain@workspace:packages/domain"],
-
-    "@nudge/effect-services": ["@nudge/effect-services@workspace:packages/effect-services"],
-
-    "@nudge/evals": ["@nudge/evals@workspace:packages/evals"],
-
-    "@nudge/observability": ["@nudge/observability@workspace:packages/observability"],
-
-    "@nudge/ui": ["@nudge/ui@workspace:packages/ui"],
-
-    "@nudge/web": ["@nudge/web@workspace:apps/web"],
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 

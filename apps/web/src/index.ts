@@ -6,13 +6,16 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db, type AgentRunOutputRecord } from "@nudge/db";
+import { Db } from "@nudge/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
   MemoryIndex,
+  NoteAnalysisWorkflows,
   PrimitiveWorkflows,
   workflowStepName,
+  type DailyNoteAnalysisExtractedItemInput,
+  type DailyNoteAnalysisWorkflowParams,
   type WorkflowVersion,
 } from "@nudge/effect-services";
 import {
@@ -146,8 +149,6 @@ type RecentToolEvent = UserAgentSessionState["recentToolEvents"][number];
 
 const recentToolEvent = (event: RecentToolEvent) => event;
 
-const agentRunOutput = (output: Pick<AgentRunOutputRecord, "outputId" | "outputType">) => output;
-
 interface NudgeUserRef {
   readonly displayName: string;
   readonly id: string;
@@ -214,6 +215,21 @@ type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> &
   readonly provider: "cloudflare-think";
 };
 
+function dailyNoteAnalysisItemsFrom(
+  items: ThinkDailyNoteExtraction["items"],
+): ReadonlyArray<DailyNoteAnalysisExtractedItemInput> {
+  return items.map((item) => ({
+    body: item.body,
+    ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
+    ...(item.dueAt !== undefined ? { dueAt: item.dueAt } : {}),
+    ...(item.eventEndsAt !== undefined ? { eventEndsAt: item.eventEndsAt } : {}),
+    ...(item.eventStartsAt !== undefined ? { eventStartsAt: item.eventStartsAt } : {}),
+    kind: item.kind,
+    ...(item.remindAt !== undefined ? { remindAt: item.remindAt } : {}),
+    title: item.title,
+  }));
+}
+
 const reasoningHarness = {
   name: "think",
   runtime: "cloudflare-agents",
@@ -227,34 +243,6 @@ const initialUserAgentSessionState = {
   updatedAt: null,
   userId: null,
 } satisfies UserAgentSessionState;
-
-const normalizeDedupe = (text: string) =>
-  text
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-|-$/g, "")
-    .slice(0, 96);
-
-const weekRangeFor = (localDate: string) => {
-  const date = new Date(`${localDate}T00:00:00.000Z`);
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const start = new Date(date);
-  start.setUTCDate(date.getUTCDate() + mondayOffset);
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  return { end: end.toISOString().slice(0, 10), start: start.toISOString().slice(0, 10) };
-};
-
-const dailySummaryFrom = (input: {
-  readonly items: ReadonlyArray<{ readonly kind: string; readonly title: string }>;
-  readonly noteText: string;
-}) => {
-  const actionText = input.items.length
-    ? input.items.map((item) => `${item.kind}: ${item.title}`).join("; ")
-    : "No extracted actions.";
-  return [`Actions: ${actionText}`, `Context: ${input.noteText.slice(0, 500)}`].join("\n");
-};
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   initialState = initialUserAgentSessionState;
@@ -838,22 +826,6 @@ export interface DailyDigestWorkflowParams {
   workflowVersion?: WorkflowVersion;
 }
 
-export interface DailyNoteAnalysisWorkflowParams {
-  changedText: string;
-  documentId: string;
-  kind: "daily-note-analysis";
-  localDate: string;
-  noteId: string;
-  requestId?: string;
-  revisionId: string;
-  runId: string;
-  title: string;
-  traceparent?: string;
-  userDisplayName: string;
-  userId: string;
-  workflowVersion?: WorkflowVersion;
-}
-
 type NudgeWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
 
 export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowParams> {
@@ -895,12 +867,9 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
         await runRuntimeDbEffect(
           this.env,
           traceContext,
-          Effect.gen(function* () {
-            const database = yield* Db;
-            yield* database.markAgentRunRunning({
-              runId: input.runId,
-              userId: input.userId,
-            });
+          NoteAnalysisWorkflows.markAnalysisRunRunning({
+            runId: input.runId,
+            userId: input.userId,
           }),
         );
       },
@@ -956,118 +925,36 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
         workflowStepName(workflowVersion, "daily-note-analysis-persist-results"),
         durableWorkflowStepConfig,
         async () => {
-          const extractedItems = await Promise.all(
-            extraction.items.map(async (extracted) =>
-              runRuntimeDbEffect(
-                this.env,
-                traceContext,
-                Effect.gen(function* () {
-                  const database = yield* Db;
-                  const item = yield* database.upsertExtractedItem({
-                    body: extracted.body,
-                    confidence: extracted.confidence ?? 0.74,
-                    dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
-                    ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
-                    ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
-                    ...(extracted.eventStartsAt ? { eventStartsAt: extracted.eventStartsAt } : {}),
-                    kind: extracted.kind,
-                    metadata: { extractor: "cloudflare-think" },
-                    ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
-                    sourceNoteId: input.noteId,
-                    sourceRevisionId: input.revisionId,
-                    status: "proposed",
-                    title: extracted.title,
-                    userId: input.userId,
-                  });
-                  yield* database.recordItemEvent({
-                    eventType: "created",
-                    itemId: item.id,
-                    payload: { sourceRevisionId: input.revisionId },
-                    userId: input.userId,
-                  });
-                  yield* database.upsertMemoryDocument({
-                    bodyText: `${item.title}\n${item.body}`,
-                    localDate: input.localDate,
-                    sourceId: item.id,
-                    sourceType: "extracted_item",
-                    title: item.title,
-                    userId: input.userId,
-                  });
-                  return item;
-                }),
-              ),
-            ),
-          );
-          const dailySummary = await runRuntimeDbEffect(
+          const persisted = await runRuntimeDbEffect(
             this.env,
             traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              return yield* database.upsertSummaryDocument({
-                body:
-                  extraction.dailySummary ??
-                  dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
-                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                periodEnd: input.localDate,
-                periodStart: input.localDate,
-                periodType: "day",
-                sourceItemIds: extractedItems.map((item) => item.id),
-                sourceNoteIds: [input.noteId],
-                status: "ready",
-                title: `${input.localDate} summary`,
-                userId: input.userId,
-              });
-            }),
-          );
-          const week = weekRangeFor(input.localDate);
-          const weeklySummary = await runRuntimeDbEffect(
-            this.env,
-            traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              return yield* database.upsertSummaryDocument({
-                body: `Week so far: ${dailySummary.body}`,
-                metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                periodEnd: week.end,
-                periodStart: week.start,
-                periodType: "week",
-                sourceItemIds: extractedItems.map((item) => item.id),
-                sourceNoteIds: [input.noteId],
-                status: "ready",
-                title: `${week.start} week summary`,
-                userId: input.userId,
-              });
-            }),
-          );
-          await runRuntimeDbEffect(
-            this.env,
-            traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              yield* database.completeAgentRun({
-                outputs: [
-                  ...extractedItems.map((item) =>
-                    agentRunOutput({ outputId: item.id, outputType: "extracted_item" }),
-                  ),
-                  agentRunOutput({ outputId: dailySummary.id, outputType: "summary" }),
-                  agentRunOutput({ outputId: weeklySummary.id, outputType: "summary" }),
-                ],
-                runId: input.runId,
-                status: "completed",
-                userId: input.userId,
-              });
+            NoteAnalysisWorkflows.persistAnalysisResults({
+              changedText: input.changedText,
+              extraction: {
+                ...(extraction.dailySummary !== undefined
+                  ? { dailySummary: extraction.dailySummary }
+                  : {}),
+                items: dailyNoteAnalysisItemsFrom(extraction.items),
+                model: extraction.model,
+                provider: extraction.provider,
+              },
+              localDate: input.localDate,
+              noteId: input.noteId,
+              revisionId: input.revisionId,
+              runId: input.runId,
+              userId: input.userId,
             }),
           );
           console.info(
             JSON.stringify({
               event: "daily_note_ai_extract_completed",
-              itemCount: extractedItems.length,
+              itemCount: persisted.itemCount,
               logKind: "wide_event",
               model: extraction.model,
               provider: "cloudflare-think",
             }),
           );
-          return { itemCount: extractedItems.length, ok: true, userId: input.userId };
+          return { itemCount: persisted.itemCount, ok: true, userId: input.userId };
         },
       );
     } catch (error) {
@@ -1080,14 +967,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
           await runRuntimeDbEffect(
             this.env,
             traceContext,
-            Effect.gen(function* () {
-              const database = yield* Db;
-              yield* database.completeAgentRun({
-                errorCode,
-                runId: input.runId,
-                status: "failed",
-                userId: input.userId,
-              });
+            NoteAnalysisWorkflows.markAnalysisRunFailed({
+              errorCode,
+              runId: input.runId,
+              userId: input.userId,
             }),
           );
           console.warn(

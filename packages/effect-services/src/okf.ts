@@ -26,6 +26,9 @@ export const buildOkfProjection = (input: OkfProjectionInput): OkfProjection => 
   const dailyNotes = [...input.dailyNotes].sort((a, b) => a.localDate.localeCompare(b.localDate));
   const extractedItems = [...input.extractedItems].sort((a, b) => a.title.localeCompare(b.title));
   const memoryDocuments = [...input.memoryDocuments].sort((a, b) => a.title.localeCompare(b.title));
+  const openItems = extractedItems.filter(
+    (item) => item.status === "proposed" || item.status === "accepted",
+  );
   const summaryDocuments = [...input.summaryDocuments].sort((a, b) =>
     a.periodStart.localeCompare(b.periodStart),
   );
@@ -33,6 +36,12 @@ export const buildOkfProjection = (input: OkfProjectionInput): OkfProjection => 
   files.set(
     "/index.md",
     index("Nudge Workspace Knowledge", [
+      ["User Wiki", "user/", "Profile, writing style, and durable preferences"],
+      [
+        "Open Actions",
+        "actions/open.md",
+        `${openItems.length} open item${plural(openItems.length)}`,
+      ],
       ["Daily Notes", "daily/", `${dailyNotes.length} daily note${plural(dailyNotes.length)}`],
       [
         "Items",
@@ -51,6 +60,33 @@ export const buildOkfProjection = (input: OkfProjectionInput): OkfProjection => 
       ],
     ]),
   );
+
+  files.set(
+    "/user/index.md",
+    index("User Wiki", [
+      ["Profile", "profile.md", input.user.displayName],
+      ["Writing Style", "writing-style.md", "Reusable writing samples and memory signals"],
+    ]),
+  );
+  files.set("/user/profile.md", userProfileFile(input.user, memoryDocuments));
+  files.set("/user/writing-style.md", writingStyleFile(dailyNotes, memoryDocuments));
+
+  files.set(
+    "/actions/index.md",
+    index("Actions", [
+      [
+        "Open",
+        "open.md",
+        `${openItems.length} proposed or accepted item${plural(openItems.length)}`,
+      ],
+      [
+        "All Extracted Items",
+        "../items/",
+        `${extractedItems.length} total item${plural(extractedItems.length)}`,
+      ],
+    ]),
+  );
+  files.set("/actions/open.md", openActionsFile(openItems));
 
   files.set(
     "/daily/index.md",
@@ -178,6 +214,94 @@ const dailyNoteFile = (note: DailyNoteRecord) =>
     note.bodyText,
   );
 
+const userProfileFile = (
+  user: OkfProjectionInput["user"],
+  memoryDocuments: ReadonlyArray<MemoryDocumentRecord>,
+) =>
+  concept(
+    [
+      ["type", "User Profile"],
+      ["title", user.displayName],
+      ["description", `Profile and durable user memory for ${user.displayName}`],
+      ["resource", "nudge://user/profile"],
+      ["timestamp", newestTimestamp(memoryDocuments.map((document) => document.updatedAt))],
+      ["tags", ["user", "profile", "wiki"]],
+      ["source_id", user.id],
+    ],
+    [
+      "# Identity",
+      "",
+      `Display name: ${user.displayName}`,
+      "",
+      "# Durable Memory Signals",
+      "",
+      bulletList(
+        memoryDocuments
+          .slice(0, 20)
+          .map((document) => `${document.title}: ${firstLine(document.bodyText)}`),
+      ),
+    ].join("\n"),
+  );
+
+const writingStyleFile = (
+  dailyNotes: ReadonlyArray<DailyNoteRecord>,
+  memoryDocuments: ReadonlyArray<MemoryDocumentRecord>,
+) =>
+  concept(
+    [
+      ["type", "Writing Style"],
+      ["title", "Writing Style"],
+      ["description", "Recent writing samples and style-relevant memory for drafting"],
+      ["resource", "nudge://user/writing-style"],
+      [
+        "timestamp",
+        newestTimestamp([
+          ...dailyNotes.map((note) => note.updatedAt),
+          ...memoryDocuments.map((document) => document.updatedAt),
+        ]),
+      ],
+      ["tags", ["user", "writing-style", "wiki"]],
+      ["source_id", "writing-style"],
+    ],
+    [
+      "# Recent Writing Samples",
+      "",
+      bulletList(
+        dailyNotes.slice(-10).map((note) => `${note.localDate}: ${firstLine(note.bodyText)}`),
+      ),
+      "",
+      "# Memory Signals",
+      "",
+      bulletList(
+        memoryDocuments
+          .filter((document) => document.sourceType === "extracted_item")
+          .slice(0, 20)
+          .map((document) => `${document.title}: ${firstLine(document.bodyText)}`),
+      ),
+    ].join("\n"),
+  );
+
+const openActionsFile = (items: ReadonlyArray<ExtractedItemRecord>) =>
+  concept(
+    [
+      ["type", "Open Actions"],
+      ["title", "Open Actions"],
+      ["description", `${items.length} proposed or accepted action${plural(items.length)}`],
+      ["resource", "nudge://actions/open"],
+      ["timestamp", newestTimestamp(items.map((item) => item.updatedAt))],
+      ["tags", ["actions", "open", "wiki"]],
+      ["source_id", "open-actions"],
+    ],
+    items.length
+      ? items
+          .map(
+            (item) =>
+              `# ${item.title}\n\nStatus: ${item.status}\nKind: ${item.kind}\n\n${item.body}\n\nSource: [${item.id}](../items/${item.id}.md)`,
+          )
+          .join("\n\n")
+      : "No open actions.",
+  );
+
 const itemFile = (item: ExtractedItemRecord) =>
   concept(
     [
@@ -261,6 +385,12 @@ const yamlLine = (key: string, value: FrontmatterValue) =>
     : `${key}: ${JSON.stringify(value)}`;
 
 const firstLine = (value: string) => value.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+
+const bulletList = (values: ReadonlyArray<string>) =>
+  values.length ? values.map((value) => `* ${value}`).join("\n") : "No entries yet.";
+
+const newestTimestamp = (timestamps: ReadonlyArray<string>) =>
+  timestamps.length ? ([...timestamps].sort((a, b) => b.localeCompare(a))[0] ?? "") : "";
 
 const snippetFor = (value: string, matchIndex: number) => {
   const lineStart = value.lastIndexOf("\n", matchIndex) + 1;

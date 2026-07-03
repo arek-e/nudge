@@ -66,6 +66,7 @@ const summaryPeriodType = v.union(
   v.literal("custom"),
 );
 const summaryStatus = v.union(v.literal("draft"), v.literal("ready"), v.literal("superseded"));
+const stickyNoteStatus = v.union(v.literal("active"), v.literal("archived"));
 const cloudflareAgentRunStatus = v.union(
   v.literal("queued"),
   v.literal("running"),
@@ -128,6 +129,40 @@ export default defineSchema({
     title: v.string(),
     updatedAt: v.string(),
   }).index("by_owner_local_date", ["ownerId", "localDate"]),
+  stickyNoteAgentStatuses: defineTable({
+    errorCode: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
+    noteId: v.id("stickyNotes"),
+    status: agentStatus,
+    updatedAt: v.string(),
+  })
+    .index("by_note", ["noteId"])
+    .index("by_note_idempotency_key", ["noteId", "idempotencyKey"]),
+  stickyNoteMutations: defineTable({
+    createdAt: v.string(),
+    idempotencyKey: v.string(),
+    noteId: v.id("stickyNotes"),
+    ownerId: v.id("users"),
+    payloadHash: v.string(),
+    status: v.literal("accepted"),
+  })
+    .index("by_note", ["noteId"])
+    .index("by_owner_idempotency_key", ["ownerId", "idempotencyKey"]),
+  stickyNotes: defineTable({
+    bodyDocument: v.optional(v.any()),
+    bodyText: v.string(),
+    color: v.string(),
+    createdAt: v.string(),
+    ownerId: v.id("users"),
+    pinned: v.boolean(),
+    serverRevision: v.string(),
+    sortOrder: v.number(),
+    status: stickyNoteStatus,
+    title: v.string(),
+    updatedAt: v.string(),
+  })
+    .index("by_owner_status_updated", ["ownerId", "status", "updatedAt"])
+    .index("by_owner_updated", ["ownerId", "updatedAt"]),
   users: defineTable({
     createdAt: v.string(),
     email: v.optional(v.string()),

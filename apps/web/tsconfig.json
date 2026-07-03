@@ -16,6 +16,7 @@
     { "path": "../../packages/db-convex" },
     { "path": "../../packages/evals" },
     { "path": "../../packages/observability" },
+    { "path": "../../packages/surface" },
     { "path": "../../packages/ui" }
   ]
 }
