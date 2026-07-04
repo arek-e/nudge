@@ -8,7 +8,7 @@
     "tsBuildInfoFile": "../../.tsbuild/apps/web.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../../convex/**/*.ts", "../../convex/**/*.d.ts"],
-  "exclude": ["src/**/*.test.ts", "../../convex/**/*.test.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "../../convex/**/*.test.ts"],
   "references": [
     { "path": "../../packages/domain" },
     { "path": "../../packages/effect-services" },

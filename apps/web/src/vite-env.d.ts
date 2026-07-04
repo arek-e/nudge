@@ -27,18 +27,36 @@ interface NudgeDesktopUpdateActionResult {
   readonly state: NudgeDesktopUpdateState;
 }
 
+interface NudgeDesktopSettings {
+  readonly quickCaptureShortcut: string;
+}
+
+interface NudgeDesktopSettingsActionResult {
+  readonly ok: boolean;
+  readonly settings: NudgeDesktopSettings;
+  readonly error?: string;
+}
+
 interface NudgeDesktopBridge {
   readonly appVersion: string;
   readonly authCallbackUrl: string;
   readonly surface: "desktop";
   checkForUpdate(): Promise<NudgeDesktopUpdateActionResult>;
   downloadUpdate(): Promise<NudgeDesktopUpdateActionResult>;
+  getSettings(): Promise<NudgeDesktopSettingsActionResult>;
   getUpdateState(): Promise<NudgeDesktopUpdateState>;
   installUpdate(): Promise<NudgeDesktopUpdateActionResult>;
   onUpdateState(listener: (state: unknown) => void): () => void;
   openExternalAuth(url: string): Promise<{ readonly ok: boolean }>;
+  setSettings(settings: NudgeDesktopSettings): Promise<NudgeDesktopSettingsActionResult>;
+}
+
+interface NudgeDesktopQuickCaptureBridge {
+  close(): Promise<{ readonly ok: boolean }>;
+  submitted(): Promise<{ readonly ok: boolean }>;
 }
 
 interface Window {
   readonly nudgeDesktop?: NudgeDesktopBridge;
+  readonly nudgeDesktopQuickCapture?: NudgeDesktopQuickCaptureBridge;
 }

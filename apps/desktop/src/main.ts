@@ -1,13 +1,17 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { mkdir, writeFile } from "node:fs/promises";
+import { app, BrowserWindow, globalShortcut, ipcMain, Notification, shell } from "electron";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
   canOpenExternalUrl,
+  defaultDesktopSettings,
+  desktopSettingsFromUnknown,
+  desktopSettingsUpdateFromUnknown,
   desktopAuthTicketFromCallbackUrl,
   desktopProtocol,
   desktopWebAppUrlForAuthTicket,
+  type DesktopSettings,
   isDesktopAuthCallbackUrl,
   resolveDesktopAutoUpdatesEnabled,
   resolveDesktopE2eReadyFile,
@@ -31,6 +35,9 @@ const desktopUpdatePollIntervalMs = 4 * 60 * 60 * 1000;
 type DesktopUpdatesRuntime = ManagedRuntime.ManagedRuntime<DesktopUpdates, never>;
 
 let mainWindow: BrowserWindow | undefined;
+let quickCaptureWindow: BrowserWindow | undefined;
+let desktopSettings: DesktopSettings = defaultDesktopSettings;
+let registeredQuickCaptureShortcut: string | undefined;
 let pendingDesktopAuthCallbackUrl: string | undefined;
 let desktopUpdatesRuntime: DesktopUpdatesRuntime | undefined;
 let desktopUpdateStartupTimer: NodeJS.Timeout | undefined;
@@ -77,6 +84,97 @@ function createMainWindow() {
   return browserWindow;
 }
 
+function createQuickCaptureWindow() {
+  const browserWindow = new BrowserWindow({
+    alwaysOnTop: true,
+    backgroundColor: "#eef1f5",
+    frame: false,
+    height: 240,
+    maxHeight: 260,
+    maxWidth: 560,
+    minHeight: 220,
+    minWidth: 480,
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    title: "Quick Capture",
+    webPreferences: {
+      additionalArguments: [`--nudge-app-version=${app.getVersion()}`],
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: join(currentDirectory, "preload.cjs"),
+    },
+    width: 520,
+  });
+  quickCaptureWindow = browserWindow;
+
+  browserWindow.on("blur", () => {
+    if (!browserWindow.webContents.isDevToolsOpened()) browserWindow.hide();
+  });
+
+  browserWindow.on("closed", () => {
+    if (quickCaptureWindow === browserWindow) quickCaptureWindow = undefined;
+  });
+
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (canOpenExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  void browserWindow.loadURL(desktopWebAppRouteUrl("/quick-capture"));
+  return browserWindow;
+}
+
+function desktopWebAppRouteUrl(pathname: string) {
+  const url = new URL(resolveNudgeWebAppUrl(process.env));
+  url.pathname = pathname;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function desktopSettingsPath() {
+  return join(app.getPath("userData"), "desktop-settings.json");
+}
+
+function isNodeErrorWithCode(error: unknown, code: string) {
+  return typeof error === "object" && error !== null && Reflect.get(error, "code") === code;
+}
+
+async function loadDesktopSettings() {
+  const settingsPath = desktopSettingsPath();
+  try {
+    desktopSettings = desktopSettingsFromUnknown(JSON.parse(await readFile(settingsPath, "utf8")));
+  } catch (error) {
+    if (!isNodeErrorWithCode(error, "ENOENT")) {
+      console.warn("[desktop-settings] could not read settings", error);
+    }
+    desktopSettings = defaultDesktopSettings;
+  }
+}
+
+async function saveDesktopSettings(settings: DesktopSettings) {
+  const settingsPath = desktopSettingsPath();
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+async function updateDesktopSettings(value: unknown) {
+  const nextSettings = desktopSettingsUpdateFromUnknown(value);
+  if (!nextSettings) {
+    return {
+      error: "Enter a shortcut like CommandOrControl+Shift+N.",
+      ok: false,
+      settings: desktopSettings,
+    };
+  }
+
+  desktopSettings = nextSettings;
+  await saveDesktopSettings(desktopSettings);
+  registerQuickCaptureShortcut(desktopSettings.quickCaptureShortcut);
+  return { ok: true, settings: desktopSettings };
+}
+
 function registerDesktopAuthProtocolClient() {
   if (process.defaultApp) {
     const appEntryPoint = process.argv[1];
@@ -96,6 +194,45 @@ function focusWindow(window: BrowserWindow) {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+}
+
+function focusQuickCaptureWindow(window: BrowserWindow) {
+  if (window.isDestroyed()) return;
+  window.center();
+  window.show();
+  window.focus();
+  window.webContents.focus();
+}
+
+function openQuickCaptureWindow() {
+  const window = quickCaptureWindow ?? createQuickCaptureWindow();
+  if (window.isVisible()) {
+    window.hide();
+    return;
+  }
+
+  if (window.webContents.isLoading()) {
+    window.once("ready-to-show", () => focusQuickCaptureWindow(window));
+    return;
+  }
+  focusQuickCaptureWindow(window);
+}
+
+function hideQuickCaptureWindow() {
+  const window = quickCaptureWindow;
+  if (!window || window.isDestroyed()) return;
+  window.hide();
+}
+
+function registerQuickCaptureShortcut(shortcut: string) {
+  if (registeredQuickCaptureShortcut) {
+    globalShortcut.unregister(registeredQuickCaptureShortcut);
+  }
+  registeredQuickCaptureShortcut = shortcut;
+  const registered = globalShortcut.register(shortcut, openQuickCaptureWindow);
+  if (!registered) {
+    console.warn(`[quick-capture] failed to register ${shortcut}`);
+  }
 }
 
 function handleDesktopAuthCallbackUrl(value: string) {
@@ -309,6 +446,25 @@ ipcMain.handle("nudge:update-install", async () =>
   runDesktopUpdatesAction((updates) => updates.install()),
 );
 
+ipcMain.handle("nudge:desktop-settings-get", () => ({ ok: true, settings: desktopSettings }));
+
+ipcMain.handle("nudge:desktop-settings-set", async (_event, settings: unknown) =>
+  updateDesktopSettings(settings),
+);
+
+ipcMain.handle("nudge:quick-capture-close", () => {
+  hideQuickCaptureWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("nudge:quick-capture-submitted", () => {
+  hideQuickCaptureWindow();
+  if (Notification.isSupported()) {
+    new Notification({ body: "Captured in Nudge.", title: "Quick Capture" }).show();
+  }
+  return { ok: true };
+});
+
 app.on("open-url", (event, url) => {
   event.preventDefault();
   handleDesktopAuthCallbackUrl(url);
@@ -328,10 +484,12 @@ if (!singleInstanceLock) {
     if (mainWindow) focusWindow(mainWindow);
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    await loadDesktopSettings();
     registerDesktopAuthProtocolClient();
     setupDesktopUpdates();
     createMainWindow();
+    registerQuickCaptureShortcut(desktopSettings.quickCaptureShortcut);
 
     if (pendingDesktopAuthCallbackUrl) {
       const callbackUrl = pendingDesktopAuthCallbackUrl;
@@ -346,6 +504,10 @@ if (!singleInstanceLock) {
 }
 
 app.on("before-quit", clearDesktopUpdateTimers);
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

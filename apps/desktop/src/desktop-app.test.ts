@@ -3,12 +3,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   canOpenExternalUrl,
+  defaultDesktopSettings,
   desktopAuthCallbackUrl,
+  desktopSettingsFromUnknown,
+  desktopSettingsUpdateFromUnknown,
   desktopAuthTicketFromCallbackUrl,
   desktopProtocol,
   desktopWebAppUrlForAuthTicket,
   defaultNudgeWebAppUrl,
   isDesktopAuthCallbackUrl,
+  normalizeDesktopShortcut,
   resolveDesktopAutoUpdatesEnabled,
   resolveDesktopE2eReadyFile,
   resolveNudgeWebAppUrl,
@@ -67,6 +71,21 @@ describe("Desktop app", () => {
         isPackaged: false,
       }),
     ).toBe(true);
+  });
+
+  test("normalizes desktop settings for the quick capture shortcut", () => {
+    expect(defaultDesktopSettings.quickCaptureShortcut).toBe("CommandOrControl+Shift+N");
+    expect(normalizeDesktopShortcut(" cmd + shift + space ")).toBe("Command+Shift+Space");
+    expect(normalizeDesktopShortcut("mod+alt+k")).toBe("CommandOrControl+Alt+K");
+    expect(normalizeDesktopShortcut("n")).toBeNull();
+    expect(normalizeDesktopShortcut("hyper+shift+n")).toBeNull();
+    expect(desktopSettingsFromUnknown({ quickCaptureShortcut: "ctrl+shift+j" })).toEqual({
+      quickCaptureShortcut: "Control+Shift+J",
+    });
+    expect(desktopSettingsFromUnknown({ quickCaptureShortcut: "n" })).toEqual(
+      defaultDesktopSettings,
+    );
+    expect(desktopSettingsUpdateFromUnknown({ quickCaptureShortcut: "n" })).toBeNull();
   });
 
   test("defines a desktop package with macOS release artifacts", () => {
@@ -136,6 +155,15 @@ describe("Desktop app", () => {
 
     expect(mainSource).toContain("contextIsolation: true");
     expect(mainSource).toContain("nodeIntegration: false");
+    expect(mainSource).toContain("globalShortcut.register");
+    expect(mainSource).toContain('"desktop-settings.json"');
+    expect(mainSource).toContain("desktopSettingsFromUnknown");
+    expect(mainSource).toContain(
+      "registerQuickCaptureShortcut(desktopSettings.quickCaptureShortcut)",
+    );
+    expect(mainSource).toContain("globalShortcut.unregister(registeredQuickCaptureShortcut)");
+    expect(mainSource).toContain('title: "Quick Capture"');
+    expect(mainSource).toContain('desktopWebAppRouteUrl("/quick-capture")');
     expect(mainSource).toContain(
       "additionalArguments: [`--nudge-app-version=${app.getVersion()}`]",
     );
@@ -146,8 +174,13 @@ describe("Desktop app", () => {
     expect(mainSource).toContain('ipcMain.handle("nudge:update-check"');
     expect(mainSource).toContain('ipcMain.handle("nudge:update-download"');
     expect(mainSource).toContain('ipcMain.handle("nudge:update-install"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:quick-capture-close"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:quick-capture-submitted"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:desktop-settings-get"');
+    expect(mainSource).toContain('ipcMain.handle("nudge:desktop-settings-set"');
     expect(mainSource).toContain('app.on("open-url"');
     expect(mainSource).toContain('app.on("second-instance"');
+    expect(mainSource).toContain('app.on("will-quit"');
     expect(mainSource).toContain("desktopWebAppUrlForAuthTicket");
     expect(mainSource).toContain("makeDesktopUpdatesLayer");
     expect(mainSource).toContain("resolveDesktopAutoUpdatesEnabled");
@@ -165,6 +198,11 @@ describe("Desktop app", () => {
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-check")');
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-download")');
     expect(preloadSource).toContain('ipcRenderer.invoke("nudge:update-install")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:desktop-settings-get")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:desktop-settings-set", settings)');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:quick-capture-close")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("nudge:quick-capture-submitted")');
+    expect(preloadSource).toContain("nudgeDesktopQuickCapture");
     expect(preloadSource).toContain('ipcRenderer.on("nudge:update-state"');
     expect(preloadSource).toContain("contextBridge.exposeInMainWorld");
   });

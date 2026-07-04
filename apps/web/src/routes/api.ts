@@ -109,6 +109,7 @@ export function registerApiRoutes(
       return new Response(object.body, { headers });
     }
 
+    const clientSurface = c.req.header("x-nudge-client");
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
@@ -124,6 +125,7 @@ export function registerApiRoutes(
             dailyAnalysisWorkflow: appServices.dailyAnalysisWorkflow,
             db: appServices.db,
             getOkfSandbox: () => appServices.okfSandboxFor(user),
+            ...(clientSurface !== undefined ? { clientSurface } : {}),
             recordSpan,
             runEffect,
             session: auth,
@@ -154,6 +156,8 @@ function responseWithMutableHeaders(response: Response) {
 function apiRouteWideEventFields(path: string) {
   if (path.startsWith("/api/captures")) {
     return { routeName: "api.captures" };
+  } else if (path.startsWith("/api/quick-captures")) {
+    return { routeName: "api.quick_captures" };
   } else if (path.startsWith("/api/media")) {
     return { routeName: "api.media" };
   } else if (path.startsWith("/api/conversations")) {

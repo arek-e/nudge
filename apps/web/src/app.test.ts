@@ -2054,6 +2054,47 @@ describe("web app", () => {
     ]);
   });
 
+  test("POST /api/quick-captures stores a capture and returns a reviewable draft", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/quick-captures",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, "x-nudge-client": "desktop" },
+        body: JSON.stringify({
+          idempotencyKey: "quick-capture-retry-1",
+          note: "Travel this week and follow up with work",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+        }),
+      },
+      env,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      capture: expect.objectContaining({
+        userId: anonymousUserId,
+        type: "manual_check_in_submitted",
+        source: "desktop_app",
+        occurredAt: "2026-06-12T10:00:00.000Z",
+        schemaVersion: 1,
+        idempotencyKey: "quick-capture-retry-1",
+        payload: { note: "Travel this week and follow up with work" },
+      }),
+      draft: {
+        confidence: 0.82,
+        proposal: expect.objectContaining({
+          status: "pending",
+          title: "Clarify next attention point",
+        }),
+        requiresReview: true,
+      },
+      processingStatus: "drafted",
+    });
+  });
+
   test("voice logs append a primitive signal without queuing analysis", async () => {
     const workflowCreates: Array<unknown> = [];
     const app = createApp({ dbLayer: Db.layerMemory });

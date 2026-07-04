@@ -21,8 +21,10 @@ export * from "./workflow-config";
 
 export interface LoopIntakeDraftInput {
   readonly conversationId: string;
+  readonly idempotencyKey?: string;
   readonly message: string;
   readonly occurredAt?: string;
+  readonly source?: string;
   readonly user: DbUser;
 }
 
@@ -434,11 +436,11 @@ export const PrimitiveWorkflows = {
   draftLoopIntake: (input: LoopIntakeDraftInput): Effect.Effect<LoopIntakeDraftResult, Error, Db> =>
     Effect.gen(function* () {
       const signal = yield* PrimitiveWorkflows.appendSignal({
-        idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+        idempotencyKey: input.idempotencyKey ?? `agent:${input.conversationId}:${input.message}`,
         occurredAt: input.occurredAt ?? new Date().toISOString(),
         payload: { note: input.message },
         schemaVersion: 1,
-        source: "nudge_agent_intake",
+        source: input.source ?? "nudge_agent_intake",
         type: "manual_check_in_submitted",
         user: input.user,
       });

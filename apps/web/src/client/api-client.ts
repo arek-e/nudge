@@ -15,6 +15,7 @@ export function setSessionTokenResolver(resolver: SessionTokenResolver | null) {
 
 async function nudgeRequestHeaders(input: HeadersInit = {}) {
   const headers = new Headers(input);
+  headers.set("x-nudge-client", nudgeClientSurface());
   if (sessionTokenResolver) {
     const token = await sessionTokenResolver();
     if (token) {
@@ -25,8 +26,11 @@ async function nudgeRequestHeaders(input: HeadersInit = {}) {
 
   const identityHeaders = anonymousIdentityHeaders();
   headers.set("x-nudge-anonymous-user-id", identityHeaders["x-nudge-anonymous-user-id"]);
-  headers.set("x-nudge-client", identityHeaders["x-nudge-client"]);
   return headers;
+}
+
+function nudgeClientSurface() {
+  return window.nudgeDesktop?.surface ?? "web";
 }
 
 const link = new OpenAPILink(apiContract, {

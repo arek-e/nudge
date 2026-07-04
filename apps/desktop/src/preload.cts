@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("nudgeDesktop", {
   authCallbackUrl: desktopAuthCallbackUrl,
   checkForUpdate: () => ipcRenderer.invoke("nudge:update-check"),
   downloadUpdate: () => ipcRenderer.invoke("nudge:update-download"),
+  getSettings: () => ipcRenderer.invoke("nudge:desktop-settings-get"),
   getUpdateState: () => ipcRenderer.invoke("nudge:update-get-state"),
   installUpdate: () => ipcRenderer.invoke("nudge:update-install"),
   onUpdateState: (listener: (state: unknown) => void) => {
@@ -20,7 +21,13 @@ contextBridge.exposeInMainWorld("nudgeDesktop", {
     };
   },
   openExternalAuth: (url: string) => ipcRenderer.invoke("nudge:open-external-auth", url),
+  setSettings: (settings: unknown) => ipcRenderer.invoke("nudge:desktop-settings-set", settings),
   surface: "desktop",
+});
+
+contextBridge.exposeInMainWorld("nudgeDesktopQuickCapture", {
+  close: () => ipcRenderer.invoke("nudge:quick-capture-close"),
+  submitted: () => ipcRenderer.invoke("nudge:quick-capture-submitted"),
 });
 
 function desktopAppVersionFromArguments() {

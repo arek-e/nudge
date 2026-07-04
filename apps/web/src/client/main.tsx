@@ -40,6 +40,8 @@ import {
 } from "@nudge/ui";
 import { api } from "../../../../convex/_generated/api";
 import { apiClient, setSessionTokenResolver, streamConversationMessage } from "./api-client";
+import { DesktopSettingsSurface } from "./DesktopSettingsSurface";
+import { QuickCaptureSurface } from "./QuickCaptureSurface";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
 
@@ -58,6 +60,7 @@ const desktopAuthRequestValue = "browser";
 const desktopAuthCallbackParam = "desktop_callback";
 const desktopTicketParam = "desktop_ticket";
 const defaultDesktopAuthCallbackUrl = "nudge://auth/callback";
+const defaultDesktopQuickCaptureShortcut = "CommandOrControl+Shift+N";
 
 type ConvexStickyNotesState = FunctionReturnType<typeof api.stickyNotes.list>;
 type StickyNote = ConvexStickyNotesState["notes"][number];
@@ -88,6 +91,11 @@ const reviewRoute = createRoute({
   path: "/review",
   component: ReviewScreen,
 });
+const quickCaptureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/quick-capture",
+  component: QuickCaptureScreen,
+});
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -95,7 +103,13 @@ const settingsRoute = createRoute({
 });
 
 const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, askRoute, reviewRoute, settingsRoute]),
+  routeTree: rootRoute.addChildren([
+    indexRoute,
+    askRoute,
+    reviewRoute,
+    quickCaptureRoute,
+    settingsRoute,
+  ]),
 });
 
 declare module "@tanstack/react-router" {
@@ -1166,6 +1180,59 @@ function NewNoteComposer() {
   );
 }
 
+function QuickCaptureScreen() {
+  const [note, setNote] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const closeQuickCapture = async () => {
+    const bridge = window.nudgeDesktopQuickCapture;
+    if (bridge) {
+      await bridge.close();
+      return;
+    }
+    window.close();
+  };
+  const submitQuickCapture = useMutation({
+    mutationFn: async () => {
+      const value = note.trim();
+      if (!value) throw new Error("Write a note first.");
+      return await apiClient.quickCaptures.submit({
+        idempotencyKey: `quick-capture:${crypto.randomUUID()}`,
+        note: value,
+      });
+    },
+    onError: (error) => {
+      setStatusMessage(errorMessageFrom(error, "Capture failed."));
+    },
+    onSuccess: (result) => {
+      setNote("");
+      setStatusMessage(result.processingStatus === "drafted" ? "Drafted for review" : "Captured");
+      const bridge = window.nudgeDesktopQuickCapture;
+      if (bridge) void bridge.submitted();
+    },
+  });
+
+  useEffect(() => {
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") void closeQuickCapture();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  return (
+    <QuickCaptureSurface
+      disabled={submitQuickCapture.isPending}
+      note={note}
+      statusMessage={statusMessage}
+      onClose={() => {
+        void closeQuickCapture();
+      }}
+      onNoteChange={setNote}
+      onSubmit={() => submitQuickCapture.mutate()}
+    />
+  );
+}
+
 function StickyNoteCard(props: { readonly note: StickyNote }) {
   const convex = useConvex();
   const convexAuth = useConvexAuth();
@@ -1328,6 +1395,7 @@ function ActionReviewPanel() {
 function SettingsScreen() {
   const navigate = useNavigate();
   const session = useSession();
+  const desktopSettings = useDesktopSettingsControls();
   const sessionUser = session.data?.user;
   const workspace = session.data?.workspace;
   const exportData = useMutation({
@@ -1375,6 +1443,16 @@ function SettingsScreen() {
           </p>
         </section>
 
+        <DesktopSettingsSurface
+          disabled={desktopSettings.isPending}
+          isDesktop={desktopSettings.isDesktop}
+          shortcut={desktopSettings.shortcut}
+          statusMessage={desktopSettings.statusMessage}
+          onResetShortcut={desktopSettings.resetQuickCaptureShortcut}
+          onSaveShortcut={desktopSettings.saveQuickCaptureShortcut}
+          onShortcutChange={desktopSettings.setShortcut}
+        />
+
         <section className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
           <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
             Data
@@ -1401,6 +1479,65 @@ function SettingsScreen() {
       </div>
     </main>
   );
+}
+
+function useDesktopSettingsControls() {
+  const isDesktop = isDesktopSurface();
+  const [shortcut, setShortcut] = useState(defaultDesktopQuickCaptureShortcut);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [isPending, setIsPending] = useState(false);
+
+  useEffect(() => {
+    const bridge = window.nudgeDesktop;
+    if (!bridge) return;
+
+    let cancelled = false;
+    void bridge
+      .getSettings()
+      .then((result) => {
+        if (cancelled) return;
+        setShortcut(result.settings.quickCaptureShortcut);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatusMessage(errorMessageFrom(error, "Desktop settings unavailable."));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveSettings = async (nextShortcut: string) => {
+    const bridge = window.nudgeDesktop;
+    if (!bridge || isPending) return;
+
+    setIsPending(true);
+    setStatusMessage("");
+    try {
+      const result = await bridge.setSettings({ quickCaptureShortcut: nextShortcut });
+      setShortcut(result.settings.quickCaptureShortcut);
+      setStatusMessage(result.ok ? "Saved" : (result.error ?? "Shortcut could not be saved."));
+    } catch (error) {
+      setStatusMessage(errorMessageFrom(error, "Shortcut could not be saved."));
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return {
+    isDesktop,
+    isPending,
+    resetQuickCaptureShortcut: () => {
+      void saveSettings(defaultDesktopQuickCaptureShortcut);
+    },
+    saveQuickCaptureShortcut: () => {
+      void saveSettings(shortcut);
+    },
+    setShortcut,
+    shortcut,
+    statusMessage,
+  };
 }
 
 function useStickyNotes() {
