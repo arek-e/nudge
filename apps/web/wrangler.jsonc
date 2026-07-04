@@ -15,7 +15,15 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/agents/*", "/mcp", "/health", "/__test/*", "/__internal/*"],
+    "run_worker_first": [
+      "/api/*",
+      "/agents/*",
+      "/mcp",
+      "/health",
+      "/__clerk/*",
+      "/__test/*",
+      "/__internal/*",
+    ],
   },
   "observability": {
     "traces": {
@@ -176,6 +184,7 @@
         "APP_VERSION": "0.0.0",
         "CLERK_AUTHORIZED_PARTIES": "https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
         "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
+        "CLERK_PROXY_URL": "https://app.explorenudge.com/__clerk",
         "CONVEX_URL": "https://friendly-lion-904.eu-west-1.convex.cloud",
         "LOG_HTTP_REQUESTS": "true",
         "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",

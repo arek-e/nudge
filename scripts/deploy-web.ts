@@ -57,6 +57,7 @@ const deployEnvironment = env ?? "production";
 const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
   production: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
+    VITE_CLERK_PROXY_URL: "/__clerk",
     VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
   },
   staging: {

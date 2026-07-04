@@ -149,6 +149,162 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
+  test("GET /__clerk proxies Clerk Frontend API requests through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+        { headers: { "CF-Connecting-IP": "203.0.113.10" } },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("clerk-js");
+      expect(proxiedRequests).toHaveLength(1);
+      expect(proxiedRequest.redirect).toBe("manual");
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+      );
+      expect(proxiedRequest.headers.get("host")).toBeNull();
+      expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
+        "https://app.explorenudge.com/__clerk",
+      );
+      expect(proxiedRequest.headers.get("Clerk-Secret-Key")).toBe("sk_test_proxy");
+      expect(proxiedRequest.headers.get("X-Forwarded-For")).toBe("203.0.113.10");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk decodes Clerk package redirect paths before proxying", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/%40clerk/clerk-js%406/dist/clerk.browser.js",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk/v1/proxy-health confirms the Worker proxy path without upstream fetch", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy health upstream request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/proxy-health?domain_id=dmn_test",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("ok");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("POST /__clerk forwards request bodies through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedBodies: Array<string> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedBodies.push(await request.text());
+
+      return Response.json({ ok: true });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/client",
+        {
+          body: JSON.stringify({ strategy: "oauth_google" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(proxiedBodies).toEqual([JSON.stringify({ strategy: "oauth_google" })]);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk fails closed when the Clerk secret is missing", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+        {},
+        env,
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "CLERK_SECRET_KEY is required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request(

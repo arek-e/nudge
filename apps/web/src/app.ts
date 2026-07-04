@@ -81,6 +81,46 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use("*", requestObservability());
   app.use("*", serverTiming());
 
+  app.all("/__clerk/*", wideEventFields({ routeName: "clerk.proxy" }), async (c) => {
+    const secretKey = c.env.CLERK_SECRET_KEY;
+    if (!secretKey) return c.json({ error: "CLERK_SECRET_KEY is required" }, 503);
+
+    const requestUrl = new URL(c.req.url);
+    if (requestUrl.pathname === "/__clerk/v1/proxy-health") {
+      return new Response("ok", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    const clerkPath = decodeClerkProxyPath(requestUrl.pathname.slice("/__clerk".length) || "/");
+    const targetUrl = new URL(clerkPath, "https://frontend-api.clerk.dev");
+    targetUrl.search = requestUrl.search;
+
+    const proxyHeaders = new Headers(c.req.raw.headers);
+    proxyHeaders.delete("host");
+    proxyHeaders.delete("content-length");
+    proxyHeaders.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
+    proxyHeaders.set("Clerk-Secret-Key", secretKey);
+    proxyHeaders.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
+
+    const proxyInit: RequestInit = {
+      headers: proxyHeaders,
+      method: c.req.raw.method,
+      redirect: "manual",
+    };
+    const proxyBody = clerkProxyBody(c.req.raw);
+    if (proxyBody) proxyInit.body = proxyBody;
+
+    const proxyRequest = new Request(targetUrl.toString(), proxyInit);
+    const response = await fetch(proxyRequest);
+
+    return new Response(response.body, {
+      headers: new Headers(response.headers),
+      status: response.status,
+      statusText: response.statusText,
+    });
+  });
+
   registerStaticRoutes(app);
 
   app.on(["GET", "POST", "OPTIONS"], "/mcp", wideEventFields({ routeName: "mcp" }), async (c) => {
@@ -124,4 +164,26 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   return app;
+}
+
+function clerkProxyUrl(requestUrl: string, env: Env) {
+  const configured = env.CLERK_PROXY_URL?.trim();
+  if (configured && configured.length > 0) return configured;
+
+  const url = new URL(requestUrl);
+  url.pathname = "/__clerk";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function clerkProxyBody(request: Request) {
+  return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
+}
+
+function decodeClerkProxyPath(path: string) {
+  return path
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
 }
