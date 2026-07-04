@@ -1,3 +1,4 @@
+import ClerkKit
 import Foundation
 
 struct VoiceLogResponse: Decodable {
@@ -518,7 +519,7 @@ enum NudgeAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path, queryItems: queryItems))
         request.httpMethod = "GET"
-        applyClientIdentity(to: &request)
+        try await applyClientIdentity(to: &request)
         return try await send(request)
     }
 
@@ -528,7 +529,7 @@ enum NudgeAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
-        applyClientIdentity(to: &request)
+        try await applyClientIdentity(to: &request)
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try encoder.encode(body)
         return try await send(request)
@@ -572,9 +573,12 @@ enum NudgeAPI {
         )
     }
 
-    private static func applyClientIdentity(to request: inout URLRequest) {
-        request.setValue(NudgeInstallIdentity.currentUserID(), forHTTPHeaderField: "x-nudge-anonymous-user-id")
+    private static func applyClientIdentity(to request: inout URLRequest) async throws {
         request.setValue("ios", forHTTPHeaderField: "x-nudge-client")
+        guard let token = try await Clerk.shared.auth.getToken() else {
+            throw NudgeAPIError.authenticationRequired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     private static func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -598,25 +602,6 @@ enum NudgeAPI {
             throw NudgeAPIError.badURL
         }
         return url
-    }
-}
-
-enum NudgeInstallIdentity {
-    static let userIDKey = "nudge.anonymousUserID"
-
-    static func currentUserID(defaults: UserDefaults = .standard) -> String {
-        if let existing = defaults.string(forKey: userIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           existing.hasPrefix("anon_") {
-            return existing.lowercased()
-        }
-
-        let userID = generatedUserID(uuidString: UUID().uuidString)
-        defaults.set(userID, forKey: userIDKey)
-        return userID
-    }
-
-    static func generatedUserID(uuidString: String) -> String {
-        "anon_\(uuidString.lowercased())"
     }
 }
 
@@ -757,6 +742,7 @@ private struct CaptureAttachmentPayload: Encodable {
 }
 
 enum NudgeAPIError: LocalizedError {
+    case authenticationRequired
     case badResponse
     case badURL
     case badMediaData
@@ -764,6 +750,8 @@ enum NudgeAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .authenticationRequired:
+            return "Server sign-in required."
         case .badResponse:
             return "The server returned an unreadable response."
         case .badURL:

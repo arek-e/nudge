@@ -4,14 +4,20 @@ import type { Context, MiddlewareHandler } from "hono";
 import { timing } from "hono/timing";
 import { Effect } from "effect";
 import {
+  buildRootServerSpan,
   buildDebugWideEventFields,
+  buildTraceSpanRow,
   createSpanId,
   createTraceId,
   finalizeRequestWideEvent,
   parseTraceparent,
+  persistTraceCacheEvent,
+  persistTraceCacheSpan,
+  pruneTraceCache,
   recordHttpRequestTelemetry,
   retryAfterSecondsFor,
   safeErrorFields,
+  safeExceptionAttributes,
   traceparentHeader,
   type RuntimeTraceContext,
   withRuntimeTraceContext,
@@ -25,7 +31,7 @@ import {
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
 
-export { retryAfterSecondsFor };
+export { retryAfterSecondsFor, safeErrorFields };
 
 type AppContext = Context<ObservabilityHonoEnv>;
 type AppMiddleware = MiddlewareHandler<ObservabilityHonoEnv>;
@@ -61,6 +67,8 @@ const now = () => {
 const requestId = (request: Request) => {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
 };
+
+const isTraceCacheRoute = (path: string) => path.startsWith("/api/traces");
 
 export const addWideEventFields = (c: AppContext, fields: Record<string, unknown>) => {
   const current = c.get("wideEvent") ?? {};
@@ -101,21 +109,25 @@ export const evlogWideEvents = (): AppMiddleware => {
 export const requestObservability = (): AppMiddleware => {
   return async (c, next) => {
     const startedAt = now();
+    const startedAtIso = new Date().toISOString();
     const id = requestId(c.req.raw);
     const incomingTrace = parseTraceparent(c.req.header("traceparent") ?? null);
     const traceId = incomingTrace?.traceId ?? createTraceId();
     const spanId = createSpanId();
     const flags = incomingTrace?.flags ?? "01";
     const path = new URL(c.req.url).pathname;
+    const cacheable = !isTraceCacheRoute(path);
 
     c.header("x-request-id", id);
     c.header("traceparent", traceparentHeader({ flags, spanId, traceId }));
     c.set("traceContext", {
+      cacheable,
       environment: c.env.ENVIRONMENT ?? "unknown",
       flags,
       method: c.req.method,
       parentSpanId: spanId,
       path,
+      recordSpan: (row) => runBackgroundEffect(c, persistTraceSpanRow(c, row)),
       requestId: id,
       rootSpanId: spanId,
       service: "nudge-web",
@@ -142,6 +154,7 @@ export const requestObservability = (): AppMiddleware => {
     try {
       await runBraintrustSpan(
         {
+          apiKey: c.env.BRAINTRUST_API_KEY,
           attributes: {
             "http.request.method": c.req.method,
             "nudge.environment": c.env.ENVIRONMENT ?? "unknown",
@@ -164,6 +177,7 @@ export const requestObservability = (): AppMiddleware => {
       c.res = Response.json({ error: "Internal Server Error" }, { status: 500 });
     } finally {
       const durationMs = now() - startedAt;
+      const endedAtIso = new Date().toISOString();
       const status = c.res.status;
 
       await Effect.runPromise(
@@ -185,6 +199,39 @@ export const requestObservability = (): AppMiddleware => {
 
       c.get("log").set(debugWideEvent);
 
+      const traceDb = c.env.DB;
+      if (cacheable && typeof traceDb?.prepare === "function") {
+        runBackgroundEffect(
+          c,
+          Effect.gen(function* () {
+            yield* persistTraceEvent(c, debugWideEvent);
+            yield* persistRootTraceSpan(c, {
+              ...debugWideEvent,
+              durationMs,
+              endedAt: endedAtIso,
+              parentSpanId: incomingTrace?.parentSpanId ?? null,
+              startedAt: startedAtIso,
+              traceId,
+            });
+            yield* pruneTraceCache(traceDb).pipe(
+              Effect.catch((cause) =>
+                Effect.sync(() => {
+                  console.warn(
+                    JSON.stringify({
+                      event: "trace_cache_prune_failed",
+                      logKind: "wide_event",
+                      service: "nudge-web",
+                      requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+                      ...safeErrorFields(cause),
+                    }),
+                  );
+                }),
+              ),
+            );
+          }),
+        );
+      }
+
       runBackgroundPromise(
         c,
         flushBraintrustTracing(c.env.BRAINTRUST_API_KEY),
@@ -199,19 +246,58 @@ export const runWithRequestSpan = async <A>(
   input: RequestSpanInput,
   task: () => Promise<A>,
 ) => {
-  return runBraintrustSpan(
-    {
-      attributes: {
-        ...(input.attributes ?? {}),
-        "span.kind": input.kind ?? "internal",
-      },
-      name: input.name,
-    },
-    task,
-  );
-};
+  const traceContext = requestRuntimeTraceContext(c);
+  const startedAt = now();
+  const startedAtIso = new Date().toISOString();
+  const spanId = createSpanId();
+  let spanStatus: "ok" | "error" = "ok";
+  let failureAttributes: Readonly<Record<string, unknown>> = {};
 
-const requestRuntimeTraceContext = (c: AppContext) => c.get("traceContext");
+  try {
+    return await runBraintrustSpan(
+      {
+        apiKey: c.env.BRAINTRUST_API_KEY,
+        attributes: {
+          ...(input.attributes ?? {}),
+          "span.kind": input.kind ?? "internal",
+        },
+        name: input.name,
+      },
+      task,
+    );
+  } catch (cause) {
+    spanStatus = "error";
+    failureAttributes = safeExceptionAttributes(cause);
+    throw cause;
+  } finally {
+    if (traceContext?.cacheable && typeof c.env.DB?.prepare === "function") {
+      const event = c.get("wideEvent") ?? {};
+      const row = buildTraceSpanRow({
+        attributes: { ...(input.attributes ?? {}), ...failureAttributes },
+        durationMs: Number((now() - startedAt).toFixed(2)),
+        endedAt: new Date().toISOString(),
+        environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
+        httpStatus: numberField(event, "status"),
+        kind: input.kind ?? "internal",
+        method: nullableStringField(event, "method"),
+        name: input.name,
+        outcome: spanStatus === "error" ? "error" : "success",
+        parentSpanId: traceContext.rootSpanId,
+        path: nullableStringField(event, "path"),
+        requestId: nullableStringField(event, "requestId"),
+        routeName: nullableStringField(event, "routeName"),
+        service: stringField(event, "service", "nudge-web"),
+        spanId,
+        startedAt: startedAtIso,
+        status: spanStatus,
+        traceId: traceContext.traceId,
+        version: stringField(event, "version", c.env.APP_VERSION ?? "0.0.0"),
+      });
+
+      runBackgroundEffect(c, persistTraceSpanRow(c, row));
+    }
+  }
+};
 
 export const withRequestTraceContext = <A, E, R>(c: AppContext, effect: Effect.Effect<A, E, R>) => {
   const traceContext = requestRuntimeTraceContext(c);
@@ -239,9 +325,105 @@ export const serverTiming = () => {
   });
 };
 
+const stringField = (event: Record<string, unknown>, key: string, fallback = "") => {
+  const value = event[key];
+  return typeof value === "string" ? value : fallback;
+};
+
 const nullableStringField = (event: Record<string, unknown>, key: string) => {
   const value = event[key];
   return typeof value === "string" ? value : null;
+};
+
+const numberField = (event: Record<string, unknown>, key: string) => {
+  const value = event[key];
+  return typeof value === "number" ? value : null;
+};
+
+const requestRuntimeTraceContext = (c: AppContext): RuntimeTraceContext | null => {
+  const traceContext = c.get("traceContext");
+  if (!traceContext) return null;
+  const event = c.get("wideEvent") ?? {};
+
+  return {
+    ...traceContext,
+    environment: stringField(event, "environment", c.env.ENVIRONMENT ?? "unknown"),
+    method: nullableStringField(event, "method"),
+    path: nullableStringField(event, "path"),
+    recordSpan: (row) => runBackgroundEffect(c, persistTraceSpanRow(c, row)),
+    requestId: nullableStringField(event, "requestId"),
+    routeName: nullableStringField(event, "routeName"),
+    service: stringField(event, "service", "nudge-web"),
+    version: stringField(event, "version", c.env.APP_VERSION ?? "0.0.0"),
+  };
+};
+
+const persistTraceEvent = (c: AppContext, event: Record<string, unknown>) => {
+  const traceDb = c.env.DB;
+  if (typeof traceDb?.prepare !== "function") return Effect.void;
+
+  return persistTraceCacheEvent(traceDb, {
+    event,
+    id: crypto.randomUUID(),
+    now: new Date().toISOString(),
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() => {
+        console.warn(
+          JSON.stringify({
+            event: "trace_event_persist_failed",
+            logKind: "wide_event",
+            service: "nudge-web",
+            requestId: nullableStringField(event, "requestId"),
+            ...safeErrorFields(cause),
+          }),
+        );
+      }),
+    ),
+    Effect.asVoid,
+  );
+};
+
+const persistRootTraceSpan = (c: AppContext, event: Record<string, unknown>) => {
+  const traceDb = c.env.DB;
+  if (typeof traceDb?.prepare !== "function") return Effect.void;
+
+  const row = buildRootServerSpan({
+    durationMs: numberField(event, "durationMs") ?? 0,
+    endedAt: stringField(event, "endedAt", new Date().toISOString()),
+    event,
+    parentSpanId: nullableStringField(event, "parentSpanId"),
+    spanId: stringField(event, "spanId", createSpanId()),
+    startedAt: stringField(event, "startedAt", new Date().toISOString()),
+    traceId: stringField(event, "traceId", createTraceId()),
+  });
+
+  return persistTraceSpanRow(c, row);
+};
+
+const persistTraceSpanRow = (
+  c: AppContext,
+  row: { readonly sql: string; readonly values: ReadonlyArray<unknown> },
+) => {
+  const traceDb = c.env.DB;
+  if (typeof traceDb?.prepare !== "function") return Effect.void;
+
+  return persistTraceCacheSpan(traceDb, row).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() => {
+        console.warn(
+          JSON.stringify({
+            event: "trace_span_persist_failed",
+            logKind: "wide_event",
+            service: "nudge-web",
+            requestId: nullableStringField(c.get("wideEvent") ?? {}, "requestId"),
+            ...safeErrorFields(cause),
+          }),
+        );
+      }),
+    ),
+    Effect.asVoid,
+  );
 };
 
 const safeExecutionContext = (c: AppContext) => {
@@ -249,6 +431,15 @@ const safeExecutionContext = (c: AppContext) => {
     return typeof c.executionCtx?.waitUntil === "function" ? c.executionCtx : null;
   } catch {
     return null;
+  }
+};
+
+const runBackgroundEffect = (c: AppContext, effect: Effect.Effect<void, unknown>) => {
+  const persistence = Effect.runPromise(effect);
+  const executionCtx = safeExecutionContext(c);
+  if (executionCtx) {
+    executionCtx.waitUntil(persistence);
+    return;
   }
 };
 

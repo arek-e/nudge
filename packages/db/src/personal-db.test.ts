@@ -336,6 +336,298 @@ describe("Db", () => {
     expect(result.exportData.agentRunOutputs).toHaveLength(2);
   });
 
+  test("records daily note text deletions as revision changes", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const initial = yield* db.upsertDailyNote({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "alpha beta gamma",
+      });
+      const deleted = yield* db.upsertDailyNote({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "alpha",
+      });
+      const revisions = yield* db.listNoteRevisions({
+        userId: "user-a",
+        noteId: initial.note.id,
+        limit: 10,
+      });
+
+      return { deleted, initial, revisions };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.deleted.note.id).toBe(result.initial.note.id);
+    expect(result.deleted.revision.revisionNumber).toBe(2);
+    expect(result.deleted.revision.changedText).toBe("[deleted] beta gamma");
+    expect(result.revisions.map((revision) => revision.revisionNumber)).toEqual([1, 2]);
+  });
+
+  test("records journal document text deletions as revision changes", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.ensureUser({ id: "user-a", displayName: "User A" });
+
+      const initial = yield* db.upsertJournalDocument({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "ship prototype then write launch notes",
+      });
+      const deleted = yield* db.upsertJournalDocument({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "",
+      });
+      const revisions = yield* db.listJournalRevisions({
+        userId: "user-a",
+        documentId: initial.document.id,
+        limit: 10,
+      });
+
+      return { deleted, initial, revisions };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.deleted.document.id).toBe(result.initial.document.id);
+    expect(result.deleted.revision.changedText).toBe(
+      "[deleted] ship prototype then write launch notes",
+    );
+    expect(result.deleted.revision.diffSummary).toBe("Updated daily journal document.");
+    expect(result.revisions.map((revision) => revision.changedText)).toEqual([
+      "ship prototype then write launch notes",
+      "[deleted] ship prototype then write launch notes",
+    ]);
+  });
+
+  test("does not return another user's extracted item when status update misses ownership", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      const saved = yield* db.upsertDailyNote({
+        userId: "user-a",
+        localDate: "2026-06-18",
+        title: "Jun 18",
+        bodyText: "private task",
+      });
+      const item = yield* db.upsertExtractedItem({
+        userId: "user-a",
+        sourceRevisionId: saved.revision.id,
+        sourceNoteId: saved.note.id,
+        kind: "task",
+        title: "Private task",
+        body: "private task",
+        status: "proposed",
+        confidence: 0.92,
+        dedupeKey: "task:private",
+        metadata: {},
+      });
+
+      return yield* db.updateExtractedItemStatus({
+        userId: "user-b",
+        itemId: item.id,
+        status: "accepted",
+      });
+    });
+
+    await expect(Effect.runPromise(Effect.provide(program, Db.layerMemory))).rejects.toThrow(
+      "Extracted item not found",
+    );
+  });
+
+  test("does not reveal another user's existing outcome through idempotency", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      const frame = yield* db.upsertCurrentFrame({
+        userId: "user-a",
+        key: "current_state",
+        title: "User A frame",
+        prompt: "private",
+      });
+      const synthesis = yield* db.appendSynthesis({
+        userId: "user-a",
+        frameId: frame.id,
+        summary: "private synthesis",
+        themes: [],
+        openQuestions: [],
+        sourceSignalIds: [],
+      });
+      const proposal = yield* db.appendProposal({
+        userId: "user-a",
+        synthesisId: synthesis.id,
+        kind: "commit",
+        title: "Private commitment",
+        body: "finish private task",
+        rationale: "test",
+      });
+      const review = yield* db.reviewProposal({
+        userId: "user-a",
+        proposalId: proposal.id,
+        decision: "accepted",
+      });
+      const commitment = yield* db.appendCommitment({
+        userId: "user-a",
+        proposalId: proposal.id,
+        reviewId: review.id,
+        title: "Private commitment",
+        body: "finish private task",
+      });
+      yield* db.recordOutcome({
+        userId: "user-a",
+        commitmentId: commitment.id,
+        result: "completed",
+        note: "private result",
+      });
+
+      return yield* db.recordOutcome({
+        userId: "user-b",
+        commitmentId: commitment.id,
+        result: "completed",
+        note: "private result",
+      });
+    });
+
+    await expect(Effect.runPromise(Effect.provide(program, Db.layerMemory))).rejects.toThrow(
+      "Commitment not found",
+    );
+  });
+
+  test("rejects foreign parent ids at write helper boundaries", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      const frame = yield* db.upsertCurrentFrame({
+        userId: "user-a",
+        key: "current_state",
+        title: "User A frame",
+        prompt: "private",
+      });
+      const event = yield* db.appendEvent({
+        userId: "user-a",
+        type: "private_signal",
+        source: "test",
+        occurredAt: "2026-06-12T09:00:00.000Z",
+        schemaVersion: 1,
+        payload: {},
+      });
+      const synthesis = yield* db.appendSynthesis({
+        userId: "user-a",
+        frameId: frame.id,
+        summary: "private synthesis",
+        themes: [],
+        openQuestions: [],
+        sourceSignalIds: [event.id],
+      });
+      const proposal = yield* db.appendProposal({
+        userId: "user-a",
+        synthesisId: synthesis.id,
+        kind: "commit",
+        title: "Private proposal",
+        body: "private body",
+        rationale: "test",
+      });
+      const review = yield* db.reviewProposal({
+        userId: "user-a",
+        proposalId: proposal.id,
+        decision: "accepted",
+      });
+
+      return yield* Effect.all([
+        Effect.exit(
+          db.appendSynthesis({
+            userId: "user-b",
+            frameId: frame.id,
+            summary: "stolen synthesis",
+            themes: [],
+            openQuestions: [],
+            sourceSignalIds: [event.id],
+          }),
+        ),
+        Effect.exit(
+          db.appendProposal({
+            userId: "user-b",
+            synthesisId: synthesis.id,
+            kind: "commit",
+            title: "Private proposal",
+            body: "private body",
+            rationale: "test",
+          }),
+        ),
+        Effect.exit(
+          db.appendCommitment({
+            userId: "user-b",
+            proposalId: proposal.id,
+            reviewId: review.id,
+            title: "Private commitment",
+            body: "private body",
+          }),
+        ),
+      ]);
+    });
+
+    const results = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(results.map((result) => Reflect.get(result, "_tag"))).toEqual([
+      "Failure",
+      "Failure",
+      "Failure",
+    ]);
+  });
+
+  test("persists updates when upserting the same summary document", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      const first = yield* db.upsertSummaryDocument({
+        userId: "user-a",
+        periodType: "day",
+        periodStart: "2026-06-18",
+        periodEnd: "2026-06-18",
+        title: "First title",
+        body: "first body",
+        status: "ready",
+        sourceNoteIds: ["note-a"],
+        sourceItemIds: ["item-a"],
+        metadata: { version: 1 },
+      });
+      const second = yield* db.upsertSummaryDocument({
+        userId: "user-a",
+        periodType: "day",
+        periodStart: "2026-06-18",
+        periodEnd: "2026-06-18",
+        title: "Second title",
+        body: "second body",
+        status: "ready",
+        sourceNoteIds: ["note-b"],
+        sourceItemIds: ["item-b"],
+        metadata: { version: 2 },
+      });
+      const listed = yield* db.listSummaryDocuments({ userId: "user-a", limit: 10 });
+
+      return { first, listed, second };
+    });
+
+    const result = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(result.second.id).toBe(result.first.id);
+    expect(result.listed).toEqual([
+      expect.objectContaining({
+        id: result.first.id,
+        title: "Second title",
+        body: "second body",
+        sourceNoteIds: ["note-b"],
+        sourceItemIds: ["item-b"],
+        metadata: { version: 2 },
+      }),
+    ]);
+  });
+
   test("marks queued agent runs as running", async () => {
     const program = Effect.gen(function* () {
       const db = yield* Db;

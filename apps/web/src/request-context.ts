@@ -5,7 +5,7 @@ import type { NudgeAppService, RunEffect } from "./Services/NudgeApp";
 export type HonoHandlerContext = Parameters<Handler<ObservabilityHonoEnv>>[0];
 
 export type RequestSession = {
-  readonly authMode: "anonymous" | "clerk" | "unauthenticated";
+  readonly authMode: "clerk" | "unauthenticated";
   readonly user: {
     readonly id: string;
     readonly displayName: string;

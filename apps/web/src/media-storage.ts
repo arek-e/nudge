@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const mediaIdPattern =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u;
+const maxMediaBytes = 25 * 1024 * 1024;
+const maxMediaBase64Length = Math.ceil(maxMediaBytes / 3) * 4;
 
 export const mediaIdSchema = z
   .string()
@@ -10,12 +12,7 @@ export const mediaIdSchema = z
 
 const mediaUploadSchema = z
   .object({
-    byteLength: z
-      .number()
-      .int()
-      .positive()
-      .max(25 * 1024 * 1024)
-      .optional(),
+    byteLength: z.number().int().positive().max(maxMediaBytes).optional(),
     dataBase64: z.string().min(1),
     id: mediaIdSchema.optional(),
     kind: z.enum(["image", "voice"]),
@@ -45,7 +42,29 @@ export type StoreMediaUploadResult =
     };
 
 export function mediaObjectKey(userId: string, mediaId: string) {
-  return `users/${storageSegment(userId)}/media/${mediaId}`;
+  return `${mediaObjectPrefix(userId)}${mediaId}`;
+}
+
+export function mediaObjectPrefix(userId: string) {
+  return `users/${storageSegment(userId)}/media/`;
+}
+
+export async function deleteUserMedia(input: {
+  readonly bucket: R2Bucket;
+  readonly userId: string;
+}) {
+  const prefix = mediaObjectPrefix(input.userId);
+  let cursor: string | undefined;
+  do {
+    // eslint-disable-next-line no-await-in-loop -- R2 pagination is cursor-dependent.
+    const page = await input.bucket.list({ ...(cursor ? { cursor } : {}), prefix });
+    const keys = page.objects.map((object) => object.key);
+    if (keys.length > 0) {
+      // eslint-disable-next-line no-await-in-loop -- delete each listed page before advancing.
+      await input.bucket.delete(keys);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
 }
 
 export async function storeMediaUpload(input: {
@@ -53,6 +72,11 @@ export async function storeMediaUpload(input: {
   readonly payload: unknown;
   readonly userId: string;
 }): Promise<StoreMediaUploadResult> {
+  const base64Length = mediaBase64Length(input.payload);
+  if (base64Length !== null && base64Length > maxMediaBase64Length) {
+    return { error: "Media too large", ok: false, status: 413 };
+  }
+
   const parsed = mediaUploadSchema.safeParse(input.payload);
   if (!parsed.success) {
     return { error: "Invalid media upload", ok: false, status: 400 };
@@ -61,6 +85,9 @@ export async function storeMediaUpload(input: {
   const bytes = decodeBase64(parsed.data.dataBase64);
   if (!bytes) {
     return { error: "Invalid media data", ok: false, status: 400 };
+  }
+  if (bytes.byteLength > maxMediaBytes) {
+    return { error: "Media too large", ok: false, status: 413 };
   }
   if (parsed.data.byteLength !== undefined && parsed.data.byteLength !== bytes.byteLength) {
     return { error: "Media byte length mismatch", ok: false, status: 400 };
@@ -89,6 +116,12 @@ export async function storeMediaUpload(input: {
     },
     ok: true,
   };
+}
+
+function mediaBase64Length(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const dataBase64 = Reflect.get(payload, "dataBase64");
+  return typeof dataBase64 === "string" ? dataBase64.trim().length : null;
 }
 
 function decodeBase64(value: string) {

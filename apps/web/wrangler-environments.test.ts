@@ -41,15 +41,21 @@ describe("Nudge Worker environments", () => {
       "utf8",
     );
     const deployScript = await readFile(new URL("scripts/deploy-web.ts", repoRoot), "utf8");
+    const deployConfig = await readFile(new URL("scripts/deploy-web-config.ts", repoRoot), "utf8");
     const clientEntry = await readFile(new URL("src/client/main.tsx", webRoot), "utf8");
 
-    expect(deployWorkflow).toContain("workflow_dispatch:");
-    expect(deployWorkflow).not.toContain("workflow_run:");
+    expect(deployWorkflow).toContain("workflow_dispatch: {}");
+    expect(deployWorkflow).toContain("workflow_run:");
     expect(deployWorkflow).toContain("environment: production");
+    expect(deployWorkflow).not.toContain("D1 migrations");
     expect(deployScript).toContain('const deployEnvironment = env ?? "production";');
-    expect(deployScript).toContain("const deployTargetArgs = [`--env ${deployEnvironment}`");
-    expect(deployScript).toContain('deployEnvironment === "production"');
-    expect(deployScript).toContain('"--containers-rollout=none"');
+    expect(deployScript).toContain("wranglerDeployArgs");
+    expect(deployScript).toContain(
+      '["mise", "exec", "--", "bunx", "wrangler", "deploy", ...deployArgs]',
+    );
+    expect(deployScript).not.toContain('["bash", "-lc"');
+    expect(deployConfig).toContain('"--env"');
+    expect(deployConfig).toContain('"--var"');
     expect(deployScript).toContain(
       'VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );
@@ -75,14 +81,20 @@ describe("Nudge Worker environments", () => {
   test("local dev uses a config that skips the optional sandbox container", async () => {
     const ciWorkflow = await readFile(new URL(".github/workflows/ci.yml", repoRoot), "utf8");
     const devScript = await readFile(new URL("scripts/dev-web.ts", repoRoot), "utf8");
+    const devConfig = await readFile(new URL("scripts/dev-web-config.ts", repoRoot), "utf8");
     const localWrangler = await readFile(new URL("wrangler.local.jsonc", webRoot), "utf8");
     const playwrightConfig = await readFile(new URL("playwright.config.ts", webRoot), "utf8");
 
     expect(ciWorkflow).not.toContain("environment: production");
     expect(ciWorkflow).not.toContain("CLOUDFLARE_API_TOKEN");
-    expect(devScript).toContain('["--config", "wrangler.local.jsonc"]');
+    expect(devConfig).toContain('["--config", "wrangler.local.jsonc"]');
+    expect(devConfig).toContain('args.includes("--remote")');
     expect(playwrightConfig).toContain("--config wrangler.local.jsonc");
-    expect(devScript).toContain('args.includes("--remote")');
+    expect(devScript).toContain("wranglerClerkEnvFileArgs");
+    expect(devScript).toContain("writeFile(clerkEnvFile");
+    expect(devScript).not.toContain("d1");
+    expect(devScript).not.toContain('["--var"');
+    expect(devScript).not.toContain("CLERK_SECRET_KEY:");
     expect(localWrangler).not.toContain('"containers"');
     expect(localWrangler).not.toContain('"OKF_SANDBOX"');
     expect(localWrangler).toContain('"/__clerk/*"');
