@@ -8,7 +8,6 @@ import {
   type BuildSurfaceIdentityHeadersInput,
 } from "@nudge/surface";
 import { apiContract } from "../api-contract";
-import { anonymousIdentityHeaders, anonymousUserId } from "./anonymous-identity";
 import { currentAppSurface } from "./surface-runtime";
 
 type SessionTokenResolver = () => Promise<string | null>;
@@ -26,14 +25,15 @@ export async function nudgeRequestHeaders(input: HeadersInit = {}) {
 }
 
 async function surfaceIdentityHeaders() {
+  const surface = currentAppSurface();
   if (sessionTokenResolver) {
     const token = await sessionTokenResolver();
     return token
-      ? buildSurfaceIdentityHeaders({ bearerToken: token, surface: currentAppSurface() })
-      : buildSurfaceIdentityHeaders({ surface: currentAppSurface() });
+      ? buildSurfaceIdentityHeaders({ bearerToken: token, surface })
+      : buildSurfaceIdentityHeaders({ surface });
   }
 
-  return anonymousIdentityHeaders();
+  return buildSurfaceIdentityHeaders({ surface });
 }
 
 function applyHeaders(headers: Headers, values: Readonly<Record<string, string>>) {
@@ -74,7 +74,7 @@ async function surfaceEngineIdentity(): Promise<BuildSurfaceIdentityHeadersInput
     return token ? { bearerToken: token, surface } : { surface };
   }
 
-  return { anonymousUserId: anonymousUserId(), surface };
+  return { surface };
 }
 
 export async function streamConversationMessage(input: {

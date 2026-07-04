@@ -30,6 +30,9 @@ struct NudgeClientFailure: LocalizedError {
     var errorDescription: String? { message }
 
     private static func isAuthenticationRequired(_ error: Error) -> Bool {
+        if case NudgeAPIError.authenticationRequired = error {
+            return true
+        }
         if case NudgeAPIError.httpStatus(401) = error {
             return true
         }

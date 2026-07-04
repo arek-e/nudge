@@ -340,6 +340,21 @@ const summaryListInputSchema = z.object({
   periodType: z.enum(["day", "week", "month", "quarter", "year", "custom"]).optional(),
 });
 
+export const traceSpanSummarySchema = z.object({
+  id: z.string(),
+  traceId: z.string(),
+  parentSpanId: z.string().nullable(),
+  name: z.string(),
+  kind: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  durationMs: z.number().nullable(),
+  routeName: z.string().nullable(),
+  method: z.string().nullable(),
+  path: z.string().nullable(),
+});
+
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
@@ -423,7 +438,7 @@ export const conversationMessageResponseSchema = z.object({
 });
 
 export const sessionResponseSchema = z.object({
-  authMode: z.enum(["anonymous", "clerk", "unauthenticated"]),
+  authMode: z.enum(["clerk", "unauthenticated"]),
   user: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   workspace: z.object({ id: z.string(), label: z.string() }).nullable(),
 });
@@ -732,6 +747,12 @@ export const apiContract = {
       .route({ method: "GET", path: "/syntheses/latest" })
       .input(synthesisInputSchema)
       .output(synthesisResponseSchema),
+  },
+  traces: {
+    recent: oc
+      .route({ method: "GET", path: "/traces/recent" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
+      .output(z.object({ spans: z.array(traceSpanSummarySchema) })),
   },
   voice: {
     log: oc

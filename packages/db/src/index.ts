@@ -577,8 +577,14 @@ const sameOutcomeInput = (outcome: OutcomeRecord, input: RecordOutcomeInput) =>
   outcome.result === input.result && outcome.note === input.note;
 
 const changedTextFrom = (previous: string | null, next: string) => {
-  if (!previous) return next;
+  if (previous === null) return next;
+  if (previous === next) return "";
   if (next.startsWith(previous)) return next.slice(previous.length).trim();
+  if (previous.startsWith(next)) {
+    const deletedText = previous.slice(next.length).trim();
+    return deletedText.length > 0 ? `[deleted] ${deletedText}` : "[deleted text]";
+  }
+  if (next.length === 0) return "[deleted text]";
   return next;
 };
 
@@ -931,8 +937,21 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
           }),
         appendCommitment: (input) =>
           Effect.sync(() => {
+            const proposal = proposalStore.get(input.proposalId);
+            const review = reviewStore.get(input.reviewId);
+            if (!proposal || proposal.userId !== input.userId) {
+              throw new Error("Proposal not found");
+            }
+            if (
+              !review ||
+              review.userId !== input.userId ||
+              review.proposalId !== input.proposalId
+            ) {
+              throw new Error("Review not found");
+            }
             const existing = [...commitmentStore.values()].find(
-              (commitment) => commitment.proposalId === input.proposalId,
+              (commitment) =>
+                commitment.proposalId === input.proposalId && commitment.userId === input.userId,
             );
             if (existing) return existing;
 
@@ -949,6 +968,10 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
           }),
         appendProposal: (input) =>
           Effect.sync(() => {
+            const synthesis = synthesisStore.get(input.synthesisId);
+            if (!synthesis || synthesis.userId !== input.userId) {
+              throw new Error("Synthesis not found");
+            }
             const existing = [...proposalStore.values()].find((proposal) =>
               sameProposalInput(proposal, input),
             );
@@ -967,6 +990,16 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
           }),
         appendSynthesis: (input) =>
           Effect.sync(() => {
+            const frame = [...frameStore.values()].find(
+              (candidate) => candidate.id === input.frameId && candidate.userId === input.userId,
+            );
+            if (!frame) throw new Error("Frame not found");
+            for (const signalId of input.sourceSignalIds) {
+              const signal = eventStore.get(signalId);
+              if (!signal || signal.userId !== input.userId) {
+                throw new Error("Signal not found");
+              }
+            }
             const existing = [...synthesisStore.values()].find((synthesis) =>
               sameSynthesisInput(synthesis, input),
             );
@@ -1109,20 +1142,20 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
           }),
         recordOutcome: (input) =>
           Effect.sync(() => {
+            const commitment = commitmentStore.get(input.commitmentId);
+            if (!commitment || commitment.userId !== input.userId) {
+              throw new Error("Commitment not found");
+            }
             const existingOutcome = [...outcomeStore.values()].find(
-              (outcome) => outcome.commitmentId === input.commitmentId,
+              (outcome) =>
+                outcome.commitmentId === input.commitmentId && outcome.userId === input.userId,
             );
             if (existingOutcome) {
               if (sameOutcomeInput(existingOutcome, input)) return existingOutcome;
               throw new Error("Commitment outcome already recorded");
             }
 
-            const commitment = commitmentStore.get(input.commitmentId);
-            if (
-              !commitment ||
-              commitment.userId !== input.userId ||
-              commitment.status !== "active"
-            ) {
+            if (commitment.status !== "active") {
               throw new Error("Commitment not found");
             }
 
@@ -1244,10 +1277,15 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
             } satisfies MemoryDocumentRecord;
 
             memoryDocumentStore.set(key, document);
+            const replacedChunkIds = new Set<string>();
             for (const chunk of [...memoryChunkStore.values()].filter(
               (candidate) => candidate.memoryDocumentId === document.id,
             )) {
+              replacedChunkIds.add(chunk.id);
               memoryChunkStore.delete(chunk.id);
+            }
+            for (const job of [...memoryIndexJobStore.values()]) {
+              if (replacedChunkIds.has(job.memoryChunkId)) memoryIndexJobStore.delete(job.id);
             }
 
             const chunks = memoryChunksFrom(input).map((chunkText, chunkIndex) => {

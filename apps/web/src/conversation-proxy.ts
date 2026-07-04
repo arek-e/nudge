@@ -143,7 +143,7 @@ function sseFrame(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-async function signAgentRequest(secret: string, userId: string, conversationId: string) {
+export async function signAgentRequest(secret: string, userId: string, conversationId: string) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),

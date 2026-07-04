@@ -24,6 +24,7 @@ import {
   type ObservabilityHonoEnv,
   requestObservability,
   retryAfterSecondsFor,
+  safeErrorFields,
   runWithRequestSpan,
   serverTiming,
   withRequestTraceContext,
@@ -180,9 +181,7 @@ export function createApp(options: CreateAppOptions = {}) {
     addWideEventFields(c, {
       status,
       outcome: "error",
-      errorType: error.name,
-      errorMessage: error.message,
-      ...(error.stack ? { errorStack: error.stack } : {}),
+      ...safeErrorFields(error),
       ...(retryAfterSeconds !== null
         ? { retryAfterSeconds, resilienceKind: "transient_backpressure" }
         : {}),
