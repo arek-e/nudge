@@ -1,8 +1,10 @@
 import type { Sandbox } from "@cloudflare/sandbox";
 
 export interface Env {
+  DB?: D1Database;
   MEDIA_FILES?: R2Bucket;
   OKF_FILES?: R2Bucket;
+  TRACE_ARTIFACTS?: R2Bucket;
   DAILY_DIGEST_WORKFLOW: Workflow;
   USER_AGENT_SESSION: DurableObjectNamespace;
   OKF_SANDBOX?: DurableObjectNamespace<Sandbox>;

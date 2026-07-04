@@ -26,6 +26,12 @@ export function registerApiRoutes(
     wideEventFieldsFrom((c) => apiRouteWideEventFields(c.req.path)),
   );
 
+  app.get("/api/traces/agent-runs/recent", async (c) => {
+    const limit = traceSummaryLimit(c.req.url);
+    const summaries = await listRecentAgentAndEvalRunSummaries(c.env.DB, limit);
+    return c.json(summaries);
+  });
+
   app.use("/api/*", async (c, next) => {
     const { appServices, runEffect } = await resolveRequestApp(c);
     const auth = await runWithRequestSpan(
@@ -129,6 +135,10 @@ export function registerApiRoutes(
             recordSpan,
             runEffect,
             session: auth,
+            ...(appServices.env.TRACE_ARTIFACTS !== undefined
+              ? { traceArtifacts: appServices.env.TRACE_ARTIFACTS }
+              : {}),
+            ...(appServices.env.DB !== undefined ? { traceDb: appServices.env.DB } : {}),
             traceHeaders: requestTraceHeaders(c),
             ...(appServices.turbopuffer ? { turbopuffer: appServices.turbopuffer } : {}),
             user,
@@ -153,6 +163,131 @@ function responseWithMutableHeaders(response: Response) {
   });
 }
 
+async function listRecentAgentAndEvalRunSummaries(traceDb: D1Database | undefined, limit: number) {
+  if (typeof traceDb?.prepare !== "function") return { agentRuns: [], evalRuns: [] };
+
+  const [agentRuns, evalRuns] = await Promise.all([
+    traceDb
+      .prepare(
+        `SELECT
+          id,
+          trace_id,
+          user_id,
+          agent_name,
+          status,
+          started_at,
+          completed_at,
+          summary,
+          artifact_key,
+          created_at
+        FROM agent_runs
+        ORDER BY started_at DESC
+        LIMIT ?`,
+      )
+      .bind(limit)
+      .all(),
+    traceDb
+      .prepare(
+        `SELECT
+          id,
+          suite_name,
+          status,
+          started_at,
+          completed_at,
+          summary,
+          artifact_key,
+          created_at
+        FROM eval_runs
+        ORDER BY started_at DESC
+        LIMIT ?`,
+      )
+      .bind(limit)
+      .all(),
+  ]);
+
+  return {
+    agentRuns: traceRows(agentRuns).map(agentRunSummaryFromRow).filter(isPresent),
+    evalRuns: traceRows(evalRuns).map(evalRunSummaryFromRow).filter(isPresent),
+  };
+}
+
+function traceSummaryLimit(requestUrl: string) {
+  const rawLimit = new URL(requestUrl).searchParams.get("limit");
+  const limit = Number(rawLimit ?? "20");
+  if (!Number.isFinite(limit)) return 20;
+  return Math.max(1, Math.min(100, Math.trunc(limit)));
+}
+
+function traceRows(result: { readonly results?: unknown }) {
+  return Array.isArray(result.results) ? result.results : [];
+}
+
+function isPresent<T>(value: T | null): value is T {
+  return value !== null;
+}
+
+function readRowProperty(row: unknown, key: string) {
+  return typeof row === "object" && row !== null ? Reflect.get(row, key) : undefined;
+}
+
+function readStringProperty(row: unknown, key: string) {
+  const value = readRowProperty(row, key);
+  return typeof value === "string" ? value : null;
+}
+
+function readJsonSummary(row: unknown): unknown | null {
+  const value = readStringProperty(row, "summary");
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function agentRunSummaryFromRow(row: unknown) {
+  const id = readStringProperty(row, "id");
+  const agentName = readStringProperty(row, "agent_name");
+  const status = readStringProperty(row, "status");
+  const startedAt = readStringProperty(row, "started_at");
+  const createdAt = readStringProperty(row, "created_at");
+  if (!id || !agentName || !status || !startedAt || !createdAt) return null;
+
+  return {
+    id,
+    traceId: readStringProperty(row, "trace_id"),
+    userId: readStringProperty(row, "user_id"),
+    agentName,
+    status,
+    startedAt,
+    completedAt: readStringProperty(row, "completed_at"),
+    summary: readJsonSummary(row),
+    artifactKey: readStringProperty(row, "artifact_key"),
+    createdAt,
+  };
+}
+
+function evalRunSummaryFromRow(row: unknown) {
+  const id = readStringProperty(row, "id");
+  const suiteName = readStringProperty(row, "suite_name");
+  const status = readStringProperty(row, "status");
+  const startedAt = readStringProperty(row, "started_at");
+  const createdAt = readStringProperty(row, "created_at");
+  if (!id || !suiteName || !status || !startedAt || !createdAt) return null;
+
+  return {
+    id,
+    suiteName,
+    status,
+    startedAt,
+    completedAt: readStringProperty(row, "completed_at"),
+    summary: readJsonSummary(row),
+    artifactKey: readStringProperty(row, "artifact_key"),
+    createdAt,
+  };
+}
+
 function apiRouteWideEventFields(path: string) {
   if (path.startsWith("/api/captures")) {
     return { routeName: "api.captures" };
@@ -175,6 +310,8 @@ function apiRouteWideEventFields(path: string) {
     return { routeName: "api.calendar" };
   } else if (path.startsWith("/api/agent-runs")) {
     return { routeName: "api.agent-runs" };
+  } else if (path.startsWith("/api/traces")) {
+    return { routeName: "api.traces" };
   } else if (path.startsWith("/api/signals")) {
     return { routeName: "api.signals" };
   } else if (path.startsWith("/api/syntheses")) {

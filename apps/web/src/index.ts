@@ -22,7 +22,10 @@ import {
   createSpanId,
   createTraceId,
   parseTraceparent,
+  persistAgentTraceRun,
+  safeErrorFields,
   traceparentHeader,
+  type AgentTraceRunInput,
   type RuntimeTraceContext,
   withRuntimeTraceContext,
 } from "@nudge/observability";
@@ -48,6 +51,30 @@ const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText 
 const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
 
 export default app;
+
+const persistDailyNoteAgentTrace = async (env: Env, input: AgentTraceRunInput) => {
+  if (typeof env.DB?.prepare !== "function") return;
+  try {
+    await persistAgentTraceRun(
+      {
+        artifactPrefix: "agent-runs/daily-note-analysis",
+        db: env.DB,
+        ...(env.TRACE_ARTIFACTS ? { artifactBucket: env.TRACE_ARTIFACTS } : {}),
+      },
+      input,
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        agentName: input.agentName,
+        event: "agent_trace_persist_failed",
+        logKind: "wide_event",
+        runId: input.id,
+        ...safeErrorFields(error),
+      }),
+    );
+  }
+};
 
 const runtimeTraceContextFromRequest = (
   env: Env,
@@ -893,6 +920,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
       input,
       "workflow.daily_note_analysis",
     );
+    const traceStartedAt = new Date().toISOString();
     await step.do(
       workflowStepName(workflowVersion, "daily-note-analysis-mark-running"),
       durableWorkflowStepConfig,
@@ -978,6 +1006,27 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
               userId: input.userId,
             }),
           );
+          await persistDailyNoteAgentTrace(this.env, {
+            agentName: "daily-note-analysis",
+            completedAt: new Date().toISOString(),
+            id: input.runId,
+            outcomeLabels: ["completed", `items:${persisted.itemCount}`, "summary:day-week"],
+            startedAt: traceStartedAt,
+            status: "completed",
+            toolCalls: [
+              {
+                resultCount: extraction.items.length,
+                status: "completed",
+                tool: "daily-note-analysis-extract-with-think",
+              },
+              {
+                resultCount: persisted.itemCount + 1,
+                status: "completed",
+                tool: "daily-note-analysis-persist-results",
+              },
+            ],
+            userId: input.userId,
+          });
           console.info(
             JSON.stringify({
               event: "daily_note_ai_extract_completed",
@@ -1006,6 +1055,21 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
               userId: input.userId,
             }),
           );
+          await persistDailyNoteAgentTrace(this.env, {
+            agentName: "daily-note-analysis",
+            completedAt: new Date().toISOString(),
+            id: input.runId,
+            outcomeLabels: ["failed", safeError.name],
+            startedAt: traceStartedAt,
+            status: "failed",
+            toolCalls: [
+              {
+                status: "failed",
+                tool: "daily-note-analysis",
+              },
+            ],
+            userId: input.userId,
+          });
           console.warn(
             JSON.stringify({
               event: "daily_note_ai_extract_failed",

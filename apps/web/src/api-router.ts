@@ -22,6 +22,7 @@ import {
   searchOkfFiles,
   type SaveJournalCaptureInput,
 } from "@nudge/effect-services";
+import { persistAgentTraceRun, safeErrorFields } from "@nudge/observability";
 import type { RequestSession } from "./request-context";
 import type { RunEffect } from "./Services/NudgeApp";
 import {
@@ -299,6 +300,8 @@ export interface ApiContext {
     task: () => Promise<A>,
   ) => Promise<A>;
   readonly runEffect: RunEffect;
+  readonly traceArtifacts?: R2Bucket;
+  readonly traceDb?: D1Database;
   readonly traceHeaders?: Readonly<Record<string, string>>;
   readonly turbopuffer?: {
     readonly apiKey: string;
@@ -428,7 +431,8 @@ export const apiRouter = api.router({
       );
     }),
     sendMessage: api.conversations.sendMessage.handler(async ({ context, input }) => {
-      return proxyConversationRequest(
+      const startedAt = new Date().toISOString();
+      const response = await proxyConversationRequest(
         context.agentSessions,
         context.agentInternalSecret,
         context.user,
@@ -441,6 +445,12 @@ export const apiRouter = api.router({
         },
         context.traceHeaders,
       );
+      await persistConversationAgentTrace(context, {
+        conversationId: input.conversationId,
+        response,
+        startedAt,
+      });
+      return response;
     }),
   },
   captures: {
@@ -884,6 +894,54 @@ export const apiRouter = api.router({
     }),
   },
 });
+
+async function persistConversationAgentTrace(
+  context: ApiContext,
+  input: {
+    readonly conversationId: string;
+    readonly response: {
+      readonly draft: unknown | null;
+      readonly memoryResults: ReadonlyArray<unknown>;
+      readonly usedTools: ReadonlyArray<string>;
+    };
+    readonly startedAt: string;
+  },
+) {
+  if (typeof context.traceDb?.prepare !== "function") return;
+
+  try {
+    await persistAgentTraceRun(
+      {
+        artifactPrefix: "agent-runs/conversation",
+        db: context.traceDb,
+        ...(context.traceArtifacts ? { artifactBucket: context.traceArtifacts } : {}),
+      },
+      {
+        agentName: "conversation-agent",
+        completedAt: new Date().toISOString(),
+        outcomeLabels: [
+          "completed",
+          `conversation:${input.conversationId}`,
+          input.response.draft ? "draft:proposal" : "draft:none",
+          `memory:${input.response.memoryResults.length}`,
+        ],
+        startedAt: input.startedAt,
+        status: "completed",
+        toolCalls: input.response.usedTools.map((tool) => ({ status: "completed", tool })),
+        userId: context.user.id,
+      },
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        agentName: "conversation-agent",
+        event: "agent_trace_persist_failed",
+        logKind: "wide_event",
+        ...safeErrorFields(error),
+      }),
+    );
+  }
+}
 
 function toSynthesisResponse(synthesis: {
   readonly id: string;

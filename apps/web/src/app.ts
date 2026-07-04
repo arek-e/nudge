@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { Layer } from "effect";
+import { createEvalTraceSink, runAgentEvalSuite } from "@nudge/evals";
 import type { Env } from "./env";
 import type { HonoHandlerContext } from "./request-context";
 import type { NudgeAppRuntime, NudgeOkfSandboxFactory, RunEffect } from "./Services/NudgeApp";
@@ -121,6 +122,38 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
+  app.post(
+    "/__internal/evals/agent",
+    wideEventFields({ routeName: "internal.evals.agent" }),
+    async (c) => {
+      if (!isEvalRunRequestAuthorized(c.req.raw, c.env)) return c.notFound();
+      if (typeof c.env.DB?.prepare !== "function") {
+        return c.json({ error: "D1 is not configured" }, 503);
+      }
+
+      const runId = crypto.randomUUID();
+      const artifactPrefix = "evals/cloudflare";
+      const report = await runAgentEvalSuite({
+        artifactSink: createEvalTraceSink({
+          artifactPrefix,
+          db: c.env.DB,
+          runId,
+          ...(c.env.TRACE_ARTIFACTS ? { artifactBucket: c.env.TRACE_ARTIFACTS } : {}),
+        }),
+      });
+
+      return c.json({
+        artifactKey: `${artifactPrefix}/${runId}.jsonl`,
+        candidateSummaries: report.candidateSummaries.length,
+        guidanceResults: report.guidanceResults.length,
+        passed: report.passed,
+        results: report.results.length,
+        runId,
+        score: report.score,
+      });
+    },
+  );
+
   registerStaticRoutes(app);
 
   app.on(["GET", "POST", "OPTIONS"], "/mcp", wideEventFields({ routeName: "mcp" }), async (c) => {
@@ -164,6 +197,12 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   return app;
+}
+
+function isEvalRunRequestAuthorized(request: Request, env: Env) {
+  const secret = env.AGENT_INTERNAL_SECRET?.trim();
+  if (!secret) return false;
+  return request.headers.get("x-nudge-eval-secret") === secret;
 }
 
 function clerkProxyUrl(requestUrl: string, env: Env) {

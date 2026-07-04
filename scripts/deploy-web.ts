@@ -88,6 +88,7 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
+run("bun run check");
 run("bun run build", { cwd: web, env: clientEnvironment });
 run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
 
