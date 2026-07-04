@@ -86,6 +86,12 @@ export function createApp(options: CreateAppOptions = {}) {
     if (!secretKey) return c.json({ error: "CLERK_SECRET_KEY is required" }, 503);
 
     const requestUrl = new URL(c.req.url);
+    if (requestUrl.pathname === "/__clerk/v1/proxy-health") {
+      return new Response("ok", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+
     const clerkPath = decodeClerkProxyPath(requestUrl.pathname.slice("/__clerk".length) || "/");
     const targetUrl = new URL(clerkPath, "https://frontend-api.clerk.dev");
     targetUrl.search = requestUrl.search;
