@@ -2,8 +2,14 @@ import type { ContractRouterClient } from "@orpc/contract";
 import type { JsonifiedClient } from "@orpc/openapi-client";
 import { createORPCClient } from "@orpc/client";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
+import {
+  buildSurfaceIdentityHeaders,
+  createSurfaceEngineClient,
+  type BuildSurfaceIdentityHeadersInput,
+} from "@nudge/surface";
 import { apiContract } from "../api-contract";
-import { anonymousIdentityHeaders } from "./anonymous-identity";
+import { anonymousIdentityHeaders, anonymousUserId } from "./anonymous-identity";
+import { currentAppSurface } from "./surface-runtime";
 
 type SessionTokenResolver = () => Promise<string | null>;
 
@@ -13,24 +19,27 @@ export function setSessionTokenResolver(resolver: SessionTokenResolver | null) {
   sessionTokenResolver = resolver;
 }
 
-async function nudgeRequestHeaders(input: HeadersInit = {}) {
+export async function nudgeRequestHeaders(input: HeadersInit = {}) {
   const headers = new Headers(input);
-  headers.set("x-nudge-client", nudgeClientSurface());
-  if (sessionTokenResolver) {
-    const token = await sessionTokenResolver();
-    if (token) {
-      headers.set("authorization", `Bearer ${token}`);
-    }
-    return headers;
-  }
-
-  const identityHeaders = anonymousIdentityHeaders();
-  headers.set("x-nudge-anonymous-user-id", identityHeaders["x-nudge-anonymous-user-id"]);
+  applyHeaders(headers, await surfaceIdentityHeaders());
   return headers;
 }
 
-function nudgeClientSurface() {
-  return window.nudgeDesktop?.surface ?? "web";
+async function surfaceIdentityHeaders() {
+  if (sessionTokenResolver) {
+    const token = await sessionTokenResolver();
+    return token
+      ? buildSurfaceIdentityHeaders({ bearerToken: token, surface: currentAppSurface() })
+      : buildSurfaceIdentityHeaders({ surface: currentAppSurface() });
+  }
+
+  return anonymousIdentityHeaders();
+}
+
+function applyHeaders(headers: Headers, values: Readonly<Record<string, string>>) {
+  for (const [key, value] of Object.entries(values)) {
+    headers.set(key, value);
+  }
 }
 
 const link = new OpenAPILink(apiContract, {
@@ -43,6 +52,30 @@ const link = new OpenAPILink(apiContract, {
 
 export const apiClient: JsonifiedClient<ContractRouterClient<typeof apiContract>> =
   createORPCClient(link);
+
+export async function createWebSurfaceEngineClient(
+  input: {
+    readonly baseUrl?: string;
+    readonly fetch?: (request: Request) => Promise<Response>;
+  } = {},
+) {
+  const identity = await surfaceEngineIdentity();
+  return createSurfaceEngineClient({
+    ...identity,
+    baseUrl: input.baseUrl ?? window.location.origin,
+    ...(input.fetch !== undefined ? { fetch: input.fetch } : {}),
+  });
+}
+
+async function surfaceEngineIdentity(): Promise<BuildSurfaceIdentityHeadersInput> {
+  const surface = currentAppSurface();
+  if (sessionTokenResolver) {
+    const token = await sessionTokenResolver();
+    return token ? { bearerToken: token, surface } : { surface };
+  }
+
+  return { anonymousUserId: anonymousUserId(), surface };
+}
 
 export async function streamConversationMessage(input: {
   readonly conversationId: string;

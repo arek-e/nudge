@@ -1,22 +1,19 @@
-const anonymousUserStorageKey = "nudge.anonymousUserID";
+import {
+  anonymousUserIdFromStorage,
+  buildSurfaceIdentityHeaders,
+  generatedAnonymousUserId,
+} from "@nudge/surface";
+import { currentAppSurface } from "./surface-runtime";
 
-export function generatedAnonymousUserId(randomUUID: () => string = crypto.randomUUID) {
-  return `anon_${randomUUID().toLowerCase()}`;
-}
+export { generatedAnonymousUserId };
 
 export function anonymousUserId() {
-  const storage = globalThis.localStorage;
-  const existing = storage.getItem(anonymousUserStorageKey)?.trim().toLowerCase();
-  if (existing?.startsWith("anon_")) return existing;
-
-  const userId = generatedAnonymousUserId();
-  storage.setItem(anonymousUserStorageKey, userId);
-  return userId;
+  return anonymousUserIdFromStorage({ storage: globalThis.localStorage });
 }
 
 export function anonymousIdentityHeaders() {
-  return {
-    "x-nudge-anonymous-user-id": anonymousUserId(),
-    "x-nudge-client": "web",
-  };
+  return buildSurfaceIdentityHeaders({
+    anonymousUserId: anonymousUserId(),
+    surface: currentAppSurface(),
+  });
 }

@@ -20,7 +20,7 @@ const mediaUploadSchema = z
     id: mediaIdSchema.optional(),
     kind: z.enum(["image", "voice"]),
     label: z.string().min(1).max(160),
-    mimeType: z.enum(["audio/mp4", "image/jpeg", "image/png"]),
+    mimeType: z.enum(["audio/mp4", "audio/webm", "image/jpeg", "image/png"]),
   })
   .strict();
 
@@ -29,7 +29,7 @@ export interface StoredMediaReference {
   readonly id: string;
   readonly kind: "image" | "voice";
   readonly label: string;
-  readonly mimeType: "audio/mp4" | "image/jpeg" | "image/png";
+  readonly mimeType: "audio/mp4" | "audio/webm" | "image/jpeg" | "image/png";
   readonly url: string;
 }
 
