@@ -1,6 +1,6 @@
 # Resilience
 
-Lares treats retries as normal, not exceptional. Durable mutating paths must be safe to replay after client timeouts, Worker restarts, Workflow retries, and D1 transient pressure.
+Nudge treats retries as normal, not exceptional. Durable mutating paths must be safe to replay after client timeouts, Worker restarts, Workflow retries, and D1 transient pressure.
 
 ## Current Guarantees
 

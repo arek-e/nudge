@@ -6,27 +6,146 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
-import { Db } from "@lares/db";
+import { Db } from "@nudge/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
   MemoryIndex,
+  NoteAnalysisWorkflows,
   PrimitiveWorkflows,
   workflowStepName,
+  type DailyNoteAnalysisExtractedItemInput,
+  type DailyNoteAnalysisWorkflowParams,
   type WorkflowVersion,
-} from "@lares/effect-services";
+} from "@nudge/effect-services";
 import {
+  createSpanId,
+  createTraceId,
+  parseTraceparent,
   persistAgentTraceRun,
   safeErrorFields,
+  traceparentHeader,
   type AgentTraceRunInput,
-} from "@lares/observability";
+  type RuntimeTraceContext,
+  withRuntimeTraceContext,
+} from "@nudge/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
 import { createApp } from "./app";
+import {
+  ensureBraintrustTracing,
+  runBraintrustSpan,
+  wrapBraintrustAISDK,
+} from "./braintrust-tracing";
+import {
+  DailyNoteExtractionHttpError,
+  dailyNoteAnalysisErrorCode,
+  dailyNoteAnalysisExtractionStepConfig,
+  dailyNoteAnalysisHttpStatus,
+  dailyNoteAnalysisResponseError,
+} from "./daily-note-analysis";
+import { resolveDbLayerForEnv } from "./db-layer";
 
 const app = createApp();
+const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText });
+const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
 
 export default app;
+
+const persistDailyNoteAgentTrace = async (env: Env, input: AgentTraceRunInput) => {
+  if (typeof env.DB?.prepare !== "function") return;
+  try {
+    await persistAgentTraceRun(
+      {
+        artifactPrefix: "agent-runs/daily-note-analysis",
+        db: env.DB,
+        ...(env.TRACE_ARTIFACTS ? { artifactBucket: env.TRACE_ARTIFACTS } : {}),
+      },
+      input,
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        agentName: input.agentName,
+        event: "agent_trace_persist_failed",
+        logKind: "wide_event",
+        runId: input.id,
+        ...safeErrorFields(error),
+      }),
+    );
+  }
+};
+
+const runtimeTraceContextFromRequest = (
+  env: Env,
+  request: Request,
+  service: string,
+  routeName: string,
+): RuntimeTraceContext => {
+  const incomingTrace = parseTraceparent(request.headers.get("traceparent"));
+  const traceId = incomingTrace?.traceId ?? createTraceId();
+  const rootSpanId = createSpanId();
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const path = new URL(request.url).pathname;
+
+  return {
+    environment: env.ENVIRONMENT ?? "unknown",
+    flags: incomingTrace?.flags ?? "01",
+    method: request.method,
+    parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
+    path,
+    requestId,
+    rootSpanId,
+    routeName,
+    service,
+    traceId,
+    version: env.APP_VERSION ?? "0.0.0",
+  };
+};
+
+const runtimeTraceContextFromWorkflow = (
+  env: Env,
+  input: NudgeWorkflowParams,
+  routeName: string,
+): RuntimeTraceContext => {
+  const incomingTrace =
+    input.kind === "daily-note-analysis" ? parseTraceparent(input.traceparent ?? null) : null;
+  const traceId = incomingTrace?.traceId ?? createTraceId();
+  const rootSpanId = createSpanId();
+
+  return {
+    environment: env.ENVIRONMENT ?? "unknown",
+    flags: incomingTrace?.flags ?? "01",
+    method: "WORKFLOW",
+    parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
+    path: routeName,
+    requestId: input.kind === "daily-note-analysis" ? (input.requestId ?? null) : null,
+    rootSpanId,
+    routeName,
+    service: "nudge-workflow",
+    traceId,
+    version: env.APP_VERSION ?? "0.0.0",
+  };
+};
+
+const runRuntimeDbEffect = <A, E>(
+  env: Env,
+  traceContext: RuntimeTraceContext | undefined,
+  effect: Effect.Effect<A, E, Db>,
+) => {
+  const provided = Effect.provide(effect, resolveDbLayerForEnv(env));
+  if (traceContext) return Effect.runPromise(withRuntimeTraceContext(provided, traceContext));
+  return Effect.runPromise(provided);
+};
+
+const traceHeadersFromContext = (traceContext: RuntimeTraceContext) => ({
+  traceparent: traceparentHeader({
+    flags: traceContext.flags,
+    spanId: traceContext.rootSpanId,
+    traceId: traceContext.traceId,
+  }),
+  ...(traceContext.requestId ? { "x-request-id": traceContext.requestId } : {}),
+});
 
 interface UserAgentSessionState {
   readonly conversationId: string | null;
@@ -38,10 +157,14 @@ interface UserAgentSessionState {
     readonly tool: "listRecentSignals" | "retrieveMemory" | "reply";
   }>;
   readonly updatedAt: string | null;
-  readonly userId: string;
+  readonly userId: string | null;
 }
 
-interface LaresUserRef {
+type RecentToolEvent = UserAgentSessionState["recentToolEvents"][number];
+
+const recentToolEvent = (event: RecentToolEvent) => event;
+
+interface NudgeUserRef {
   readonly displayName: string;
   readonly id: string;
 }
@@ -56,7 +179,8 @@ interface LoopIntakeDraftInput {
     readonly text: string;
   }>;
   readonly message: string;
-  readonly user: LaresUserRef;
+  readonly traceContext?: RuntimeTraceContext;
+  readonly user: NudgeUserRef;
 }
 
 interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
@@ -67,6 +191,15 @@ interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
     readonly title: string;
   } | null;
   readonly fallbackReply: string;
+}
+
+interface AgentReceiptView {
+  readonly id: string;
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
 }
 
 const thinkExtractedItemSchema = z.object({
@@ -85,14 +218,45 @@ const thinkDailyNoteExtractionSchema = z.object({
   items: z.array(thinkExtractedItemSchema).default([]),
 });
 
+const replyRequestBodySchema = z.object({
+  message: z.string().optional(),
+});
+
+const journalInterpretRequestBodySchema = z.object({
+  changedText: z.string().optional(),
+  documentId: z.string().optional(),
+  localDate: z.string().optional(),
+  revisionId: z.string().optional(),
+});
+
+const extractionHttpErrorBodySchema = z.object({
+  error: z.string().optional(),
+  errorCode: z.string().optional(),
+});
+
 type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> & {
   readonly model: string;
   readonly provider: "cloudflare-think";
 };
 
+function dailyNoteAnalysisItemsFrom(
+  items: ThinkDailyNoteExtraction["items"],
+): ReadonlyArray<DailyNoteAnalysisExtractedItemInput> {
+  return items.map((item) => ({
+    body: item.body,
+    ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
+    ...(item.dueAt !== undefined ? { dueAt: item.dueAt } : {}),
+    ...(item.eventEndsAt !== undefined ? { eventEndsAt: item.eventEndsAt } : {}),
+    ...(item.eventStartsAt !== undefined ? { eventStartsAt: item.eventStartsAt } : {}),
+    kind: item.kind,
+    ...(item.remindAt !== undefined ? { remindAt: item.remindAt } : {}),
+    title: item.title,
+  }));
+}
+
 const reasoningHarness = {
-  name: "think" as const,
-  runtime: "cloudflare-agents" as const,
+  name: "think",
+  runtime: "cloudflare-agents",
 };
 
 const initialUserAgentSessionState = {
@@ -101,60 +265,8 @@ const initialUserAgentSessionState = {
   recentMemoryRetrievalsAt: [],
   recentToolEvents: [],
   updatedAt: null,
-  userId: "dev-user",
+  userId: null,
 } satisfies UserAgentSessionState;
-
-const normalizeDedupe = (text: string) =>
-  text
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-|-$/g, "")
-    .slice(0, 96);
-
-const weekRangeFor = (localDate: string) => {
-  const date = new Date(`${localDate}T00:00:00.000Z`);
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const start = new Date(date);
-  start.setUTCDate(date.getUTCDate() + mondayOffset);
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  return { end: end.toISOString().slice(0, 10), start: start.toISOString().slice(0, 10) };
-};
-
-const dailySummaryFrom = (input: {
-  readonly items: ReadonlyArray<{ readonly kind: string; readonly title: string }>;
-  readonly noteText: string;
-}) => {
-  const actionText = input.items.length
-    ? input.items.map((item) => `${item.kind}: ${item.title}`).join("; ")
-    : "No extracted actions.";
-  return [`Actions: ${actionText}`, `Context: ${input.noteText.slice(0, 500)}`].join("\n");
-};
-
-const persistDailyNoteAgentTrace = async (env: Env, input: AgentTraceRunInput) => {
-  if (typeof env.DB?.prepare !== "function") return;
-  try {
-    await persistAgentTraceRun(
-      {
-        artifactBucket: env.TRACE_ARTIFACTS,
-        artifactPrefix: "agent-runs/daily-note-analysis",
-        db: env.DB,
-      },
-      input,
-    );
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        agentName: input.agentName,
-        event: "agent_trace_persist_failed",
-        logKind: "wide_event",
-        runId: input.id,
-        ...safeErrorFields(error),
-      }),
-    );
-  }
-};
 
 export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   initialState = initialUserAgentSessionState;
@@ -193,20 +305,22 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private resolveUser(request: Request) {
+    const id = request.headers.get("x-nudge-user-id");
+    if (!id) return null;
     return {
-      displayName: request.headers.get("x-lares-user-display-name") ?? "Lares User",
-      id: request.headers.get("x-lares-user-id") ?? "dev-user",
+      displayName: request.headers.get("x-nudge-user-display-name") ?? "Nudge User",
+      id,
     };
   }
 
   private async verifyInternalRequest(
     request: Request,
-    user: LaresUserRef,
+    user: NudgeUserRef,
     conversationId: string,
   ) {
-    const secret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+    const secret = this.env.AGENT_INTERNAL_SECRET;
     if (!secret) return true;
-    const providedSignature = request.headers.get("x-lares-internal-signature");
+    const providedSignature = request.headers.get("x-nudge-internal-signature");
     if (!providedSignature) return false;
     const expectedSignature = await signAgentRequest(secret, user.id, conversationId);
     return providedSignature === expectedSignature;
@@ -222,8 +336,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async metadata(request: Request) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -231,7 +346,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
     return Response.json({
       conversationId,
-      userId: state.userId,
+      userId: state.userId ?? user.id,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       recentToolEvents: state.recentToolEvents,
@@ -244,20 +359,26 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async listRecentSignals(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.list_recent_signals",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 50);
-    const signals = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.listSignals({
-          user,
-          limit,
-        }),
-        Db.layerD1(this.env.DB),
-      ),
+    const signals = await runRuntimeDbEffect(
+      this.env,
+      traceContext,
+      PrimitiveWorkflows.listSignals({
+        user,
+        limit,
+      }),
     );
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -267,7 +388,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: signals.length, tool: "listRecentSignals" as const },
+        recentToolEvent({ at: timestamp, resultCount: signals.length, tool: "listRecentSignals" }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -291,8 +412,15 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async retrieveMemory(request: Request, url: URL) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.retrieve_memory",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
@@ -314,11 +442,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
           region: this.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
         })
       : MemoryIndex.layerMemory;
-    const retrieved = await Effect.runPromise(
+    const retrieved = await runRuntimeDbEffect(
+      this.env,
+      traceContext,
       Effect.gen(function* () {
         const memoryIndex = yield* MemoryIndex;
         return yield* memoryIndex.retrieve({ limit, query, user });
-      }).pipe(Effect.provide(memoryIndexLayer), Effect.provide(Db.layerD1(this.env.DB))),
+      }).pipe(Effect.provide(memoryIndexLayer)),
     );
     const timestamp = now.toISOString();
 
@@ -327,7 +457,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt,
       recentToolEvents: [
-        { at: timestamp, resultCount: retrieved.results.length, tool: "retrieveMemory" as const },
+        recentToolEvent({
+          at: timestamp,
+          resultCount: retrieved.results.length,
+          tool: "retrieveMemory",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -342,21 +476,34 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
   }
 
   private async prepareReply(request: Request) {
-    const conversationId = request.headers.get("x-lares-conversation-id") ?? "default";
+    const traceContext = runtimeTraceContextFromRequest(
+      this.env,
+      request,
+      "nudge-agent",
+      "agent.reply",
+    );
+    const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, conversationId))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
-    const body = (await request.json()) as { readonly message?: string };
+    const body = replyRequestBodySchema.parse(await request.json());
     const message = String(body.message ?? "").trim();
     const previous = this.state ?? initialUserAgentSessionState;
     const now = new Date();
     const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
     const memoryResults = recentMemoryRetrievalsAt
-      ? await this.retrieveMemoryResults(user, message, 5)
+      ? await this.retrieveMemoryResults(user, message, 5, traceContext)
       : [];
     const intake = await this.subAgent(LoopIntakeThinkAgent, "current-state");
-    const draft = await intake.draftFromMessage({ conversationId, memoryResults, message, user });
+    const draft = await intake.draftFromMessage({
+      conversationId,
+      memoryResults,
+      message,
+      traceContext,
+      user,
+    });
     const timestamp = now.toISOString();
 
     this.setState({
@@ -364,8 +511,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" as const },
-        { at: timestamp, resultCount: memoryResults.length, tool: "retrieveMemory" as const },
+        recentToolEvent({ at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" }),
+        recentToolEvent({
+          at: timestamp,
+          resultCount: memoryResults.length,
+          tool: "retrieveMemory",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -386,6 +537,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       memoryResults,
       message,
       reasoningHarness,
+      receipt: draft.receipt,
       reply: draft.reply,
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
@@ -418,25 +570,57 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 
   private async interpretJournal(request: Request) {
     const user = this.resolveUser(request);
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
     if (!(await this.verifyInternalRequest(request, user, "journal"))) {
       return Response.json({ error: "forbidden" }, { status: 403 });
     }
-    const body = (await request.json()) as {
-      readonly changedText?: string;
-      readonly documentId?: string;
-      readonly localDate?: string;
-      readonly revisionId?: string;
-    };
+    const body = journalInterpretRequestBodySchema.parse(await request.json());
     const changedText = String(body.changedText ?? "").trim();
     const localDate = String(body.localDate ?? "today");
     let extraction: ThinkDailyNoteExtraction = {
       items: [],
-      model: this.env.THINK_MODEL,
+      model: extractionModelName(this.env),
       provider: "cloudflare-think",
     };
     if (changedText.length > 0) {
       const intake = await this.subAgent(LoopIntakeThinkAgent, "journal-current-state");
-      extraction = await intake.extractDailyNote({ changedText, localDate });
+      ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
+      try {
+        extraction = await runBraintrustSpan(
+          {
+            attributes: {
+              "nudge.ai.changed_text_chars": changedText.length,
+              "nudge.ai.local_date": localDate,
+              "nudge.ai.revision_id": String(body.revisionId ?? ""),
+              "nudge.ai.system": "cloudflare-think",
+            },
+            name: "journal.interpret.extract_daily_note",
+            type: "task",
+          },
+          () => intake.extractDailyNote({ changedText, localDate }),
+        );
+      } catch (error) {
+        const errorCode = dailyNoteAnalysisErrorCode(error);
+        const safeError =
+          error instanceof Error ? error : new Error("Daily note extraction failed");
+        console.warn(
+          JSON.stringify({
+            event: "daily_note_ai_extract_request_failed",
+            errorCode,
+            errorType: safeError.name,
+            logKind: "wide_event",
+            model: extractionModelName(this.env),
+            provider: "cloudflare-think",
+          }),
+        );
+        return Response.json(
+          {
+            error: dailyNoteAnalysisResponseError(errorCode),
+            errorCode,
+          },
+          { status: dailyNoteAnalysisHttpStatus(errorCode) },
+        );
+      }
     }
     const timestamp = new Date().toISOString();
     const previous = this.state ?? initialUserAgentSessionState;
@@ -445,7 +629,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       createdAt: previous.createdAt ?? timestamp,
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
-        { at: timestamp, resultCount: changedText.length > 0 ? 1 : 0, tool: "reply" as const },
+        recentToolEvent({
+          at: timestamp,
+          resultCount: changedText.length > 0 ? 1 : 0,
+          tool: "reply",
+        }),
         ...previous.recentToolEvents,
       ].slice(0, 20),
       updatedAt: timestamp,
@@ -455,7 +643,12 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return Response.json(extraction);
   }
 
-  private async retrieveMemoryResults(user: LaresUserRef, query: string, limit: number) {
+  private async retrieveMemoryResults(
+    user: NudgeUserRef,
+    query: string,
+    limit: number,
+    traceContext?: RuntimeTraceContext,
+  ) {
     if (query.trim().length === 0) return [];
     try {
       const memoryIndexLayer = this.env.TURBOPUFFER_API_KEY
@@ -464,11 +657,13 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
             region: this.env.TURBOPUFFER_REGION ?? "aws-eu-west-1",
           })
         : MemoryIndex.layerMemory;
-      const retrieved = await Effect.runPromise(
+      const retrieved = await runRuntimeDbEffect(
+        this.env,
+        traceContext,
         Effect.gen(function* () {
           const memoryIndex = yield* MemoryIndex;
           return yield* memoryIndex.retrieve({ limit, query, user });
-        }).pipe(Effect.provide(memoryIndexLayer), Effect.provide(Db.layerD1(this.env.DB))),
+        }).pipe(Effect.provide(memoryIndexLayer)),
       );
       return [...retrieved.results];
     } catch (error) {
@@ -490,7 +685,13 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   workspaceBash = false;
 
   getModel(): LanguageModel {
+    ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
     return createWorkersAI({ binding: this.env.AI })(this.env.THINK_MODEL);
+  }
+
+  getExtractionModel(): LanguageModel {
+    ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
+    return createWorkersAI({ binding: this.env.AI })(extractionModelName(this.env));
   }
 
   getSystemPrompt(): string {
@@ -515,9 +716,9 @@ export class LoopIntakeThinkAgent extends Think<Env> {
           `Draft rationale: ${input.draft.rationale}`,
         ].join("\n")
       : "No review draft was created.";
-    const result = streamText({
+    const result = tracedAI.streamText({
       abortSignal: AbortSignal.timeout(30_000),
-      experimental_transform: smoothStream({
+      experimental_transform: tracedAI.smoothStream({
         chunking: "word",
         delayInMs: 20,
       }),
@@ -538,7 +739,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return result.toTextStreamResponse({
       headers: {
         "cache-control": "no-cache",
-        "x-lares-conversation-id": input.conversationId,
+        "x-nudge-conversation-id": input.conversationId,
       },
     });
   }
@@ -547,9 +748,9 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     readonly changedText: string;
     readonly localDate: string;
   }): Promise<ThinkDailyNoteExtraction> {
-    const { object } = await generateObject({
+    const { object } = await tracedAI.generateObject({
       abortSignal: AbortSignal.timeout(10_000),
-      model: this.getModel(),
+      model: this.getExtractionModel(),
       prompt: dailyNoteExtractionPrompt(input),
       schema: thinkDailyNoteExtractionSchema,
     });
@@ -557,40 +758,71 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     return {
       ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
       items: object.items,
-      model: this.env.THINK_MODEL,
+      model: extractionModelName(this.env),
       provider: "cloudflare-think",
     };
   }
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
     const occurredAt = new Date().toISOString();
-    const signal = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.appendSignal({
-          idempotencyKey: `agent:${input.conversationId}:${input.message}`,
-          occurredAt,
-          payload: { note: input.message },
-          schemaVersion: 1,
-          source: "lares_agent_intake",
-          type: "manual_check_in_submitted",
-          user: input.user,
-        }),
-        Db.layerD1(this.env.DB),
-      ),
+    const signal = await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.appendSignal({
+        idempotencyKey: `agent:${input.conversationId}:${input.message}`,
+        occurredAt,
+        payload: { note: input.message },
+        schemaVersion: 1,
+        source: "nudge_agent_intake",
+        type: "manual_check_in_submitted",
+        user: input.user,
+      }),
     );
-    await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
-        Db.layerD1(this.env.DB),
-      ),
+    await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.createSynthesis({ frameKey: "current_state", user: input.user }),
     );
-    const proposals = await Effect.runPromise(
-      Effect.provide(
-        PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
-        Db.layerD1(this.env.DB),
-      ),
+    const proposals = await runRuntimeDbEffect(
+      this.env,
+      input.traceContext,
+      PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
     );
     const proposal = proposals[0];
+    let receipt: AgentReceiptView | null = null;
+    if (proposal) {
+      const changed = {
+        proposalId: proposal.id,
+        status: proposal.status,
+        title: proposal.title,
+      };
+      const receiptSignal = await runRuntimeDbEffect(
+        this.env,
+        input.traceContext,
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent-receipt:proposal.generated:${proposal.id}`,
+          occurredAt: new Date().toISOString(),
+          payload: {
+            action: "proposal.generated",
+            changed,
+            signalIds: [signal.id],
+            why: proposal.rationale,
+          },
+          schemaVersion: 1,
+          source: "nudge_agent_session",
+          type: "agent.receipt",
+          user: input.user,
+        }),
+      );
+      receipt = {
+        id: receiptSignal.id,
+        action: "proposal.generated",
+        changed,
+        createdAt: receiptSignal.createdAt,
+        signalIds: [signal.id],
+        why: proposal.rationale,
+      };
+    }
 
     return {
       draft: proposal
@@ -608,7 +840,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
               createdAt: proposal.createdAt,
               updatedAt: proposal.updatedAt,
             },
-            requiresReview: true as const,
+            requiresReview: true,
             signal: {
               id: signal.id,
               userId: signal.userId,
@@ -621,6 +853,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
             },
           }
         : null,
+      receipt,
       reply: proposal
         ? input.memoryResults.length > 0
           ? `I found ${input.memoryResults.length} related memory and drafted a reviewable next step from your message.`
@@ -653,24 +886,10 @@ export interface DailyDigestWorkflowParams {
   workflowVersion?: WorkflowVersion;
 }
 
-export interface DailyNoteAnalysisWorkflowParams {
-  changedText: string;
-  documentId: string;
-  kind: "daily-note-analysis";
-  localDate: string;
-  noteId: string;
-  revisionId: string;
-  runId: string;
-  title: string;
-  userDisplayName: string;
-  userId: string;
-  workflowVersion?: WorkflowVersion;
-}
+type NudgeWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
 
-type LaresWorkflowParams = DailyDigestWorkflowParams | DailyNoteAnalysisWorkflowParams;
-
-export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowParams> {
-  async run(event: WorkflowEvent<LaresWorkflowParams>, step: WorkflowStep) {
+export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowParams> {
+  async run(event: WorkflowEvent<NudgeWorkflowParams>, step: WorkflowStep) {
     const input = event.payload;
     const workflowVersion = input.workflowVersion ?? currentWorkflowVersion;
 
@@ -696,20 +915,40 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
     workflowVersion: WorkflowVersion,
     step: WorkflowStep,
   ) {
+    const traceContext = runtimeTraceContextFromWorkflow(
+      this.env,
+      input,
+      "workflow.daily_note_analysis",
+    );
     const traceStartedAt = new Date().toISOString();
+    await step.do(
+      workflowStepName(workflowVersion, "daily-note-analysis-mark-running"),
+      durableWorkflowStepConfig,
+      async () => {
+        await runRuntimeDbEffect(
+          this.env,
+          traceContext,
+          NoteAnalysisWorkflows.markAnalysisRunRunning({
+            runId: input.runId,
+            userId: input.userId,
+          }),
+        );
+      },
+    );
+
     try {
       const extraction = await step.do(
         workflowStepName(workflowVersion, "daily-note-analysis-extract-with-think"),
-        durableWorkflowStepConfig,
+        dailyNoteAnalysisExtractionStepConfig,
         async () => {
           const agentId = this.env.USER_AGENT_SESSION.idFromName(`${input.userId}:journal`);
           const agent = this.env.USER_AGENT_SESSION.get(agentId);
-          const internalSecret = this.env.AGENT_INTERNAL_SECRET ?? this.env.BETTER_AUTH_SECRET;
+          const internalSecret = this.env.AGENT_INTERNAL_SECRET;
           const internalSignature = internalSecret
             ? await signAgentRequest(internalSecret, input.userId, "journal")
             : undefined;
           const response = await agent.fetch(
-            new Request("https://lares.local/journal/interpret", {
+            new Request("https://nudge.local/journal/interpret", {
               body: JSON.stringify({
                 changedText: input.changedText,
                 documentId: input.documentId,
@@ -718,15 +957,25 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
               }),
               headers: {
                 "content-type": "application/json",
-                "x-lares-conversation-id": "journal",
-                ...(internalSignature ? { "x-lares-internal-signature": internalSignature } : {}),
-                "x-lares-user-display-name": input.userDisplayName,
-                "x-lares-user-id": input.userId,
+                ...traceHeadersFromContext(traceContext),
+                "x-nudge-conversation-id": "journal",
+                ...(internalSignature ? { "x-nudge-internal-signature": internalSignature } : {}),
+                "x-nudge-user-display-name": input.userDisplayName,
+                "x-nudge-user-id": input.userId,
               },
               method: "POST",
             }),
           );
-          if (!response.ok) throw new Error(`Think extraction failed with ${response.status}`);
+          if (!response.ok) {
+            let responseError: string | null = null;
+            try {
+              const body = extractionHttpErrorBodySchema.parse(await response.json());
+              responseError = body.errorCode ?? body.error ?? null;
+            } catch {
+              responseError = null;
+            }
+            throw new DailyNoteExtractionHttpError(response.status, responseError);
+          }
           return thinkDailyNoteExtractionSchema
             .extend({ model: z.string(), provider: z.literal("cloudflare-think") })
             .parse(await response.json());
@@ -737,121 +986,31 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
         workflowStepName(workflowVersion, "daily-note-analysis-persist-results"),
         durableWorkflowStepConfig,
         async () => {
-          const layer = Db.layerD1(this.env.DB);
-          const extractedItems = await Promise.all(
-            extraction.items.map(async (extracted) =>
-              Effect.runPromise(
-                Effect.provide(
-                  Effect.gen(function* () {
-                    const database = yield* Db;
-                    const item = yield* database.upsertExtractedItem({
-                      body: extracted.body,
-                      confidence: extracted.confidence ?? 0.74,
-                      dedupeKey: `${extracted.kind}:${normalizeDedupe(`${extracted.title}:${extracted.body}`)}`,
-                      ...(extracted.dueAt ? { dueAt: extracted.dueAt } : {}),
-                      ...(extracted.eventEndsAt ? { eventEndsAt: extracted.eventEndsAt } : {}),
-                      ...(extracted.eventStartsAt
-                        ? { eventStartsAt: extracted.eventStartsAt }
-                        : {}),
-                      kind: extracted.kind,
-                      metadata: { extractor: "cloudflare-think" },
-                      ...(extracted.remindAt ? { remindAt: extracted.remindAt } : {}),
-                      sourceNoteId: input.noteId,
-                      sourceRevisionId: input.revisionId,
-                      status: "proposed",
-                      title: extracted.title,
-                      userId: input.userId,
-                    });
-                    yield* database.recordItemEvent({
-                      eventType: "created",
-                      itemId: item.id,
-                      payload: { sourceRevisionId: input.revisionId },
-                      userId: input.userId,
-                    });
-                    yield* database.upsertMemoryDocument({
-                      bodyText: `${item.title}\n${item.body}`,
-                      localDate: input.localDate,
-                      sourceId: item.id,
-                      sourceType: "extracted_item",
-                      title: item.title,
-                      userId: input.userId,
-                    });
-                    return item;
-                  }),
-                  layer,
-                ),
-              ),
-            ),
-          );
-          const dailySummary = await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                return yield* database.upsertSummaryDocument({
-                  body:
-                    extraction.dailySummary ??
-                    dailySummaryFrom({ items: extractedItems, noteText: input.changedText }),
-                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                  periodEnd: input.localDate,
-                  periodStart: input.localDate,
-                  periodType: "day",
-                  sourceItemIds: extractedItems.map((item) => item.id),
-                  sourceNoteIds: [input.noteId],
-                  status: "ready",
-                  title: `${input.localDate} summary`,
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
-          );
-          const week = weekRangeFor(input.localDate);
-          const weeklySummary = await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                return yield* database.upsertSummaryDocument({
-                  body: `Week so far: ${dailySummary.body}`,
-                  metadata: { generatedBy: "cloudflare-think", model: extraction.model },
-                  periodEnd: week.end,
-                  periodStart: week.start,
-                  periodType: "week",
-                  sourceItemIds: extractedItems.map((item) => item.id),
-                  sourceNoteIds: [input.noteId],
-                  status: "ready",
-                  title: `${week.start} week summary`,
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
-          );
-          await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                yield* database.completeAgentRun({
-                  outputs: [
-                    ...extractedItems.map((item) => ({
-                      outputId: item.id,
-                      outputType: "extracted_item" as const,
-                    })),
-                    { outputId: dailySummary.id, outputType: "summary" as const },
-                    { outputId: weeklySummary.id, outputType: "summary" as const },
-                  ],
-                  runId: input.runId,
-                  status: "completed",
-                  userId: input.userId,
-                });
-              }),
-              layer,
-            ),
+          const persisted = await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            NoteAnalysisWorkflows.persistAnalysisResults({
+              changedText: input.changedText,
+              extraction: {
+                ...(extraction.dailySummary !== undefined
+                  ? { dailySummary: extraction.dailySummary }
+                  : {}),
+                items: dailyNoteAnalysisItemsFrom(extraction.items),
+                model: extraction.model,
+                provider: extraction.provider,
+              },
+              localDate: input.localDate,
+              noteId: input.noteId,
+              revisionId: input.revisionId,
+              runId: input.runId,
+              userId: input.userId,
+            }),
           );
           await persistDailyNoteAgentTrace(this.env, {
             agentName: "daily-note-analysis",
             completedAt: new Date().toISOString(),
             id: input.runId,
-            outcomeLabels: ["completed", `items:${extractedItems.length}`, "summary:day-week"],
+            outcomeLabels: ["completed", `items:${persisted.itemCount}`, "summary:day-week"],
             startedAt: traceStartedAt,
             status: "completed",
             toolCalls: [
@@ -861,7 +1020,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
                 tool: "daily-note-analysis-extract-with-think",
               },
               {
-                resultCount: extractedItems.length + 2,
+                resultCount: persisted.itemCount + 1,
                 status: "completed",
                 tool: "daily-note-analysis-persist-results",
               },
@@ -871,34 +1030,30 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
           console.info(
             JSON.stringify({
               event: "daily_note_ai_extract_completed",
-              itemCount: extractedItems.length,
+              itemCount: persisted.itemCount,
               logKind: "wide_event",
               model: extraction.model,
               provider: "cloudflare-think",
             }),
           );
-          return { itemCount: extractedItems.length, ok: true, userId: input.userId };
+          return { itemCount: persisted.itemCount, ok: true, userId: input.userId };
         },
       );
     } catch (error) {
       const safeError = error instanceof Error ? error : new Error("Daily note analysis failed");
+      const errorCode = dailyNoteAnalysisErrorCode(safeError);
       await step.do(
         workflowStepName(workflowVersion, "daily-note-analysis-mark-failed"),
         durableWorkflowStepConfig,
         async () => {
-          await Effect.runPromise(
-            Effect.provide(
-              Effect.gen(function* () {
-                const database = yield* Db;
-                yield* database.completeAgentRun({
-                  errorCode: safeError.name,
-                  runId: input.runId,
-                  status: "failed",
-                  userId: input.userId,
-                });
-              }),
-              Db.layerD1(this.env.DB),
-            ),
+          await runRuntimeDbEffect(
+            this.env,
+            traceContext,
+            NoteAnalysisWorkflows.markAnalysisRunFailed({
+              errorCode,
+              runId: input.runId,
+              userId: input.userId,
+            }),
           );
           await persistDailyNoteAgentTrace(this.env, {
             agentName: "daily-note-analysis",
@@ -918,9 +1073,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, LaresWorkflowPa
           console.warn(
             JSON.stringify({
               event: "daily_note_ai_extract_failed",
+              errorCode,
               errorType: safeError.name,
               logKind: "wide_event",
-              model: this.env.THINK_MODEL,
+              model: extractionModelName(this.env),
               provider: "cloudflare-think",
             }),
           );

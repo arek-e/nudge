@@ -2,9 +2,9 @@
 
 Status: accepted direction. Current conversation endpoints use request/response POSTs; SSE is the first choice when token or workflow-progress streaming is added.
 
-Lares uses a React single-page app served by the Cloudflare Worker as the first frontend architecture. The app should use TanStack Router for client routing and TanStack Query for API state. Hono and oRPC remain the backend API boundary for user-owned data, OpenAPI documentation, auth, observability, D1, Durable Objects, and Workers Workflows.
+Nudge uses a React single-page app served by the Nudge Engine as the first frontend architecture. The app should use TanStack Router for client routing and TanStack Query for API state. Hono and oRPC remain the Engine API boundary for user-owned data, OpenAPI documentation, auth, observability, D1, Durable Objects, and Workers Workflows.
 
-TanStack Start server functions should not be introduced yet. They would create a second server-action boundary that overlaps with the existing Worker API and complicates the product's public OpenAPI integration contract before Lares needs SSR or colocated server mutations. Revisit TanStack Start if the app needs SSR for shareable pages, SEO-sensitive public surfaces, or route-level server loading that cannot be handled cleanly by the Worker API.
+TanStack Start server functions should not be introduced yet. They would create a second server-action boundary that overlaps with the existing Worker API and complicates the product's public OpenAPI integration contract before Nudge needs SSR or colocated server mutations. Revisit TanStack Start if the app needs SSR for shareable pages, SEO-sensitive public surfaces, or route-level server loading that cannot be handled cleanly by the Worker API.
 
 For agent and chat experiences, use Server-Sent Events first for model tokens, workflow progress, and append-only agent status updates. SSE fits the first Daily Operating Loop because most early streams are server-to-client, work well through normal HTTP infrastructure, are easy to resume or replay from durable events, and keep the API contract simpler than WebSockets.
 

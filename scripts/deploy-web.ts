@@ -1,11 +1,13 @@
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
+const wrangler = `${root}node_modules/.bin/wrangler`;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
+const containersRolloutArg = process.argv.find((arg) => arg.startsWith("--containers-rollout="));
 const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
 const requestedVersion = versionArg?.slice("--version=".length).trim();
 
@@ -52,19 +54,44 @@ if (status && !allowDirty) {
 const commit = output("git rev-parse --short HEAD");
 const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit);
 const deployEnvironment = env ?? "production";
+const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
+  production: {
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
+    VITE_CLERK_PROXY_URL: "/__clerk",
+    VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
+  },
+  staging: {
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
+    VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
+    VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+  },
+};
+const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
+if (!clientEnvironment) {
+  console.error(`Unknown deploy environment: ${deployEnvironment}`);
+  process.exit(1);
+}
+const deployTargetArgs = [`--env ${deployEnvironment}`];
+const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
+const containersRollout =
+  containersRolloutArg ?? (deployEnvironment === "production" ? "--containers-rollout=none" : "");
 const deployArgs = [
-  env ? `--env ${env}` : "",
+  ...deployTargetArgs,
+  containersRollout,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
+  `--var CONVEX_URL:${serverConvexUrl}`,
   `--tag ${version}`,
   `--message ${JSON.stringify(`Deploy ${version}`)}`,
 ]
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run check");
-run("mise exec -- bun run build", { cwd: web });
-run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
+run("bun run check");
+run("bun run build", { cwd: web, env: clientEnvironment });
+run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
 
-console.log(`${dryRun ? "Dry-run verified" : "Deployed"} lares-web at ${version}`);
+console.log(
+  `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,
+);

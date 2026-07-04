@@ -1,210 +1,139 @@
 <div align="center">
 
-# Lares
+<img src="apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.svg" alt="Nudge" width="240">
 
-**A private operating layer for personal context and agentic work**
+# Nudge
 
-Cloudflare-native. OpenAPI-first. Human-in-the-loop by default.
+## The private context layer for notes, memory, and reviewable AI.
 
-[Live App](https://lares-web.teampitch.workers.dev/) &middot; [API Docs](https://lares-web.teampitch.workers.dev/api/docs) &middot; [OpenAPI](https://lares-web.teampitch.workers.dev/api/openapi.json)
+[Website](https://explorenudge.com/) · [App](https://app.explorenudge.com/) · [Downloads](https://explorenudge.com/) · [Docs](docs/product-vision.md) · [API](https://nudge-web.teampitch.workers.dev/api/docs)
+
+<br>
+
+<img src="apps/marketing/public/images/nudge-hero-open-sky.png" alt="Nudge sticky notes turning into reviewed next steps" width="760">
 
 </div>
 
----
+## Why Nudge
 
-## The Problem
+Nudge is built for people who capture more context than they can process.
 
-Your life leaves context everywhere: messages, calendar commitments, relationship details, travel constraints, personal notes, work decisions, and small observations that only make sense later.
+It brings notes, voice logs, app captures, and agent output into one reviewable
+workspace. Agents can summarize, extract, remember, and propose, but they do not
+silently change your commitments or memory. You stay in the loop.
 
-Most assistants either forget that context or hide it inside opaque prompts. Most productivity tools hardcode a niche workflow: a morning routine, a task inbox, a journal, a CRM, a daily planner.
+[Learn more about the product direction](docs/product-vision.md).
 
-**Lares takes a primitive-first approach.** Captures become Signals. Signals form Context. Frames bound what Lares is helping with. Syntheses interpret the context. Later, Proposals, Reviews, Commitments, and Outcomes close the loop.
+## Installation
 
-The goal is not a chatbot. The goal is a private operating layer that remembers what matters, shows its sources, asks for review before sensitive changes, and improves through evals.
+### Cloud
 
-## How It Works
+The fastest way to start is the hosted app:
 
-```text
-User / Integration
-      |
-      |  Capture
-      v
-+----------------+       +----------------+
-|    Signals     | ----> |    Context     |
-| append-only D1 |       | time-scoped    |
-+----------------+       +-------+--------+
-                                  |
-                                  | Frame: "What matters now?"
-                                  v
-                         +----------------+
-                         |   Synthesis    |
-                         | source-linked  |
-                         +-------+--------+
-                                  |
-                                  | later
-                                  v
-                         +----------------+
-                         | Proposal/Review|
-                         | HITL decisions |
-                         +----------------+
-```
+[Open Nudge](https://app.explorenudge.com/)
 
-Current deployed slice:
+### macOS
 
-- Capture context from the mobile-first app.
-- Persist user-owned Signals in D1.
-- Query Signals by time range.
-- Generate a deterministic, source-linked Synthesis for the current Frame.
-- Save daily notes and journal documents with revisions.
-- Extract reviewable actions, reminders, events, questions, ideas, and memory candidates from note revisions.
-- Run a durable `UserAgentSession` for conversations, memory retrieval, and reviewable loop drafts.
-- Index memory documents through the local memory index or Turbopuffer when configured.
-- Review Proposals into Commitments and close them with Outcomes.
-- List generated Summaries.
-- Sign in through Better Auth in configured environments, including passkeys and optional Google.
-- Export or delete user-owned data.
-- Read OpenAPI docs for custom integrations.
-- Persist safe wide events and trace spans for debugging and evals.
+Download the latest desktop build from [explorenudge.com](https://explorenudge.com/).
 
-Model-backed extraction is narrow and draft-first. External writes and behavior-changing automation still require explicit review before they are added.
+- Use `Nudge-<version>-universal.dmg` for normal installation.
+- Use `Nudge-<version>-universal.zip` when you need the raw app bundle.
+- Release assets are produced by `.github/workflows/release-apps.yml`.
 
-## Quick Start
+See [desktop and Raycast release notes](docs/releasing-apps.md).
 
-Prerequisites:
+### Raycast
 
-- [`mise`](https://mise.jdx.dev/) installed.
-- Cloudflare/Wrangler auth for commands that use remote Cloudflare resources.
+The Raycast extension is not in the public Raycast Store yet. Install it locally:
 
 ```bash
-mise trust
-mise install
-mise exec -- bun install
-mise exec -- bun run dev
+bun install
+bun run raycast:dev
 ```
 
-If your shell already activates `mise`, the `mise exec --` prefix is optional.
+Tagged GitHub Releases also upload `Nudge-Raycast-build-<tag>.zip` as an
+internal compiled QA artifact. It is not a one-click installer. Publish with
+`bun run raycast:publish` when the Store or private organization listing is ready.
 
-`bun run dev` builds the web app, applies local D1 migrations, and starts `wrangler dev` on the first available local port.
+### iOS
 
-Then open:
+The Native iOS app includes SwiftUI capture, calendar context, review, and
+Siri capture through App Intents.
 
-- App: `http://localhost:8787/`
-- Health: `http://localhost:8787/health`
-- API docs: `http://localhost:8787/api/docs`
-- OpenAPI spec: `http://localhost:8787/api/openapi.json`
+Open `apps/ios/Nudge/Nudge.xcodeproj` in Xcode and run the `Nudge Local`,
+`Nudge Staging`, or `Nudge Production` scheme.
 
-## Features
+TestFlight/App Store deployment is not wired yet.
 
-|                   | Feature                     | Description                                                    |
-| ----------------- | --------------------------- | -------------------------------------------------------------- |
-| :memo:            | **Captures**                | User or integration input recorded as source-linked Signals    |
-| :signal_strength: | **Signals**                 | Append-only D1 records with occurrence time and payload        |
-| :compass:         | **Frames**                  | Bounded questions like “What matters now?”                     |
-| :sparkles:        | **Syntheses**               | Deterministic, source-linked interpretations over Signals      |
-| :link:            | **OpenAPI integrations**    | Public API contract for user-owned data and custom workflows   |
-| :shield:          | **Human-in-the-loop model** | Review-first posture for future memory/actions/automation      |
-| :bar_chart:       | **Persistent traces**       | Safe wide events stored in D1 for debugging and improvement    |
-| :iphone:          | **Mobile-first app**        | React dashboard with TanStack Router, Query, Table, and Motion |
+### Local Development
 
-## Architecture
-
-```text
-+--------------------------------------------------+
-|                  Cloudflare Worker               |
-|  Hono API  -  oRPC/OpenAPI  -  React static app   |
-+---------------------+----------------------------+
-                      |
-      +---------------+---------------+
-      |                               |
-      v                               v
-+------------+                 +-------------+
-| D1         |                 | R2          |
-| Signals    |                 | Redacted    |
-| Frames     |                 | artifacts   |
-| Syntheses  |                 +-------------+
-| Notes      |
-| Memory     |
-| Traces     |
-+------------+
-      |
-      v
-+--------------------+       +----------------------+
-| Durable Objects    |       | Workers Workflows    |
-| user agents        |       | note/digest analysis |
-+--------------------+       +----------------------+
+```bash
+bun install
+bun run dev
 ```
 
-- **`apps/web`**: Cloudflare Worker, Hono app, React app, oRPC/OpenAPI API, Better Auth, Workers Workflow, and Cloudflare Agent entrypoints.
-- **`packages/db`**: D1 schema, migrations, and Effect `Db` service.
-- **`packages/ui`**: shared React UI components and design tokens.
-- **`packages/observability`**: wide-event logging, request telemetry, and safe error fields.
-- **`packages/effect-services`**: Effect service seams for auth, primitive workflows, and memory indexing.
-- **`packages/evals`**: golden-case agent/product evals.
+Open the local app at `$NUDGE_DEV_URL`.
+
+## Everything You Need
+
+Nudge gives you one operating loop across every surface: capture context, sync it
+to a workspace, ask an agent to reason over it, then review the result before it
+becomes memory or action.
+
+| Surface        | What it does                                                       |
+| -------------- | ------------------------------------------------------------------ |
+| Web app / PWA  | Notes, capture, review, actions, summaries, settings, and API docs |
+| macOS desktop  | Native shell for the shared Nudge workspace                        |
+| Native iOS app | SwiftUI capture, notes, calendar context, review, and Siri capture |
+| Raycast        | Fast capture, current context, Ask Nudge, and lightweight review   |
+| API + MCP      | Integration surface for tools and agent workflows                  |
+
+| Building block | Purpose                                           |
+| -------------- | ------------------------------------------------- |
+| Signals        | Source-linked records from notes, apps, and voice |
+| Context        | The current working set Nudge can summarize       |
+| Syntheses      | Grounded interpretations over recent signals      |
+| Proposals      | Draft actions and memories waiting for review     |
+| Commitments    | Accepted work with follow-through state           |
+| Outcomes       | Closed-loop review of what happened               |
 
 ## Stack
 
-- Cloudflare Workers, D1, R2, Durable Objects, Workers Workflows.
-- Cloudflare Agents, Think, Workers AI, and optional Turbopuffer memory search.
-- Hono for Worker routing and middleware.
-- oRPC/OpenAPI for public API contracts and typed frontend clients.
-- React, TanStack Router, TanStack Query, TanStack Table, Motion.
-- Better Auth for email, passkey, and optional Google authentication.
-- Effect v4 for services and dependency injection.
-- Drizzle over D1 behind an Effect `Db` port.
-- Bun, Mise, Oxfmt, Oxlint, Lefthook.
+- TypeScript, Bun, Oxfmt, Oxlint
+- React, TanStack Router, TanStack Query, Motion
+- Cloudflare Workers, D1, R2, Durable Objects, Workers Workflows
+- Convex for realtime product state
+- Hono and oRPC/OpenAPI for the public API
+- Clerk for authentication
+- Effect for services and workflows
+- Electron, SwiftUI, and Raycast for app surfaces
 
 ## Development
 
 ```bash
-bun run check          # format + lint + typecheck + unit tests
-bun run test:e2e       # mobile Playwright smoke test
-bun run dev            # build client and start wrangler dev
+bun run check
+bun run --cwd apps/web test:e2e
+bun run desktop:dist:mac
+bun run raycast:dev
 ```
 
-Useful operational commands:
+GitHub Actions deploys the Cloudflare Worker from the production workflow.
+Release builds for macOS and Raycast are documented in
+[docs/releasing-apps.md](docs/releasing-apps.md).
 
-```bash
-bun run logs:tail
-bun run logs:tail:pretty
-bun run traces:recent
-```
+## Brand Assets
 
-## Deployment
+| Asset           | Path                                                                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Logo lockup     | [`nudge-logo-lockup-blobby-n-transparent.svg`](apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.svg) |
+| Logo lockup PNG | [`nudge-logo-lockup-blobby-n-transparent.png`](apps/web/public/icons/nudge-logo-lockup-blobby-n-transparent.png) |
+| App icon        | [`nudge-app-icon.svg`](apps/web/public/icons/nudge-app-icon.svg)                                                 |
+| App icon PNG    | [`nudge-app-icon.png`](apps/web/public/icons/nudge-app-icon.png)                                                 |
 
-Deploys are tied to Git commits.
+## Links
 
-```bash
-bun run deploy
-```
-
-The deploy script refuses dirty working trees, runs checks and mobile e2e, builds the app, stamps `APP_VERSION` with the short Git SHA, and deploys with a matching Cloudflare Worker version tag/message.
-
-For explicit prototype deploys only:
-
-```bash
-bun run deploy:dirty
-```
-
-See [`docs/deployment.md`](docs/deployment.md) for rollback and PR guidance.
-
-## Documentation
-
-- [`CONTEXT.md`](CONTEXT.md): glossary and primitive domain language.
-- [`docs/product-vision.md`](docs/product-vision.md): product direction.
-- [`docs/prd/daily-operating-loop-mvp.md`](docs/prd/daily-operating-loop-mvp.md): historical MVP PRD.
-- [`docs/adr/`](docs/adr/): durable architecture decisions.
-- [`docs/observability-and-evals.md`](docs/observability-and-evals.md): trace/eval direction.
-- [`docs/resilience.md`](docs/resilience.md): retry and replay guarantees.
+[Product vision](docs/product-vision.md) · [Domain glossary](CONTEXT.md) · [Architecture decisions](docs/adr/) · [Releases](https://github.com/arek-e/nudge/releases)
 
 ## License
 
 Private project for now.
-
----
-
-<div align="center">
-<pre>
-Lares — private context, source-linked memory,
-and agents that ask before they act.
-</pre>
-</div>

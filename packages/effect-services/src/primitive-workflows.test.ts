@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Db } from "@lares/db";
+import { Db } from "@nudge/db";
 import {
   currentWorkflowVersion,
   durableWorkflowStepConfig,
@@ -121,6 +121,62 @@ describe("PrimitiveWorkflows", () => {
     expect(result.synthesis.synthesis.themes).toContain("travel");
     expect(result.proposals).toHaveLength(1);
     expect(result.proposals[0]?.title).toBe("Clarify next attention point");
+  });
+
+  test("drafts loop intake as a reviewable proposal from a captured message", async () => {
+    const result = await runWithMemoryDb(
+      PrimitiveWorkflows.draftLoopIntake({
+        user,
+        conversationId: "today",
+        message: "Travel this week and follow up with work",
+        occurredAt: "2026-06-12T10:00:00.000Z",
+      }),
+    );
+
+    expect(result.signal).toEqual(
+      expect.objectContaining({
+        userId: user.id,
+        type: "manual_check_in_submitted",
+        source: "nudge_agent_intake",
+        payload: { note: "Travel this week and follow up with work" },
+      }),
+    );
+    expect(result.synthesis.summary).toContain("1 signal captured");
+    expect(result.draft?.requiresReview).toBe(true);
+    expect(result.draft?.proposal).toEqual(
+      expect.objectContaining({
+        status: "pending",
+        title: "Clarify next attention point",
+      }),
+    );
+  });
+
+  test("drafting loop intake is idempotent across retries", async () => {
+    const result = await runWithMemoryDb(
+      Effect.gen(function* () {
+        const first = yield* PrimitiveWorkflows.draftLoopIntake({
+          user,
+          conversationId: "today",
+          message: "Travel this week and follow up with work",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+        });
+        const retried = yield* PrimitiveWorkflows.draftLoopIntake({
+          user,
+          conversationId: "today",
+          message: "Travel this week and follow up with work",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+        });
+        const signals = yield* PrimitiveWorkflows.listSignals({ user, limit: 10 });
+        const pending = yield* PrimitiveWorkflows.listPendingProposals({ user, limit: 10 });
+
+        return { first, pending, retried, signals };
+      }),
+    );
+
+    expect(result.retried.signal.id).toBe(result.first.signal.id);
+    expect(result.retried.draft?.proposal.id).toBe(result.first.draft?.proposal.id);
+    expect(result.signals).toHaveLength(1);
+    expect(result.pending).toHaveLength(1);
   });
 
   test("synthesis and proposal generation are idempotent across retries", async () => {

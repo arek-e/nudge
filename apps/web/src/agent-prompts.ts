@@ -1,1 +1,1 @@
-export { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "@lares/effect-services";
+export { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "@nudge/effect-services";

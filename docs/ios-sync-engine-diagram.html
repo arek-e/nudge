@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nudge iOS Sync Engine Diagram</title>
+    <script>
+      (function () {
+        const saved = localStorage.getItem("nudge-ios-sync-diagram-theme");
+        const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+    <style>
+      :root {
+        --bg: #faf9f5;
+        --surface: #ffffff;
+        --surface-2: #f0eee6;
+        --ink: #141413;
+        --body: #3d3d3a;
+        --muted: #87867f;
+        --line: #d1cfc5;
+        --line-soft: #e6e3da;
+        --clay: #d97757;
+        --clay-soft: rgba(217, 119, 87, 0.11);
+        --olive: #788c5d;
+        --olive-soft: rgba(120, 140, 93, 0.14);
+        --gold: #c9a45c;
+        --gold-soft: rgba(201, 164, 92, 0.15);
+        --blue: #587b7f;
+        --blue-soft: rgba(88, 123, 127, 0.13);
+        --purple: #6d6aa8;
+        --purple-soft: rgba(109, 106, 168, 0.13);
+        --rust: #b04a3f;
+        --rust-soft: rgba(176, 74, 63, 0.12);
+        --zone: rgba(20, 20, 19, 0.026);
+        --shadow: rgba(30, 25, 18, 0.12);
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+
+      html.dark {
+        --bg: #121211;
+        --surface: #1f1f1d;
+        --surface-2: #2a2a28;
+        --ink: #faf9f5;
+        --body: #d1cfc5;
+        --muted: #9c9a91;
+        --line: #3d3d3a;
+        --line-soft: #2c2c29;
+        --clay: #e48a6e;
+        --clay-soft: rgba(228, 138, 110, 0.16);
+        --olive: #9db07c;
+        --olive-soft: rgba(157, 176, 124, 0.17);
+        --gold: #d4b36f;
+        --gold-soft: rgba(212, 179, 111, 0.18);
+        --blue: #75adb2;
+        --blue-soft: rgba(117, 173, 178, 0.16);
+        --purple: #aaa4ff;
+        --purple-soft: rgba(170, 164, 255, 0.16);
+        --rust: #e07a72;
+        --rust-soft: rgba(224, 122, 114, 0.16);
+        --zone: rgba(250, 249, 245, 0.035);
+        --shadow: rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--body);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        font: inherit;
+        color: inherit;
+      }
+
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 64px;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--line-soft);
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        backdrop-filter: blur(18px);
+      }
+
+      .title h1 {
+        color: var(--ink);
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 520;
+        letter-spacing: -0.01em;
+        line-height: 1.08;
+      }
+
+      .title .sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 7px;
+      }
+
+      .chip,
+      #themeToggle {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        padding: 6px 11px;
+      }
+
+      #themeToggle {
+        border-radius: 8px;
+        text-transform: uppercase;
+      }
+
+      .chip:hover,
+      #themeToggle:hover {
+        border-color: var(--muted);
+        color: var(--ink);
+      }
+
+      .chip.on {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: var(--bg);
+      }
+
+      .stage {
+        position: relative;
+        height: calc(100vh - 64px);
+        min-height: 0;
+      }
+
+      .stage svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .zone rect {
+        fill: var(--zone);
+        stroke: var(--line-soft);
+        stroke-width: 1.3;
+        stroke-dasharray: 7 7;
+        rx: 18;
+      }
+
+      .zone .ztitle {
+        fill: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .zone .zsub {
+        fill: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        opacity: 0.78;
+      }
+
+      .node {
+        cursor: pointer;
+        transition: opacity 0.18s ease;
+      }
+
+      .node rect,
+      .node path {
+        fill: var(--surface);
+        stroke: var(--line);
+        stroke-width: 1.55;
+        rx: 10;
+      }
+
+      .node.local rect {
+        fill: var(--blue-soft);
+        stroke: var(--blue);
+      }
+
+      .node.queue rect {
+        fill: var(--clay-soft);
+        stroke: var(--clay);
+      }
+
+      .node.engine rect {
+        fill: var(--olive-soft);
+        stroke: var(--olive);
+      }
+
+      .node.ai rect {
+        fill: var(--purple-soft);
+        stroke: var(--purple);
+      }
+
+      .node.store rect {
+        fill: var(--surface-2);
+      }
+
+      .node.wake rect {
+        fill: var(--gold-soft);
+        stroke: var(--gold);
+      }
+
+      .node.fail rect {
+        fill: var(--rust-soft);
+        stroke: var(--rust);
+      }
+
+      .node:hover rect,
+      .node.sel rect {
+        stroke-width: 2.35;
+      }
+
+      .node.sel rect {
+        stroke: var(--clay);
+      }
+
+      .t {
+        fill: var(--ink);
+        font-family: var(--sans);
+        font-size: 14.5px;
+        font-weight: 700;
+        pointer-events: none;
+      }
+
+      .m {
+        fill: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        pointer-events: none;
+      }
+
+      .k {
+        fill: var(--clay);
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        pointer-events: none;
+        text-transform: uppercase;
+      }
+
+      .edge {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.7;
+        marker-end: url(#arrow-muted);
+        transition:
+          opacity 0.2s ease,
+          stroke 0.2s ease;
+      }
+
+      .edge.dash {
+        stroke-dasharray: 6 5;
+      }
+
+      .edge.soft {
+        opacity: 0.62;
+      }
+
+      .label {
+        fill: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        transition: opacity 0.2s ease;
+      }
+
+      .stage.flowing .edge {
+        opacity: 0.12;
+      }
+
+      .stage.flowing .label {
+        opacity: 0.12;
+      }
+
+      .stage.flowing .node {
+        opacity: 0.28;
+      }
+
+      .stage.flowing .zone {
+        opacity: 0.52;
+      }
+
+      .stage.flowing .edge.lit {
+        opacity: 1;
+        stroke: var(--clay);
+        marker-end: url(#arrow-clay);
+        stroke-dasharray: 8 6;
+        animation: march 0.9s linear infinite;
+      }
+
+      .stage.flowing .label.lit {
+        fill: var(--clay);
+        opacity: 1;
+      }
+
+      .stage.flowing .node.lit {
+        opacity: 1;
+      }
+
+      .stage.flowing .node.lit rect {
+        stroke: var(--clay);
+      }
+
+      @keyframes march {
+        to {
+          stroke-dashoffset: -14;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .stage.flowing .edge.lit {
+          animation: none;
+        }
+      }
+
+      .card {
+        position: absolute;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        box-shadow: 0 18px 70px var(--shadow);
+        padding: 14px 16px 15px;
+      }
+
+      #detail {
+        right: 16px;
+        bottom: 16px;
+        width: 350px;
+      }
+
+      #detail h2 {
+        margin-bottom: 3px;
+        color: var(--ink);
+        font-family: var(--serif);
+        font-size: 18px;
+        font-weight: 520;
+      }
+
+      #detail .meta {
+        margin-bottom: 9px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      #detail p {
+        color: var(--body);
+        font-size: 12.8px;
+        line-height: 1.55;
+      }
+
+      #detail code,
+      #flowcap code {
+        color: var(--clay);
+        font-family: var(--mono);
+        font-size: 0.92em;
+      }
+
+      #flowcap {
+        left: 16px;
+        bottom: 16px;
+        display: none;
+        max-width: 480px;
+      }
+
+      #flowcap.show {
+        display: block;
+      }
+
+      #flowcap .name {
+        margin-bottom: 8px;
+        color: var(--clay);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      #flowcap ol {
+        margin-left: 18px;
+      }
+
+      #flowcap li {
+        color: var(--body);
+        font-size: 12.8px;
+        line-height: 1.55;
+      }
+
+      .src {
+        position: absolute;
+        top: 10px;
+        right: 16px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        opacity: 0.82;
+      }
+
+      @media (max-width: 920px) {
+        body {
+          overflow: auto;
+        }
+
+        .bar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .spacer {
+          display: none;
+        }
+
+        .chips {
+          justify-content: flex-start;
+        }
+
+        .stage {
+          height: auto;
+          min-height: 780px;
+        }
+
+        .stage svg {
+          height: 760px;
+          position: relative;
+        }
+
+        #detail,
+        #flowcap {
+          position: static;
+          width: auto;
+          max-width: none;
+          margin: 12px 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <div class="title">
+        <h1>Nudge iOS sync engine</h1>
+        <div class="sub">local commands up, canonical Engine facts down</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="chips" id="chips">
+        <button class="chip on" data-flow="all">Overview</button>
+        <button class="chip" data-flow="offline">Save offline</button>
+        <button class="chip" data-flow="push">Push command</button>
+        <button class="chip" data-flow="ai">AI completes</button>
+        <button class="chip" data-flow="pull">Pull facts</button>
+        <button class="chip" data-flow="retry">Retry fail</button>
+      </div>
+      <button id="themeToggle">Theme</button>
+    </div>
+
+    <div class="stage" id="stage">
+      <svg
+        viewBox="0 0 1560 980"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label="Nudge iOS sync architecture diagram"
+      >
+        <defs>
+          <marker
+            id="arrow-muted"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6.5"
+            markerHeight="6.5"
+            orient="auto-start-reverse"
+          >
+            <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)" />
+          </marker>
+          <marker
+            id="arrow-clay"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6.5"
+            markerHeight="6.5"
+            orient="auto-start-reverse"
+          >
+            <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)" />
+          </marker>
+        </defs>
+
+        <g class="zone" id="zone-ios">
+          <rect x="42" y="118" width="440" height="684" />
+          <text class="ztitle" x="66" y="150">iOS App Surface</text>
+          <text class="zsub" x="66" y="170">
+            SwiftUI reads local state; user intent is queued first
+          </text>
+        </g>
+        <g class="zone" id="zone-sync">
+          <rect x="530" y="118" width="300" height="684" />
+          <text class="ztitle" x="554" y="150">Sync Boundary</text>
+          <text class="zsub" x="554" y="170">single actor, idempotent commands, cursor pulls</text>
+        </g>
+        <g class="zone" id="zone-engine">
+          <rect x="878" y="118" width="402" height="684" />
+          <text class="ztitle" x="902" y="150">Nudge Engine</text>
+          <text class="zsub" x="902" y="170">
+            owns behavior, review boundaries, and AI workflow state
+          </text>
+        </g>
+        <g class="zone" id="zone-async">
+          <rect x="1324" y="118" width="194" height="684" />
+          <text class="ztitle" x="1346" y="150">Wakeups</text>
+          <text class="zsub" x="1346" y="170">push wakes sync, never carries truth</text>
+        </g>
+
+        <path class="edge" id="e-submit" d="M246,252 L246,324" />
+        <path class="edge" id="e-db-outbox" d="M392,372 C455,372 462,482 534,482" />
+        <path class="edge" id="e-db-ui" d="M204,372 C130,444 126,620 246,664" />
+        <path class="edge" id="e-trigger" d="M394,256 C500,255 512,286 566,328" />
+        <path class="edge" id="e-read-outbox" d="M626,456 L626,394" />
+        <path class="edge" id="e-post" d="M742,360 C822,356 822,254 912,252" />
+        <path class="edge" id="e-engine-d1" d="M1054,306 L1054,398" />
+        <path class="edge" id="e-engine-run" d="M1138,274 C1230,274 1230,508 1348,520" />
+        <path class="edge" id="e-d1-change" d="M1124,448 C1190,448 1195,632 1136,676" />
+        <path class="edge" id="e-ai-change" d="M1348,570 C1274,606 1240,650 1136,694" />
+        <path class="edge dash" id="e-push-wake" d="M1420,514 C1472,416 1384,306 1282,282" />
+        <path class="edge" id="e-get" d="M742,650 C824,652 832,704 912,704" />
+        <path class="edge" id="e-apply" d="M912,704 C760,758 516,738 392,706" />
+        <path class="edge soft" id="e-cursor" d="M626,650 C574,718 518,720 392,706" />
+        <path class="edge dash" id="e-retry" d="M626,394 C552,336 504,564 534,566" />
+        <path class="edge dash" id="e-failed-ui" d="M534,566 C438,604 398,626 318,646" />
+
+        <text class="label" data-e="e-submit" x="258" y="298">transaction</text>
+        <text class="label" data-e="e-db-outbox" x="432" y="442">pending command</text>
+        <text class="label" data-e="e-db-ui" x="126" y="516">observed queries</text>
+        <text class="label" data-e="e-trigger" x="476" y="252">syncNow()</text>
+        <text class="label" data-e="e-read-outbox" x="642" y="428">load pending</text>
+        <text class="label" data-e="e-post" x="796" y="316">POST mutations</text>
+        <text class="label" data-e="e-engine-d1" x="1070" y="354">canonical writes</text>
+        <text class="label" data-e="e-engine-run" x="1230" y="362">queue run</text>
+        <text class="label" data-e="e-d1-change" x="1196" y="540">emit feed row</text>
+        <text class="label" data-e="e-ai-change" x="1240" y="626">derived changes</text>
+        <text class="label" data-e="e-push-wake" x="1358" y="382">optional wake</text>
+        <text class="label" data-e="e-get" x="800" y="690">GET changes?cursor</text>
+        <text class="label" data-e="e-apply" x="660" y="776">apply then advance cursor</text>
+        <text class="label" data-e="e-cursor" x="506" y="684">client_meta cursor</text>
+        <text class="label" data-e="e-retry" x="492" y="500">failure keeps row</text>
+        <text class="label" data-e="e-failed-ui" x="382" y="620">show retry</text>
+
+        <g class="node local" data-k="swiftui">
+          <rect x="86" y="200" width="320" height="104" />
+          <text class="t" x="112" y="232">SwiftUI capture surface</text>
+          <text class="m" x="112" y="256">Save returns after local SQLite commit</text>
+          <text class="m" x="112" y="274">Draft clears; pending sync is visible</text>
+        </g>
+
+        <g class="node store" data-k="grdb">
+          <rect x="86" y="324" width="320" height="104" />
+          <text class="t" x="112" y="356">GRDB / SQLite</text>
+          <text class="m" x="112" y="380">journal_documents, captures, client_meta</text>
+          <text class="m" x="112" y="398">UI reads local projections</text>
+        </g>
+
+        <g class="node queue" data-k="outbox">
+          <rect x="534" y="456" width="184" height="86" />
+          <text class="t" x="558" y="488">sync_outbox</text>
+          <text class="k" x="558" y="508">user commands</text>
+          <text class="m" x="558" y="526">idempotency key</text>
+        </g>
+
+        <g class="node fail" data-k="failed">
+          <rect x="534" y="552" width="184" height="74" />
+          <text class="t" x="558" y="584">retry state</text>
+          <text class="m" x="558" y="606">attempts, next time, error</text>
+        </g>
+
+        <g class="node local" data-k="localview">
+          <rect x="86" y="630" width="320" height="108" />
+          <text class="t" x="112" y="662">Local read models</text>
+          <text class="m" x="112" y="686">Synced, pending, processing, ready</text>
+          <text class="m" x="112" y="704">Agent results appear after pull</text>
+        </g>
+
+        <g class="node queue" data-k="coordinator">
+          <rect x="566" y="304" width="220" height="90" />
+          <text class="t" x="590" y="336">SyncCoordinator actor</text>
+          <text class="m" x="590" y="360">single flight push then pull</text>
+          <text class="m" x="590" y="378">foreground, network, background</text>
+        </g>
+
+        <g class="node queue" data-k="api">
+          <rect x="566" y="626" width="220" height="86" />
+          <text class="t" x="590" y="658">Sync API client</text>
+          <text class="m" x="590" y="682">POST /api/sync/mutations</text>
+          <text class="m" x="590" y="700">GET /api/sync/changes</text>
+        </g>
+
+        <g class="node engine" data-k="mutations">
+          <rect x="912" y="200" width="326" height="106" />
+          <text class="t" x="938" y="232">/api/sync/mutations</text>
+          <text class="k" x="938" y="252">command boundary</text>
+          <text class="m" x="938" y="272">note_capture.save, item.status.update</text>
+          <text class="m" x="938" y="290">proposal.review later</text>
+        </g>
+
+        <g class="node store" data-k="d1">
+          <rect x="912" y="398" width="326" height="108" />
+          <text class="t" x="938" y="430">D1 canonical state</text>
+          <text class="m" x="938" y="454">journal, daily note, revisions</text>
+          <text class="m" x="938" y="472">events, extracted items, proposals</text>
+          <text class="m" x="938" y="490">agent runs and outcomes</text>
+        </g>
+
+        <g class="node engine" data-k="changes">
+          <rect x="912" y="656" width="326" height="106" />
+          <text class="t" x="938" y="688">sync_changes feed</text>
+          <text class="k" x="938" y="708">canonical facts</text>
+          <text class="m" x="938" y="728">cursor, entity type, operation, payload</text>
+          <text class="m" x="938" y="746">missed pushes are harmless</text>
+        </g>
+
+        <g class="node ai" data-k="ai">
+          <rect x="1348" y="488" width="146" height="116" />
+          <text class="t" x="1370" y="520">AI workflows</text>
+          <text class="m" x="1370" y="544">queued -> running</text>
+          <text class="m" x="1370" y="562">completed or failed</text>
+          <text class="m" x="1370" y="580">derived artifacts</text>
+        </g>
+
+        <g class="node wake" data-k="push">
+          <rect x="1348" y="220" width="146" height="92" />
+          <text class="t" x="1370" y="252">Silent push</text>
+          <text class="m" x="1370" y="276">wake only</text>
+          <text class="m" x="1370" y="294">never truth</text>
+        </g>
+      </svg>
+
+      <div class="src">
+        Nudge notes sync plan - GRDB, outbox, SyncCoordinator actor, Engine change feed
+      </div>
+
+      <div class="card" id="flowcap">
+        <div class="name" id="flowName"></div>
+        <ol id="flowSteps"></ol>
+      </div>
+
+      <div class="card" id="detail">
+        <h2 id="detailTitle">Click a node</h2>
+        <div class="meta" id="detailMeta">architecture detail</div>
+        <p id="detailBody">
+          Use the chips to animate the main behaviors: offline save, command push, async AI
+          completion, change pull, and retry failure. The client pushes user intent and pulls
+          canonical Engine facts.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      const DETAILS = {
+        swiftui: {
+          title: "SwiftUI capture surface",
+          meta: "iOS UI",
+          body: "The user writes or speaks a note and taps save. The UI should return after the local SQLite transaction, not after the network. That is the local-first guarantee.",
+        },
+        grdb: {
+          title: "GRDB / SQLite",
+          meta: "local durable store",
+          body: "SQLite stores journal documents, captures, the outbox, sync cursor, and pulled read models. SwiftUI observes this store, so the network is no longer the display source of truth.",
+        },
+        outbox: {
+          title: "sync_outbox",
+          meta: "commands owed to the Engine",
+          body: "Each row is a user intent command with a stable idempotency key. First command: <code>note_capture.save</code>. Later commands: <code>item.status.update</code> and <code>proposal.review</code>.",
+        },
+        failed: {
+          title: "Retry state",
+          meta: "failure is visible, data is not lost",
+          body: "A failed push keeps the outbox row with attempt count, next attempt time, and last error. The local capture stays visible and can be retried.",
+        },
+        localview: {
+          title: "Local read models",
+          meta: "what SwiftUI renders",
+          body: "Rows carry user-facing states like pending sync, synced, processing, ready for review, and failed. AI results appear only after the Engine emits and the client pulls changes.",
+        },
+        coordinator: {
+          title: "SyncCoordinator actor",
+          meta: "single-flight sync loop",
+          body: "Runs push then pull. It starts on app launch, foreground, network regained, background refresh, local save, and optional silent push wakeups.",
+        },
+        api: {
+          title: "Sync API client",
+          meta: "transport adapter",
+          body: "Small wrapper over URLSession for <code>POST /api/sync/mutations</code> and <code>GET /api/sync/changes?cursor=...</code>. It does not contain product behavior.",
+        },
+        mutations: {
+          title: "Mutation endpoint",
+          meta: "Engine command boundary",
+          body: "The Engine validates commands, ensures the user, writes canonical records, queues AI work if needed, and returns accepted mutation ids. This is where Nudge behavior stays.",
+        },
+        d1: {
+          title: "D1 canonical state",
+          meta: "server source of truth",
+          body: "Journal documents, daily notes, note revisions, event records, agent runs, extracted items, proposals, commitments, and outcomes remain server-owned.",
+        },
+        changes: {
+          title: "sync_changes feed",
+          meta: "canonical facts down to iOS",
+          body: "Every server write that matters to iOS emits a feed row. The client applies rows transactionally and advances the cursor only after apply succeeds.",
+        },
+        ai: {
+          title: "AI workflows",
+          meta: "async derived state",
+          body: "AI work is derived server state: queued, running, completed, failed, extracted items, proposals, memory documents, and summaries. iOS observes it; iOS does not create it.",
+        },
+        push: {
+          title: "Silent push",
+          meta: "wake signal only",
+          body: "A push can tell iOS to sync now after an agent run finishes. It never carries truth. If it is missed, the next cursor pull still catches up.",
+        },
+      };
+
+      const FLOWS = {
+        offline: {
+          name: "Save offline",
+          edges: ["e-submit", "e-db-outbox", "e-db-ui", "e-trigger"],
+          nodes: ["swiftui", "grdb", "outbox", "localview", "coordinator"],
+          steps: [
+            "User taps save; iOS opens a SQLite transaction.",
+            "The local journal/capture row is written and <code>sync_outbox</code> gets <code>note_capture.save</code>.",
+            "SwiftUI observes local read models and shows pending sync even with no network.",
+          ],
+        },
+        push: {
+          name: "Push command",
+          edges: ["e-read-outbox", "e-post", "e-engine-d1", "e-d1-change"],
+          nodes: ["outbox", "coordinator", "mutations", "d1", "changes"],
+          steps: [
+            "The coordinator loads pending outbox rows.",
+            "It posts idempotent commands to the Engine.",
+            "The Engine writes journal, daily note, capture event, note revision, and sync feed rows.",
+          ],
+        },
+        ai: {
+          name: "AI completes later",
+          edges: ["e-engine-run", "e-ai-change", "e-push-wake"],
+          nodes: ["mutations", "d1", "ai", "changes", "push"],
+          steps: [
+            "The accepted note command queues an agent run.",
+            "The workflow eventually writes extracted items, proposals, summaries, or a failure.",
+            "Those derived facts emit feed rows; a silent push can wake iOS to pull.",
+          ],
+        },
+        pull: {
+          name: "Pull facts",
+          edges: ["e-get", "e-apply", "e-cursor", "e-db-ui"],
+          nodes: ["api", "changes", "grdb", "localview", "swiftui"],
+          steps: [
+            "The coordinator asks for changes after the stored cursor.",
+            "iOS applies all rows in one local transaction.",
+            "Only after apply succeeds does <code>client_meta.sync_cursor</code> advance.",
+          ],
+        },
+        retry: {
+          name: "Retry failure",
+          edges: ["e-read-outbox", "e-post", "e-retry", "e-failed-ui"],
+          nodes: ["coordinator", "outbox", "mutations", "failed", "localview"],
+          steps: [
+            "A network or server error does not delete the outbox row.",
+            "The row records attempt count, next retry time, and last error.",
+            "The local capture remains visible with a retry state.",
+          ],
+        },
+      };
+
+      const stage = document.getElementById("stage");
+      const nodes = document.querySelectorAll(".node");
+      const edges = document.querySelectorAll(".edge");
+      const labels = document.querySelectorAll(".label");
+      const chips = document.querySelectorAll(".chip");
+      const flowcap = document.getElementById("flowcap");
+
+      function setFlow(key) {
+        chips.forEach((chip) => chip.classList.toggle("on", chip.dataset.flow === key));
+        edges.forEach((edge) => edge.classList.remove("lit"));
+        labels.forEach((label) => label.classList.remove("lit"));
+        nodes.forEach((node) => node.classList.remove("lit"));
+
+        if (key === "all") {
+          stage.classList.remove("flowing");
+          flowcap.classList.remove("show");
+          return;
+        }
+
+        const flow = FLOWS[key];
+        stage.classList.add("flowing");
+        flow.edges.forEach((id) => document.getElementById(id)?.classList.add("lit"));
+        labels.forEach((label) => {
+          if (flow.edges.includes(label.dataset.e)) {
+            label.classList.add("lit");
+          }
+        });
+        flow.nodes.forEach((key) => {
+          document.querySelector(`.node[data-k="${key}"]`)?.classList.add("lit");
+        });
+
+        document.getElementById("flowName").textContent = flow.name;
+        document.getElementById("flowSteps").innerHTML = flow.steps
+          .map((step) => `<li>${step}</li>`)
+          .join("");
+        flowcap.classList.add("show");
+      }
+
+      chips.forEach((chip) => {
+        chip.addEventListener("click", () => setFlow(chip.dataset.flow));
+      });
+
+      nodes.forEach((node) => {
+        node.addEventListener("click", () => {
+          nodes.forEach((item) => item.classList.remove("sel"));
+          node.classList.add("sel");
+          const detail = DETAILS[node.dataset.k];
+          if (!detail) return;
+          document.getElementById("detailTitle").textContent = detail.title;
+          document.getElementById("detailMeta").textContent = detail.meta;
+          document.getElementById("detailBody").innerHTML = detail.body;
+        });
+      });
+
+      document.getElementById("themeToggle").addEventListener("click", () => {
+        const dark = !document.documentElement.classList.contains("dark");
+        document.documentElement.classList.toggle("dark", dark);
+        localStorage.setItem("nudge-ios-sync-diagram-theme", dark ? "dark" : "light");
+      });
+    </script>
+  </body>
+</html>

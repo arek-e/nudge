@@ -1,15 +1,29 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lares-web",
+  "name": "nudge-web",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-12",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "app.explorenudge.com",
+      "custom_domain": true,
+    },
+  ],
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/agents/*", "/mcp", "/health", "/__test/*", "/__internal/*"],
+    "run_worker_first": [
+      "/api/*",
+      "/agents/*",
+      "/mcp",
+      "/health",
+      "/__clerk/*",
+      "/__test/*",
+      "/__internal/*",
+    ],
   },
   "observability": {
     "traces": {
@@ -32,8 +46,11 @@
   "vars": {
     "ENVIRONMENT": "local",
     "APP_VERSION": "0.0.0",
-    "BETTER_AUTH_URL": "https://lares-web.teampitch.workers.dev",
+    "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
+    "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    "CONVEX_URL": "https://grandiose-hamster-855.eu-west-1.convex.cloud",
     "LOG_HTTP_REQUESTS": "true",
+    "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
@@ -41,27 +58,14 @@
     "binding": "AI",
     "remote": true,
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "lares-local",
-      "database_id": "f64cce82-7370-4cfa-8570-617f5c5484ca",
-      "migrations_dir": "../../packages/db/migrations",
-    },
-  ],
   "r2_buckets": [
     {
+      "binding": "MEDIA_FILES",
+      "bucket_name": "nudge-local-media",
+    },
+    {
       "binding": "OKF_FILES",
-      "bucket_name": "lares-okf-files",
-    },
-    {
-      "binding": "TRACE_ARTIFACTS",
-      "bucket_name": "lares-trace-artifacts",
-    },
-  ],
-  "send_email": [
-    {
-      "name": "SEND_EMAIL",
+      "bucket_name": "nudge-local-okf-files",
     },
   ],
   "durable_objects": {
@@ -101,4 +105,137 @@
       "new_sqlite_classes": ["Sandbox"],
     },
   ],
+  "env": {
+    "staging": {
+      "name": "nudge-web-staging",
+      "routes": [
+        {
+          "pattern": "app.staging.explorenudge.com",
+          "custom_domain": true,
+        },
+      ],
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "APP_VERSION": "0.0.0",
+        "CLERK_AUTHORIZED_PARTIES": "https://app.staging.explorenudge.com,https://nudge-web-staging.teampitch.workers.dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "CONVEX_URL": "https://abundant-retriever-130.eu-west-1.convex.cloud",
+        "LOG_HTTP_REQUESTS": "true",
+        "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
+        "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
+        "TURBOPUFFER_REGION": "aws-eu-west-1",
+      },
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_FILES",
+          "bucket_name": "nudge-staging-media",
+        },
+        {
+          "binding": "OKF_FILES",
+          "bucket_name": "nudge-staging-okf-files",
+        },
+      ],
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "./Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 1,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_AGENT_SESSION",
+            "class_name": "UserAgentSession",
+          },
+          {
+            "name": "LoopIntakeThinkAgent",
+            "class_name": "LoopIntakeThinkAgent",
+          },
+          {
+            "name": "OKF_SANDBOX",
+            "class_name": "Sandbox",
+          },
+        ],
+      },
+      "workflows": [
+        {
+          "name": "daily-digest-workflow-staging",
+          "binding": "DAILY_DIGEST_WORKFLOW",
+          "class_name": "DailyDigestWorkflow",
+        },
+      ],
+    },
+    "production": {
+      "name": "nudge-web",
+      "routes": [
+        {
+          "pattern": "app.explorenudge.com",
+          "custom_domain": true,
+        },
+      ],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "APP_VERSION": "0.0.0",
+        "CLERK_AUTHORIZED_PARTIES": "https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
+        "CLERK_PROXY_URL": "https://app.explorenudge.com/__clerk",
+        "CONVEX_URL": "https://friendly-lion-904.eu-west-1.convex.cloud",
+        "LOG_HTTP_REQUESTS": "true",
+        "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
+        "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
+        "TURBOPUFFER_REGION": "aws-eu-west-1",
+      },
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_FILES",
+          "bucket_name": "nudge-media",
+        },
+        {
+          "binding": "OKF_FILES",
+          "bucket_name": "nudge-okf-files",
+        },
+      ],
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "./Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 1,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_AGENT_SESSION",
+            "class_name": "UserAgentSession",
+          },
+          {
+            "name": "LoopIntakeThinkAgent",
+            "class_name": "LoopIntakeThinkAgent",
+          },
+          {
+            "name": "OKF_SANDBOX",
+            "class_name": "Sandbox",
+          },
+        ],
+      },
+      "workflows": [
+        {
+          "name": "daily-digest-workflow",
+          "binding": "DAILY_DIGEST_WORKFLOW",
+          "class_name": "DailyDigestWorkflow",
+        },
+      ],
+    },
+  },
 }

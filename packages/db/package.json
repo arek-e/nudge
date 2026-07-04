@@ -1,12 +1,11 @@
 {
-  "name": "@lares/db",
+  "name": "@nudge/db",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   }
 }

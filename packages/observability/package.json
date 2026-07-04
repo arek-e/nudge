@@ -1,11 +1,13 @@
 {
-  "name": "@lares/observability",
+  "name": "@nudge/observability",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "braintrust": "3.20.0",
+    "effect": "catalog:",
+    "zod": "catalog:"
   }
 }

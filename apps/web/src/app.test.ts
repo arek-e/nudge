@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Db } from "@lares/db";
-import { readHttpTelemetrySnapshot } from "@lares/observability";
+import { Db } from "@nudge/db";
+import { readHttpTelemetrySnapshot } from "@nudge/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
 import { createApp } from "./app";
@@ -9,35 +9,27 @@ const testAi = (() => ({ provider: "test" })) as Ai;
 const testWorkflow = {
   create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "test-workflow-id" }),
 } as Workflow;
+const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
+const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
+const anonymousHeaders = { "x-nudge-anonymous-user-id": anonymousUserId };
+const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
+const anonymousMcpHeaders = {
+  ...anonymousJsonHeaders,
+  accept: "application/json, text/event-stream",
+};
 
 const env = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
-  BETTER_AUTH_URL: "http://localhost:8787",
   LOG_HTTP_REQUESTS: "false",
+  CONVEX_RUNTIME_SECRET: "test-runtime-secret",
+  CONVEX_URL: "https://grandiose-hamster-855.eu-west-1.convex.cloud",
   AI: testAi,
+  EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
-
-const createTraceDb = () => {
-  const rows: Array<ReadonlyArray<unknown>> = [];
-  const db = {
-    prepare: (sql: string) => ({
-      bind: (...values: ReadonlyArray<unknown>) => ({
-        run: async () => {
-          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
-          return { success: true };
-        },
-      }),
-    }),
-  } as D1Database;
-
-  return { db, rows };
-};
 
 const createStatementDb = () => {
   const statements: Array<{ readonly sql: string; readonly values: ReadonlyArray<unknown> }> = [];
@@ -57,7 +49,7 @@ const createStatementDb = () => {
 };
 
 describe("web app", () => {
-  test("GET / serves the Lares Daily Operating Loop app", async () => {
+  test("GET / serves the Nudge Daily Operating Loop app", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/", {}, env);
     const body = await response.text();
@@ -66,6 +58,8 @@ describe("web app", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("viewport");
     expect(body).toContain('rel="manifest"');
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('rel="apple-touch-icon"');
     expect(body).toContain('name="theme-color"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style"');
@@ -82,143 +76,250 @@ describe("web app", () => {
   });
 
   test("GET /health reports service and binding availability", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
       ok: true,
-      service: "lares-web",
+      service: "nudge-web",
       environment: "test",
       version: "test-version",
       bindings: {
-        d1: true,
+        convex: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
     });
   });
 
-  test("GET /manifest.webmanifest exposes PWA install metadata", async () => {
-    const app = createApp();
-    const response = await app.request("/manifest.webmanifest", {}, env);
+  test("GET /health fails when Convex runtime store is not configured", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const { CONVEX_RUNTIME_SECRET: omittedRuntimeSecret, ...unwiredEnv } = env;
+    void omittedRuntimeSecret;
+    const response = await app.request("/health", {}, unwiredEnv);
+    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      name: "Lares",
-      display: "standalone",
-      display_override: ["standalone", "minimal-ui"],
-      theme_color: "#111111",
-      icons: [
-        expect.objectContaining({ sizes: "192x192", src: "/icons/icon-192.png" }),
-        expect.objectContaining({ sizes: "512x512", src: "/icons/icon-512.png" }),
-        expect.objectContaining({ src: "/icons/icon.svg" }),
-      ],
-      shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      ok: false,
+      bindings: {
+        convex: false,
+      },
     });
   });
 
+  test("GET /manifest.webmanifest exposes PWA install metadata", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/manifest.webmanifest", {}, env);
+
+    expect(response.status).toBe(200);
+    const manifest = await response.json();
+    expect(manifest).toMatchObject({
+      name: "Nudge",
+      display: "standalone",
+      display_override: ["standalone", "minimal-ui"],
+      theme_color: "#1a2735",
+      icons: [
+        expect.objectContaining({ sizes: "192x192", src: "/icons/nudge-app-icon-192.png" }),
+        expect.objectContaining({ sizes: "512x512", src: "/icons/nudge-app-icon-512.png" }),
+        expect.objectContaining({ src: "/icons/nudge-app-icon.svg" }),
+      ],
+    });
+    expect(manifest.shortcuts).toEqual([
+      expect.objectContaining({ name: "Today", url: "/" }),
+      expect.objectContaining({ name: "Ask Nudge", url: "/ask" }),
+      expect.objectContaining({ name: "Review inbox", url: "/review" }),
+    ]);
+  });
+
+  test("GET /icons/nudge-app-icon.svg serves the Nudge app icon", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const response = await app.request("/icons/nudge-app-icon.svg", {}, env);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/svg+xml");
+    expect(body).toContain("Nudge app icon");
+    expect(body).toContain("#f14f23");
+  });
+
   test("GET /offline.html serves a PWA offline fallback", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/offline.html", {}, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("You are offline");
+    expect(body).toContain('href="/favicon.ico?v=nudge"');
+    expect(body).toContain('href="/icons/nudge-app-icon.svg?v=nudge"');
     expect(body).toContain('name="apple-mobile-web-app-capable"');
   });
 
-  test("GET /api/auth/session is unavailable until Better Auth is configured", async () => {
+  test("legacy app auth routes are no longer registered", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/auth/session", {}, env);
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
-  test("POST /api/auth/sign-in/magic-link is unavailable until Better Auth is configured", async () => {
+  test("GET /__clerk proxies Clerk Frontend API requests through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-in/magic-link",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "lana@example.com" }),
-      },
-      env,
-    );
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+        { headers: { "CF-Connecting-IP": "203.0.113.10" } },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("clerk-js");
+      expect(proxiedRequests).toHaveLength(1);
+      expect(proxiedRequest.redirect).toBe("manual");
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+      );
+      expect(proxiedRequest.headers.get("host")).toBeNull();
+      expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
+        "https://app.explorenudge.com/__clerk",
+      );
+      expect(proxiedRequest.headers.get("Clerk-Secret-Key")).toBe("sk_test_proxy");
+      expect(proxiedRequest.headers.get("X-Forwarded-For")).toBe("203.0.113.10");
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
-  test("POST /api/auth/email-otp/send-verification-otp is unavailable until Better Auth is configured", async () => {
+  test("GET /__clerk decodes Clerk package redirect paths before proxying", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/email-otp/send-verification-otp",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "lana@example.com", type: "sign-in" }),
-      },
-      env,
-    );
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "Better Auth is not configured" });
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/%40clerk/clerk-js%406/dist/clerk.browser.js",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
-  test("POST /api/auth/sign-out clears Better Auth cookies", async () => {
+  test("GET /__clerk/v1/proxy-health confirms the Worker proxy path without upstream fetch", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-out",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      },
-      { ...env, BETTER_AUTH_SECRET: "test-secret" },
-    );
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy health upstream request");
+    });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toContain("better-auth.session_token=; Max-Age=0");
+    try {
+      const response = await app.request(
+        "/__clerk/v1/proxy-health?domain_id=dmn_test",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("ok");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
-  test("GET /api/auth/passkey/generate-register-options returns an auth error instead of 404 or 500", async () => {
+  test("POST /__clerk forwards request bodies through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/passkey/generate-register-options?name=Lares%20passkey",
-      {},
-      { ...env, BETTER_AUTH_SECRET: "test-secret", BETTER_AUTH_URL: "https://lares.test" },
-    );
+    const proxiedBodies: Array<string> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedBodies.push(await request.text());
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.status).toBeLessThan(500);
+      return Response.json({ ok: true });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/client",
+        {
+          body: JSON.stringify({ strategy: "oauth_google" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(proxiedBodies).toEqual([JSON.stringify({ strategy: "oauth_google" })]);
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
-  test("GET /api/auth/sign-up/email does not expose public sign-up by default", async () => {
+  test("GET /__clerk fails closed when the Clerk secret is missing", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request(
-      "/api/auth/sign-up/email",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: "test@example.com",
-          name: "Test User",
-          password: "password1234",
-        }),
-      },
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test-secret",
-      },
-    );
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy request");
+    });
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.headers.get("set-cookie")).toBeNull();
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+        {},
+        env,
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "CLERK_SECRET_KEY is required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
@@ -227,7 +328,7 @@ describe("web app", () => {
       "/__internal/auth/test-account",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           email: "alek@teampitch.app",
           name: "Alek",
@@ -254,7 +355,7 @@ describe("web app", () => {
       "/__internal/evals/agent",
       {
         method: "POST",
-        headers: { "x-lares-eval-secret": "eval-secret" },
+        headers: { "x-nudge-eval-secret": "eval-secret" },
       },
       {
         ...env,
@@ -304,7 +405,7 @@ describe("web app", () => {
   });
 
   test("GET /health exposes request observability headers", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/health", { headers: { "cf-ray": "test-ray" } }, env);
 
     expect(response.status).toBe(200);
@@ -316,7 +417,7 @@ describe("web app", () => {
   test("GET /health continues valid incoming trace context", async () => {
     const incomingTraceId = "0af7651916cd43dd8448eb211c80319c";
     const incomingSpanId = "b7ad6b7169203331";
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/health",
@@ -331,7 +432,7 @@ describe("web app", () => {
   });
 
   test("GET /health records request telemetry meters", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const before = await readHttpTelemetrySnapshot();
 
     await app.request("/health", {}, env);
@@ -344,7 +445,7 @@ describe("web app", () => {
   });
 
   test("GET /health emits a wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -363,7 +464,7 @@ describe("web app", () => {
       expect(log.event).toMatchObject({
         event: "http_request_completed",
         logKind: "wide_event",
-        service: "lares-web",
+        service: "nudge-web",
         environment: "test",
         version: "test-version",
         requestId: "test-ray",
@@ -383,169 +484,8 @@ describe("web app", () => {
     }
   });
 
-  test("GET /health persists a safe trace event", async () => {
-    const app = createApp();
-    const traceDb = createTraceDb();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "persisted-ray", "user-agent": "persist-test" } },
-      { ...env, DB: traceDb.db },
-    );
-
-    expect(response.status).toBe(200);
-    expect(traceDb.rows).toHaveLength(1);
-    expect(traceDb.rows[0]).toEqual([
-      expect.any(String),
-      expect.any(String),
-      "http_request_completed",
-      "wide_event",
-      "lares-web",
-      "test",
-      "test-version",
-      "persisted-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(Number),
-      "default",
-      null,
-      expect.stringContaining("persisted-ray"),
-      expect.any(String),
-    ]);
-  });
-
-  test("GET /health persists a root request trace span", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(1);
-    expect(spanRows[0]).toEqual([
-      expect.stringMatching(/^[a-f0-9]{32}$/),
-      expect.stringMatching(/^[a-f0-9]{16}$/),
-      null,
-      "GET /health",
-      "server",
-      "ok",
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      "lares-web",
-      "test",
-      "test-version",
-      "span-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(String),
-      expect.any(String),
-    ]);
-  });
-
-  test("POST /api/syntheses records framework and primitive child spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/syntheses",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "cf-ray": "synthesis-ray" },
-        body: JSON.stringify({ frameKey: "current_state" }),
-      },
-      { ...env, DB: traceDb },
-    );
-
-    const names = spanRows.map((row) => row[3]);
-    const traceIds = new Set(spanRows.map((row) => row[0]));
-    const rootSpan = spanRows.find((row) => row[2] === null);
-    const childSpans = spanRows.filter((row) => row[2] !== null);
-
-    expect(response.status).toBe(200);
-    expect(names).toContain("POST /api/syntheses");
-    expect(names).toContain("db.resolve");
-    expect(names).toContain("auth.current_user");
-    expect(names).toContain("orpc.handle");
-    expect(names).toContain("syntheses.create");
-    expect(traceIds.size).toBe(1);
-    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
-    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
-  });
-
-  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          all: async () => ({ results: [] }),
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(0);
-  });
-
-  test("GET /api/version bypasses db and auth spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp();
-
-    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
-
-    expect(response.status).toBe(200);
-    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
-  });
-
   test("request errors still emit one wide request completion log", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -578,7 +518,7 @@ describe("web app", () => {
   });
 
   test("transient pressure errors return retry-after instead of generic failure", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -609,82 +549,63 @@ describe("web app", () => {
   });
 
   test("GET /api/version reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "lares-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
 
   test("GET /api/version/ reports service version", async () => {
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/version/", {}, env);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      service: "lares-web",
+      service: "nudge-web",
       version: "test-version",
     });
   });
 
-  test("GET /api/traces/recent lists safe trace span summaries", async () => {
-    const rows = [
-      {
-        id: "span-1",
-        trace_id: "trace-1",
-        parent_span_id: null,
-        name: "GET /health",
-        kind: "server",
-        status: "ok",
-        started_at: "2026-06-12T10:00:00.000Z",
-        ended_at: "2026-06-12T10:00:00.125Z",
-        duration_ms: 125,
-        route_name: "health",
-        method: "GET",
-        path: "/health",
-      },
-    ];
-    let capturedSelectSql = "";
-    const traceDb = {
-      prepare: (sql: string) => {
-        if (sql.includes("SELECT")) capturedSelectSql = sql;
-        return {
-          bind: () => ({
-            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
-            run: async () => ({ success: true }),
-          }),
-        };
-      },
-    } as D1Database;
-    const app = createApp();
+  test("POST /api/voice/log stores a spoken capture and returns a Siri-friendly response", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+    const response = await app.request(
+      "/api/voice/log",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          idempotencyKey: "siri-log-1",
+          spokenText: "Log that I need to follow up with Maya tomorrow",
+        }),
+      },
+      env,
+    );
+    const body = await response.json();
+    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
+    const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
-    expect(capturedSelectSql).toContain("span_id AS id");
-    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
-    expect(await response.json()).toEqual({
-      spans: [
-        {
-          id: "span-1",
-          traceId: "trace-1",
-          parentSpanId: null,
-          name: "GET /health",
-          kind: "server",
-          status: "ok",
-          startedAt: "2026-06-12T10:00:00.000Z",
-          endedAt: "2026-06-12T10:00:00.125Z",
-          durationMs: 125,
-          routeName: "health",
-          method: "GET",
-          path: "/health",
-        },
-      ],
+    expect(body.spokenResponse).toBe("Understood. I logged it to Nudge.");
+    expect(body.route).toBe("capture_only");
+    expect(body.capture).toMatchObject({
+      idempotencyKey: "siri-log-1",
+      payload: { route: "capture_only", text: "Log that I need to follow up with Maya tomorrow" },
+      source: "ios_siri",
+      type: "capture.voice_log",
+      userId: anonymousUserId,
+    });
+    expect(signalsBody.signals).toHaveLength(1);
+    expect(signalsBody.signals[0]).toMatchObject({
+      payload: { text: "Log that I need to follow up with Maya tomorrow" },
+      source: "ios_siri",
+      type: "capture.voice_log",
     });
   });
 
@@ -795,7 +716,7 @@ describe("web app", () => {
             signals: [
               {
                 id: "signal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 type: "capture.note",
                 source: "test",
                 occurredAt: "2026-06-12T10:00:00.000Z",
@@ -808,7 +729,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -816,7 +737,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/list-recent-signals?limit=5",
-        {},
+        { headers: anonymousHeaders },
         { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
       );
       loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
@@ -826,10 +747,10 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(loggedEvent).toMatchObject({
       agentTool: "listRecentSignals",
       routeName: "api.conversations",
@@ -840,7 +761,7 @@ describe("web app", () => {
       signals: [
         {
           id: "signal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "capture.note",
           source: "test",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -879,7 +800,7 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
 
     let response: Response;
@@ -887,7 +808,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/retrieve-memory?query=michael%20launch&limit=3",
-        {},
+        { headers: anonymousHeaders },
         {
           ...env,
           AGENT_INTERNAL_SECRET: "test-agent-secret",
@@ -902,12 +823,12 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
-    expect(forwardedRequests[0]!.headers.get("x-lares-internal-signature")).toMatch(
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
     expect(loggedEvent).toMatchObject({
@@ -942,7 +863,7 @@ describe("web app", () => {
           forwardedRequests.push(request);
           return Response.json({
             conversationId: "focus",
-            userId: "dev-user",
+            userId: anonymousUserId,
             createdAt: null,
             updatedAt: null,
             recentToolEvents: [],
@@ -955,22 +876,22 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus",
-      {},
+      { headers: anonymousHeaders },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
-      userId: "dev-user",
+      userId: anonymousUserId,
       createdAt: null,
       updatedAt: null,
       recentToolEvents: [],
@@ -1007,9 +928,9 @@ describe("web app", () => {
               confidence: 0.82,
               signal: {
                 id: "signal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 type: "manual_check_in_submitted",
-                source: "lares_agent_intake",
+                source: "nudge_agent_intake",
                 occurredAt: "2026-06-12T10:00:00.000Z",
                 schemaVersion: 1,
                 payload: { note: "What should I do next?" },
@@ -1017,7 +938,7 @@ describe("web app", () => {
               },
               proposal: {
                 id: "proposal-1",
-                userId: "dev-user",
+                userId: anonymousUserId,
                 synthesisId: "synthesis-1",
                 kind: "commit",
                 status: "pending",
@@ -1049,13 +970,13 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ message: "What should I do next?" }),
       },
       {
@@ -1067,21 +988,21 @@ describe("web app", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-display-name")).toBe("Dev User");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-display-name")).toBe("Anonymous User");
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
         confidence: 0.82,
         signal: {
           id: "signal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "manual_check_in_submitted",
-          source: "lares_agent_intake",
+          source: "nudge_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
           schemaVersion: 1,
           payload: { note: "What should I do next?" },
@@ -1089,7 +1010,7 @@ describe("web app", () => {
         },
         proposal: {
           id: "proposal-1",
-          userId: "dev-user",
+          userId: anonymousUserId,
           synthesisId: "synthesis-1",
           kind: "commit",
           status: "pending",
@@ -1124,7 +1045,7 @@ describe("web app", () => {
     expect(agentRun?.values).toEqual([
       expect.any(String),
       null,
-      "dev-user",
+      anonymousUserId,
       "conversation-agent",
       "completed",
       expect.any(String),
@@ -1160,26 +1081,111 @@ describe("web app", () => {
         },
       }),
     } as DurableObjectNamespace;
-    const app = createApp();
+    const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages/stream",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ message: "Stream this" }),
       },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual(["dev-user:focus"]);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
-    expect(forwardedRequests[0]!.headers.get("x-lares-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-lares-user-id")).toBe("dev-user");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
+  });
+
+  test("POST /api/conversations/:conversationId/messages/stream returns progress and receipt frames", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "Stream events" });
+          return Response.json({
+            conversationId: "focus",
+            draft: {
+              confidence: 0.82,
+              signal: {
+                id: "signal-1",
+                userId: anonymousUserId,
+                type: "manual_check_in_submitted",
+                source: "nudge_agent_intake",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "Stream events" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+              proposal: {
+                id: "proposal-1",
+                userId: anonymousUserId,
+                synthesisId: "synthesis-1",
+                kind: "commit",
+                status: "pending",
+                title: "Clarify the next step",
+                body: "Choose one concrete next action.",
+                rationale: "Generated from the latest user message.",
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-12T10:00:00.000Z",
+              },
+              requiresReview: true,
+            },
+            message: "Stream events",
+            memoryResults: [],
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+            receipt: {
+              id: "receipt-1",
+              action: "proposal.generated",
+              changed: { proposalId: "proposal-1", status: "pending" },
+              createdAt: "2026-06-12T10:00:00.000Z",
+              signalIds: ["signal-1"],
+              why: "Generated from the latest user message.",
+            },
+            reply: "I drafted a reviewable next step from your message.",
+            skillsApplied: ["intake-loop"],
+            subAgentsUsed: ["loopIntakeThink"],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, accept: "text/event-stream" },
+        body: JSON.stringify({ message: "Stream events" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
+    expect(response.headers.get("content-type")).toContain("application/x-nudge-event-stream");
+    expect(body).toContain("event: progress");
+    expect(body).toContain("event: sources");
+    expect(body).toContain("event: receipt");
+    expect(body).toContain("proposal.generated");
+    expect(body).toContain("event: done");
   });
 
   test("custom integrations can append and list current user's events", async () => {
@@ -1189,7 +1195,7 @@ describe("web app", () => {
       "/api/events",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "manual_check_in_submitted",
           source: "api",
@@ -1201,14 +1207,14 @@ describe("web app", () => {
       env,
     );
 
-    const listResponse = await app.request("/api/events", {}, env);
+    const listResponse = await app.request("/api/events", { headers: anonymousHeaders }, env);
 
     expect(appendResponse.status).toBe(200);
     expect(listResponse.status).toBe(200);
     expect(await listResponse.json()).toEqual({
       events: [
         expect.objectContaining({
-          userId: "dev-user",
+          userId: anonymousUserId,
           type: "manual_check_in_submitted",
           source: "api",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -1219,74 +1225,142 @@ describe("web app", () => {
     });
   });
 
+  test("media uploads are stored in R2 and returned as attachment references", async () => {
+    const writes: Array<{
+      readonly key: string;
+      readonly options: R2PutOptions | undefined;
+      readonly value: Uint8Array;
+    }> = [];
+    const mediaBucket = {
+      get: async () => null,
+      put: async (key: string, value: Uint8Array, options?: R2PutOptions) => {
+        writes.push({ key, options, value });
+        return { key } as R2Object;
+      },
+    } as R2Bucket;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/media",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          dataBase64: btoa("image bytes"),
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          kind: "image",
+          label: "Camera photo",
+          mimeType: "image/jpeg",
+        }),
+      },
+      { ...env, MEDIA_FILES: mediaBucket },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      byteLength: 11,
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      kind: "image",
+      label: "Camera photo",
+      mimeType: "image/jpeg",
+      url: "/api/media/550e8400-e29b-41d4-a716-446655440000",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.key).toBe(
+      `users/${anonymousUserId}/media/550e8400-e29b-41d4-a716-446655440000`,
+    );
+    expect(new TextDecoder().decode(writes[0]!.value)).toBe("image bytes");
+    expect(writes[0]!.options).toEqual({
+      customMetadata: {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        kind: "image",
+        label: "Camera photo",
+        userId: anonymousUserId,
+      },
+      httpMetadata: { contentType: "image/jpeg" },
+    });
+  });
+
   test("custom integrations can inspect the current session workspace", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request("/api/session", { headers: anonymousHeaders }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "anonymous",
+      user: anonymousUser,
+      workspace: { id: anonymousUserId, label: "Anonymous User's workspace" },
+    });
+  });
+
+  test("custom integrations see an unauthenticated session without a Clerk token", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request("/api/session", {}, env);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: false, google: false, passkey: false },
-      authMode: "dev",
-      user: { id: "dev-user", displayName: "Dev User" },
-      workspace: { id: "dev-user", label: "Dev User's workspace" },
-    });
-  });
-
-  test("custom integrations see an unauthenticated session when Better Auth is configured without a cookie", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request("/api/session", {}, { ...env, BETTER_AUTH_SECRET: "test" });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
       authMode: "unauthenticated",
       user: null,
       workspace: null,
     });
   });
 
-  test("custom integrations expose Google as an auth method when OAuth credentials are configured", async () => {
+  test("custom integrations resolve an anonymous install session from a scoped client id", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/session",
-      {},
       {
-        ...env,
-        BETTER_AUTH_SECRET: "test",
-        GOOGLE_CLIENT_ID: "google-client-id",
-        GOOGLE_CLIENT_SECRET: "google-client-secret",
+        headers: {
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+        },
       },
+      env,
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: true, passkey: true },
-      authMode: "unauthenticated",
-      user: null,
-      workspace: null,
+      authMode: "anonymous",
+      user: {
+        displayName: "Anonymous User",
+        id: "anon_550e8400-e29b-41d4-a716-446655440000",
+      },
+      workspace: {
+        id: "anon_550e8400-e29b-41d4-a716-446655440000",
+        label: "Anonymous User's workspace",
+      },
     });
   });
 
   test("custom integrations cannot use user data routes without an authenticated production session", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request(
-      "/api/signals?limit=10",
-      {},
-      {
-        ...env,
-        BETTER_AUTH_SECRET: "test",
-      },
-    );
+    const response = await app.request("/api/signals?limit=10", {}, env);
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
-  test("custom integrations resolve workspace from a Better Auth session", async () => {
+  test("custom integrations can use user data routes with an anonymous install session", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/signals?limit=10",
+      {
+        headers: {
+          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
+        },
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ signals: [] });
+  });
+
+  test("custom integrations resolve workspace from a Clerk session", async () => {
     const app = createApp({
       authSessionResolver: async () => ({
         user: {
@@ -1302,11 +1376,55 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMethods: { emailOtp: true, google: false, passkey: true },
-      authMode: "better-auth",
+      authMode: "clerk",
       user: { id: "auth-user-1", displayName: "Lana" },
       workspace: { id: "auth-user-1", label: "Lana's workspace" },
     });
+  });
+
+  test("desktop browser auth rejects anonymous sessions", async () => {
+    const app = createApp({
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async () => {
+        throw new Error("unexpected desktop token mint");
+      },
+    });
+
+    const response = await app.request(
+      "/api/auth/desktop-ticket",
+      { headers: anonymousHeaders, method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Clerk session required" });
+  });
+
+  test("desktop browser auth mints a short-lived Clerk sign-in ticket", async () => {
+    const calls: Array<{ readonly appVersion: string; readonly userId: string }> = [];
+    const app = createApp({
+      authSessionResolver: async () => ({
+        user: {
+          email: "lana@example.com",
+          id: "auth-user-1",
+          name: "Lana",
+        },
+      }),
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async ({ env: requestEnv, userId }) => {
+        calls.push({ appVersion: requestEnv.APP_VERSION, userId });
+        return { expiresInSeconds: 120, ticket: "test-desktop-ticket" };
+      },
+    });
+
+    const response = await app.request("/api/auth/desktop-ticket", { method: "POST" }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      expiresInSeconds: 120,
+      ticket: "test-desktop-ticket",
+    });
+    expect(calls).toEqual([{ appVersion: "test-version", userId: "auth-user-1" }]);
   });
 
   test("custom integrations can export and delete the current user's data", async () => {
@@ -1316,7 +1434,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -1328,20 +1446,28 @@ describe("web app", () => {
       env,
     );
 
-    const exportResponse = await app.request("/api/export", {}, env);
+    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
     const exported = await exportResponse.json();
-    const deleteResponse = await app.request("/api/account/delete", { method: "POST" }, env);
-    const afterDeleteResponse = await app.request("/api/export", {}, env);
+    const deleteResponse = await app.request(
+      "/api/account/delete",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
+    const afterDeleteResponse = await app.request(
+      "/api/export",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(exportResponse.status).toBe(200);
     expect(exported).toMatchObject({
-      user: { id: "dev-user", displayName: "Dev User" },
+      user: { id: anonymousUserId, displayName: "Anonymous User" },
       events: [expect.objectContaining({ payload: { note: "export this" } })],
     });
     expect(deleteResponse.status).toBe(200);
     expect(await deleteResponse.json()).toEqual({ deleted: true });
     expect(await afterDeleteResponse.json()).toMatchObject({
-      user: { id: "dev-user", displayName: "Dev User" },
+      user: { id: anonymousUserId, displayName: "Anonymous User" },
       events: [],
       commitments: [],
       outcomes: [],
@@ -1361,7 +1487,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/account/delete",
-        { method: "POST" },
+        { method: "POST", headers: anonymousHeaders },
         {
           ...env,
           TURBOPUFFER_API_KEY: "test-key",
@@ -1377,9 +1503,9 @@ describe("web app", () => {
     expect(calls).toHaveLength(1);
     const [url, init] = calls[0]!;
     expect(String(url)).toMatch(
-      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/lares-user-[a-f0-9]{48}$/,
+      /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
     );
-    expect(String(url)).not.toContain("dev-user");
+    expect(String(url)).not.toContain(anonymousUserId);
     expect(init?.method).toBe("DELETE");
   });
 
@@ -1397,7 +1523,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "need to write to michael",
           localDate: "2026-06-18",
@@ -1417,11 +1543,15 @@ describe("web app", () => {
     );
     expect(workflowCreates).toHaveLength(1);
 
-    const documentResponse = await app.request("/api/journal/2026-06-18", {}, env);
+    const documentResponse = await app.request(
+      "/api/journal/2026-06-18",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(documentResponse.status).toBe(200);
     expect((await documentResponse.json()).document.bodyText).toBe("need to write to michael");
 
-    const exportResponse = await app.request("/api/export", {}, env);
+    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
     const exported = await exportResponse.json();
     expect(exported.journalDocuments).toHaveLength(1);
     expect(exported.journalRevisions).toHaveLength(1);
@@ -1458,12 +1588,97 @@ describe("web app", () => {
       ]),
     );
 
-    const actionsResponse = await app.request("/api/actions", {}, env);
+    const actionsResponse = await app.request("/api/actions", { headers: anonymousHeaders }, env);
     const actions = await actionsResponse.json();
     expect(actions.actions).toEqual([]);
     expect(actions.latestRun).toEqual(expect.objectContaining({ status: "queued" }));
-    const summariesResponse = await app.request("/api/summaries", {}, env);
+    const summariesResponse = await app.request(
+      "/api/summaries",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect((await summariesResponse.json()).summaries).toEqual([]);
+  });
+
+  test("iOS clients can list calendar day activity", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          bodyText: "Met Kai and captured the follow-up.",
+          localDate: "2026-06-18",
+          title: "June 18",
+        }),
+      },
+      env,
+    );
+    await app.request(
+      "/api/events",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          occurredAt: "2026-06-18T10:00:00.000Z",
+          payload: { note: "Follow up with Kai." },
+          schemaVersion: 1,
+          source: "ios_app",
+          type: "manual_check_in_submitted",
+        }),
+      },
+      env,
+    );
+
+    const response = await app.request(
+      "/api/calendar/days?timeZone=UTC",
+      { headers: anonymousHeaders },
+      env,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.days).toEqual([
+      {
+        localDate: "2026-06-18",
+        noteCount: 1,
+        signalCount: 1,
+      },
+    ]);
+  });
+
+  test("custom integrations can fetch a queued agent run by id", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const save = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          bodyText: "need to work on the guest list",
+          localDate: "2026-07-01",
+          title: "July 1",
+        }),
+      },
+      env,
+    );
+    const saved = await save.json();
+
+    const response = await app.request(
+      `/api/agent-runs/${saved.analysisRun.id}`,
+      { headers: anonymousHeaders },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      run: expect.objectContaining({
+        id: saved.analysisRun.id,
+        status: "queued",
+      }),
+    });
   });
 
   test("agents can read workspace notes through the OKF filesystem API", async () => {
@@ -1472,7 +1687,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "OKF should be mounted into the sandbox for grep and cat.",
           localDate: "2026-06-29",
@@ -1483,27 +1698,35 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const listed = await app.request("/api/okf?path=/daily", {}, env);
+    const listed = await app.request("/api/okf?path=/daily", { headers: anonymousHeaders }, env);
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual({
       entries: ["2026-06-29.md", "index.md"],
       path: "/daily",
     });
 
-    const read = await app.request("/api/okf/file?path=/daily/2026-06-29.md", {}, env);
+    const read = await app.request(
+      "/api/okf/file?path=/daily/2026-06-29.md",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(read.status).toBe(200);
     expect(await read.json()).toEqual({
       content: expect.stringContaining("OKF should be mounted into the sandbox"),
       path: "/daily/2026-06-29.md",
     });
 
-    const search = await app.request("/api/okf/search?query=grep&limit=1", {}, env);
+    const search = await app.request(
+      "/api/okf/search?query=grep&limit=1",
+      { headers: anonymousHeaders },
+      env,
+    );
     expect(search.status).toBe(200);
     expect(await search.json()).toEqual({
       results: [
         {
-          path: "/daily/2026-06-29.md",
-          snippet: "OKF should be mounted into the sandbox for grep and cat.",
+          path: "/user/profile.md",
+          snippet: "* June 29: OKF should be mounted into the sandbox for grep and cat.",
         },
       ],
     });
@@ -1515,7 +1738,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "MCP should expose the same OKF workspace boundary.",
           localDate: "2026-07-02",
@@ -1530,10 +1753,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 0,
           jsonrpc: "2.0",
@@ -1559,10 +1779,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -1585,10 +1802,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 2,
           jsonrpc: "2.0",
@@ -1616,10 +1830,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 4,
           jsonrpc: "2.0",
@@ -1647,10 +1858,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 6,
           jsonrpc: "2.0",
@@ -1674,10 +1882,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 5,
           jsonrpc: "2.0",
@@ -1706,10 +1911,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 3,
           jsonrpc: "2.0",
@@ -1729,9 +1931,9 @@ describe("web app", () => {
           results: [
             {
               mimeType: "text/markdown",
-              path: "/daily/2026-07-02.md",
-              snippet: "MCP should expose the same OKF workspace boundary.",
-              uri: "file:///okf/daily/2026-07-02.md",
+              path: "/user/profile.md",
+              snippet: "* July 2: MCP should expose the same OKF workspace boundary.",
+              uri: "file:///okf/user/profile.md",
             },
           ],
         },
@@ -1742,7 +1944,7 @@ describe("web app", () => {
         content: expect.arrayContaining([
           expect.objectContaining({
             type: "resource_link",
-            uri: "file:///okf/daily/2026-07-02.md",
+            uri: "file:///okf/user/profile.md",
           }),
         ]),
       },
@@ -1756,10 +1958,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: {
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
+        headers: anonymousMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -1794,12 +1993,12 @@ describe("web app", () => {
       },
     });
 
-    const proposals = await app.request("/api/proposals", {}, env);
+    const proposals = await app.request("/api/proposals", { headers: anonymousHeaders }, env);
     expect((await proposals.json()).proposals).toEqual([
       expect.objectContaining({ status: "pending", title: "Follow up on launch" }),
     ]);
 
-    const commitments = await app.request("/api/commitments", {}, env);
+    const commitments = await app.request("/api/commitments", { headers: anonymousHeaders }, env);
     expect((await commitments.json()).commitments).toEqual([]);
   });
 
@@ -1826,7 +2025,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox should expose OKF files to grep.",
           localDate: "2026-06-30",
@@ -1837,7 +2036,11 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+    const smoke = await app.request(
+      "/api/okf/sandbox/smoke",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
 
     expect(smoke.status).toBe(200);
     expect(await smoke.json()).toEqual({
@@ -1882,7 +2085,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox startup can fail locally while OKF projection remains valid.",
           localDate: "2026-07-01",
@@ -1893,7 +2096,11 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const smoke = await app.request("/api/okf/sandbox/smoke", { method: "POST" }, env);
+    const smoke = await app.request(
+      "/api/okf/sandbox/smoke",
+      { method: "POST", headers: anonymousHeaders },
+      env,
+    );
 
     expect(smoke.status).toBe(200);
     expect(await smoke.json()).toEqual({
@@ -1929,7 +2136,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "Ask AI to extract this action durably",
           localDate: "2026-06-22",
@@ -1943,7 +2150,7 @@ describe("web app", () => {
     const saved = await response.json();
     expect(saved.analysisRun).toEqual(
       expect.objectContaining({
-        model: "@cf/moonshotai/kimi-k2.6",
+        model: "@cf/zai-org/glm-4.7-flash",
         sourceType: "note_revision",
         status: "queued",
       }),
@@ -1955,14 +2162,17 @@ describe("web app", () => {
           changedText: "Ask AI to extract this action durably",
           kind: "daily-note-analysis",
           localDate: "2026-06-22",
+          revisionId: saved.analysisRun.sourceId,
           runId: saved.analysisRun.id,
-          userId: "dev-user",
+          userId: anonymousUserId,
           workflowVersion: 1,
         }),
       }),
     ]);
 
-    const exported = await (await app.request("/api/export", {}, env)).json();
+    const exported = await (
+      await app.request("/api/export", { headers: anonymousHeaders }, env)
+    ).json();
     expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "queued" })]);
     expect(exported.extractedItems).toEqual([]);
     expect(exported.summaryDocuments).toEqual([]);
@@ -1975,7 +2185,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           bodyText: "I have now written to michael",
           localDate: "2026-06-21",
@@ -1986,9 +2196,11 @@ describe("web app", () => {
     );
 
     expect(response.status).toBe(200);
-    const actions = await (await app.request("/api/actions", {}, env)).json();
+    const actions = await (
+      await app.request("/api/actions", { headers: anonymousHeaders }, env)
+    ).json();
     expect(actions.latestRun).toEqual(
-      expect.objectContaining({ model: "@cf/moonshotai/kimi-k2.6", status: "queued" }),
+      expect.objectContaining({ model: "@cf/zai-org/glm-4.7-flash", status: "queued" }),
     );
     expect(actions.actions).toEqual([]);
   });
@@ -2000,7 +2212,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2016,7 +2228,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2029,7 +2241,7 @@ describe("web app", () => {
       env,
     );
 
-    const signalsResponse = await app.request("/api/signals", {}, env);
+    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
     const body = await signalsResponse.json();
     const capture = await captureResponse.json();
     const retriedCapture = await retriedCaptureResponse.json();
@@ -2039,11 +2251,99 @@ describe("web app", () => {
     expect(signalsResponse.status).toBe(200);
     expect(body.signals).toEqual([
       expect.objectContaining({
-        userId: "dev-user",
+        userId: anonymousUserId,
         type: "user_context_captured",
         payload: { note: "primitive route" },
       }),
     ]);
+  });
+
+  test("POST /api/quick-captures stores a capture and returns a reviewable draft", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/quick-captures",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, "x-nudge-client": "desktop" },
+        body: JSON.stringify({
+          idempotencyKey: "quick-capture-retry-1",
+          note: "Travel this week and follow up with work",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+        }),
+      },
+      env,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      capture: expect.objectContaining({
+        userId: anonymousUserId,
+        type: "manual_check_in_submitted",
+        source: "desktop_app",
+        occurredAt: "2026-06-12T10:00:00.000Z",
+        schemaVersion: 1,
+        idempotencyKey: "quick-capture-retry-1",
+        payload: { note: "Travel this week and follow up with work" },
+      }),
+      draft: {
+        confidence: 0.82,
+        proposal: expect.objectContaining({
+          status: "pending",
+          title: "Clarify next attention point",
+        }),
+        requiresReview: true,
+      },
+      processingStatus: "drafted",
+    });
+  });
+
+  test("voice logs append a primitive signal without queuing analysis", async () => {
+    const workflowCreates: Array<unknown> = [];
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/voice/log",
+      {
+        method: "POST",
+        headers: anonymousJsonHeaders,
+        body: JSON.stringify({
+          idempotencyKey: "siri-log-1",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+          spokenText: "Follow up with Maya tomorrow",
+        }),
+      },
+      {
+        ...env,
+        DAILY_DIGEST_WORKFLOW: {
+          create: async (input: unknown) => {
+            workflowCreates.push(input);
+            return { id: "unexpected-workflow" };
+          },
+        } as Workflow,
+      },
+    );
+    const voiceLog = await response.json();
+    const signals = await (
+      await app.request("/api/signals", { headers: anonymousHeaders }, env)
+    ).json();
+
+    expect(response.status).toBe(200);
+    expect(voiceLog.spokenResponse).toBe("Understood. I'm processing it in Nudge.");
+    expect(voiceLog.route).toBe("reasoning_candidate");
+    expect(voiceLog.capture).toEqual(
+      expect.objectContaining({
+        source: "ios_siri",
+        type: "capture.voice_log",
+        payload: {
+          route: "reasoning_candidate",
+          text: "Follow up with Maya tomorrow",
+        },
+      }),
+    );
+    expect(signals.signals).toEqual([expect.objectContaining({ id: voiceLog.capture.id })]);
+    expect(workflowCreates).toEqual([]);
   });
 
   test("custom integrations can generate a source-linked synthesis for the current frame", async () => {
@@ -2053,7 +2353,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2069,14 +2369,14 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
     const latestResponse = await app.request(
       "/api/syntheses/latest?frameKey=current_state",
-      {},
+      { headers: anonymousHeaders },
       env,
     );
     const synthesis = await response.json();
@@ -2103,7 +2403,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2118,7 +2418,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2128,7 +2428,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2137,12 +2437,16 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
-    const listBeforeReviewResponse = await app.request("/api/proposals", {}, env);
+    const listBeforeReviewResponse = await app.request(
+      "/api/proposals",
+      { headers: anonymousHeaders },
+      env,
+    );
     const listBeforeReview = await listBeforeReviewResponse.json();
     const retriedGenerate = await retriedGenerateResponse.json();
     const proposal = listBeforeReview.proposals[0];
@@ -2150,12 +2454,16 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposal.id, decision: "accepted" }),
       },
       env,
     );
-    const listAfterReviewResponse = await app.request("/api/proposals", {}, env);
+    const listAfterReviewResponse = await app.request(
+      "/api/proposals",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(generateResponse.status).toBe(200);
     expect(retriedGenerate.proposals.map((item: { id: string }) => item.id)).toEqual(
@@ -2183,7 +2491,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2192,7 +2500,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2203,7 +2511,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
@@ -2212,18 +2520,22 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
     );
-    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+    const commitmentsResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
     const { commitments } = await commitmentsResponse.json();
     const outcomeResponse = await app.request(
       "/api/outcomes",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2236,7 +2548,7 @@ describe("web app", () => {
       "/api/outcomes",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2245,8 +2557,12 @@ describe("web app", () => {
       },
       env,
     );
-    const outcomesResponse = await app.request("/api/outcomes", {}, env);
-    const activeAfterOutcomeResponse = await app.request("/api/commitments", {}, env);
+    const outcomesResponse = await app.request("/api/outcomes", { headers: anonymousHeaders }, env);
+    const activeAfterOutcomeResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(retriedReviewResponse.status).toBe(200);
     expect(commitmentsResponse.status).toBe(200);
@@ -2278,7 +2594,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2287,7 +2603,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2298,7 +2614,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: anonymousJsonHeaders,
         body: JSON.stringify({
           proposalId: proposals[0].id,
           decision: "edited",
@@ -2309,7 +2625,11 @@ describe("web app", () => {
       },
       env,
     );
-    const commitmentsResponse = await app.request("/api/commitments", {}, env);
+    const commitmentsResponse = await app.request(
+      "/api/commitments",
+      { headers: anonymousHeaders },
+      env,
+    );
 
     expect(await commitmentsResponse.json()).toEqual({
       commitments: [
@@ -2337,7 +2657,7 @@ describe("web app", () => {
           "/api/events",
           {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: anonymousJsonHeaders,
             body: JSON.stringify({
               type,
               source: "api",
@@ -2353,7 +2673,7 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/events?from=2026-06-07T00:00:00.000Z&to=2026-06-14T23:59:59.999Z",
-      {},
+      { headers: anonymousHeaders },
       env,
     );
     const body = await response.json();
@@ -2364,12 +2684,12 @@ describe("web app", () => {
 
   test("GET /api/openapi.json documents the public events API", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/openapi.json", {}, env);
+    const response = await app.request("/api/openapi.json", { headers: anonymousHeaders }, env);
     const spec = await response.json();
 
     expect(response.status).toBe(200);
     expect(spec.info).toEqual({
-      title: "Lares API",
+      title: "Nudge API",
       version: "0.1.0",
     });
     expect(spec.paths["/events"].get).toMatchObject({
@@ -2408,11 +2728,11 @@ describe("web app", () => {
 
   test("GET /api/docs serves human-readable API documentation", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/docs", {}, env);
+    const response = await app.request("/api/docs", { headers: anonymousHeaders }, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(body).toContain("Lares API");
+    expect(body).toContain("Nudge API");
   });
 });

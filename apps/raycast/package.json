@@ -1,0 +1,66 @@
+{
+  "name": "@nudge/raycast",
+  "version": "0.1.0",
+  "description": "Capture notes into the Nudge Engine and review current context.",
+  "categories": [
+    "Productivity"
+  ],
+  "license": "MIT",
+  "author": "teampitch",
+  "type": "module",
+  "scripts": {
+    "build": "ray build -e dist -o dist",
+    "dev": "ray develop",
+    "publish": "ray publish",
+    "test": "bun test ./src",
+    "test:e2e": "bun test ./src/raycast-service-e2e.test.ts"
+  },
+  "dependencies": {
+    "@nudge/surface": "workspace:*",
+    "@raycast/api": "1.104.21",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "typescript": "catalog:"
+  },
+  "icon": "assets/icon.png",
+  "commands": [
+    {
+      "name": "capture",
+      "title": "Capture",
+      "description": "Send a note to the Nudge Engine.",
+      "mode": "view"
+    },
+    {
+      "name": "current-context",
+      "title": "Current Context",
+      "description": "Review today's journal, actions, signals, and AI review status.",
+      "mode": "view"
+    },
+    {
+      "name": "ask",
+      "title": "Ask Nudge",
+      "description": "Ask Nudge about the current operating loop.",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "engineUrl",
+      "title": "Engine URL",
+      "description": "Nudge Engine base URL.",
+      "type": "textfield",
+      "required": true,
+      "default": "https://nudge-web.teampitch.workers.dev"
+    },
+    {
+      "name": "bearerToken",
+      "title": "Bearer Token",
+      "description": "Optional authenticated Engine token.",
+      "type": "password",
+      "required": false
+    }
+  ],
+  "title": "Nudge"
+}

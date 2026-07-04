@@ -6,9 +6,10 @@ describe("deploy script", () => {
     const script = await readFile(new URL("./deploy-web.ts", import.meta.url), "utf8");
 
     const check = script.indexOf("bun run check");
-    const deploy = script.indexOf("wrangler deploy");
+    const deploy = script.indexOf("deploy ${deployArgs}");
 
     expect(check).toBeGreaterThan(-1);
+    expect(deploy).toBeGreaterThan(-1);
     expect(check).toBeLessThan(deploy);
   });
 });

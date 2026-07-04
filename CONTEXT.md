@@ -1,11 +1,27 @@
-# Lares
+# Nudge
 
-Lares is an adaptive operating layer for personal work, relationships, memory, and daily decision-making. This glossary keeps product language stable across docs, planning, and implementation.
+Nudge is an adaptive operating layer for personal work, relationships, memory, and daily decision-making. This glossary keeps product language stable across docs, planning, and implementation.
 
 ## Language
 
+**Nudge Engine**:
+The durable runtime that owns Nudge's API, reasoning, persistence, review boundaries, and integrations. App Surfaces call the Engine instead of reimplementing product behavior locally.
+_Avoid_: Backend as product language, duplicating Engine rules in clients
+
+**App Surface**:
+A platform-specific user interface for Nudge, such as web, Electron desktop, SwiftUI iOS, Raycast, or Siri. App Surfaces may adapt presentation and OS integration, but they should keep durable behavior behind the Nudge Engine.
+_Avoid_: Treating each app as its own product logic fork
+
+**Shared Surface Logic**:
+Presentation-adjacent product behavior reused by React App Surfaces, especially web and Electron, while durable behavior and agent decisions stay behind the Nudge Engine.
+_Avoid_: Rebuilding capture, editor, review, or Convex wiring separately per surface
+
+**Agent Loop**:
+The Engine-run cycle that turns Captures and Context into source-linked Syntheses, Proposals, Reviews, Commitments, and Outcomes.
+_Avoid_: Client-side agent rules, silent autonomous action
+
 **Primitive**:
-A general building block that can be composed into many user-facing loops without locking Lares into one niche workflow.
+A general building block that can be composed into many user-facing loops without locking Nudge into one niche workflow.
 _Avoid_: Feature-specific nouns as core architecture
 
 **Capture**:
@@ -21,11 +37,11 @@ Information available for reasoning. Context may be raw signals, user-authored c
 _Avoid_: Hidden prompt stuffing, unsourced memory
 
 **Workspace Boundary**:
-The user-scoped surface of Context that Lares exposes to agents for reasoning and tool use. A workspace boundary must preserve source links, respect the current user, and keep canonical writes behind the normal Review and persistence paths.
+The user-scoped surface of Context that Nudge exposes to agents for reasoning and tool use. A workspace boundary must preserve source links, respect the current user, and keep canonical writes behind the normal Review and persistence paths.
 _Avoid_: Global agent filesystem, shared memory dump, writeable canonical store
 
 **Frame**:
-A bounded question, situation, or intent Lares is helping with. Frames define what context matters and what kind of synthesis/proposal is useful.
+A bounded question, situation, or intent Nudge is helping with. Frames define what context matters and what kind of synthesis/proposal is useful.
 _Avoid_: Assuming every frame is a daily plan
 
 **Synthesis**:
@@ -41,7 +57,7 @@ The Human-in-the-Loop decision over a proposal: accept, edit, reject, defer, or 
 _Avoid_: Notification inbox, generic task list
 
 **Commitment**:
-A user-accepted intention, action, or behavior change that Lares should track.
+A user-accepted intention, action, or behavior change that Nudge should track.
 _Avoid_: Silent automation
 
 **Outcome**:

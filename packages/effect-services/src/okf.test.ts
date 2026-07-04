@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { UserDataExport } from "@lares/db";
+import type { UserDataExport } from "@nudge/db";
 import { buildOkfProjection, listOkfDirectory, readOkfFile, searchOkfFiles } from "./okf";
 
 const exportedUserData = {
@@ -10,7 +10,7 @@ const exportedUserData = {
       userId: "user-1",
       localDate: "2026-06-29",
       title: "June 29",
-      bodyText: "Look into OKF as the filesystem shape for Lares agent memory.",
+      bodyText: "Look into OKF as the filesystem shape for Nudge agent memory.",
       createdAt: "2026-06-29T08:00:00.000Z",
       updatedAt: "2026-06-29T09:00:00.000Z",
     },
@@ -73,13 +73,20 @@ describe("OKF projection", () => {
     const projection = buildOkfProjection(exportedUserData);
 
     expect(listOkfDirectory(projection, "/")).toEqual([
+      "actions",
       "daily",
       "index.md",
       "items",
       "memory",
       "summaries",
+      "user",
     ]);
     expect(listOkfDirectory(projection, "/daily")).toEqual(["2026-06-29.md", "index.md"]);
+    expect(listOkfDirectory(projection, "/user")).toEqual([
+      "index.md",
+      "profile.md",
+      "writing-style.md",
+    ]);
 
     expect(readOkfFile(projection, "/daily/2026-06-29.md")).toContain(
       'type: "Daily Note"\ntitle: "June 29"',
@@ -94,6 +101,11 @@ describe("OKF projection", () => {
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
       "OKF should be a projection over workspace data.",
     );
+    expect(readOkfFile(projection, "/user/profile.md")).toContain("Display name: Alex");
+    expect(readOkfFile(projection, "/user/writing-style.md")).toContain(
+      "Look into OKF as the filesystem shape",
+    );
+    expect(readOkfFile(projection, "/actions/open.md")).toContain("Follow up on OKF");
   });
 
   test("renders concept files with OKF-required type and stable resource metadata", () => {
@@ -114,20 +126,26 @@ describe("OKF projection", () => {
       );
       expect(metadata.type, path).toBeString();
       expect(metadata.type, path).not.toBe('""');
-      expect(metadata.resource, path).toMatch(/^"lares:\/\/[^"]+"$/);
+      expect(metadata.resource, path).toMatch(/^"nudge:\/\/[^"]+"$/);
     }
 
     expect(readOkfFile(projection, "/daily/2026-06-29.md")).toContain(
-      'resource: "lares://daily/2026-06-29"',
+      'resource: "nudge://daily/2026-06-29"',
     );
     expect(readOkfFile(projection, "/items/item-1.md")).toContain(
-      'resource: "lares://items/item-1"',
+      'resource: "nudge://items/item-1"',
     );
     expect(readOkfFile(projection, "/memory/daily_note/memory-1.md")).toContain(
-      'resource: "lares://memory/daily_note/memory-1"',
+      'resource: "nudge://memory/daily_note/memory-1"',
     );
     expect(readOkfFile(projection, "/summaries/day-2026-06-29.md")).toContain(
-      'resource: "lares://summaries/day/2026-06-29"',
+      'resource: "nudge://summaries/day/2026-06-29"',
+    );
+    expect(readOkfFile(projection, "/user/profile.md")).toContain(
+      'resource: "nudge://user/profile"',
+    );
+    expect(readOkfFile(projection, "/actions/open.md")).toContain(
+      'resource: "nudge://actions/open"',
     );
   });
 
@@ -135,6 +153,10 @@ describe("OKF projection", () => {
     const projection = buildOkfProjection(exportedUserData);
 
     expect(searchOkfFiles(projection, "sandbox")).toEqual([
+      expect.objectContaining({
+        path: "/actions/open.md",
+        snippet: "Decide whether the Cloudflare sandbox gets a mounted OKF tree.",
+      }),
       expect.objectContaining({
         path: "/items/item-1.md",
         snippet: "Decide whether the Cloudflare sandbox gets a mounted OKF tree.",

@@ -8,11 +8,6 @@ export type ReviewQueueItemType =
   | "routine_change"
   | "consent_grant";
 
-export interface DevUser {
-  id: UserId;
-  displayName: string;
-}
-
 export type ProposalKind = "clarify" | "follow_up" | "commit" | "ignore";
 
 export interface SignalLike {
@@ -128,7 +123,7 @@ export const buildDeterministicProposals = (input: {
       synthesisId: input.synthesisId,
       kind: "clarify",
       title: "Capture more context",
-      body: "Add another capture so Lares has enough context to help.",
+      body: "Add another capture so Nudge has enough context to help.",
       rationale: "Created because there were no open questions or specific themes.",
     },
   ];

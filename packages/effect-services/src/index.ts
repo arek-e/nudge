@@ -1,42 +1,43 @@
 import { Context, Effect, Layer } from "effect";
-import { Db, type DbUser, type MemoryChunkRecord, type ReviewDecision } from "@lares/db";
+import {
+  Db,
+  type DbUser,
+  type EventRecord,
+  type MemoryChunkRecord,
+  type ProposalRecord,
+  type ReviewDecision,
+  type SynthesisRecord,
+} from "@nudge/db";
 import {
   buildDeterministicProposals,
   buildDeterministicSynthesis,
   defaultFrame,
-  type DevUser,
-} from "@lares/domain";
+} from "@nudge/domain";
 
 export * from "./okf";
 export * from "./agent-prompts";
+export * from "./daily-note-workflows";
+export * from "./workflow-config";
 
-export const durableWorkflowStepConfig = {
-  retries: {
-    limit: 5,
-    delay: 1_000,
-    backoff: "exponential",
-  },
-  timeout: "10 minutes",
-} as const;
+export interface LoopIntakeDraftInput {
+  readonly conversationId: string;
+  readonly idempotencyKey?: string;
+  readonly message: string;
+  readonly occurredAt?: string;
+  readonly source?: string;
+  readonly user: DbUser;
+}
 
-export const currentWorkflowVersion = 1;
-
-export type WorkflowVersion = typeof currentWorkflowVersion;
-
-export const workflowStepName = (version: WorkflowVersion, name: string) => `v${version}.${name}`;
-
-export class AuthService extends Context.Service<
-  AuthService,
-  {
-    readonly currentUser: Effect.Effect<DevUser>;
-  }
->()("lares/AuthService") {
-  static readonly layerDev = Layer.succeed(AuthService)({
-    currentUser: Effect.succeed({
-      id: "dev-user",
-      displayName: "Dev User",
-    }),
-  });
+export interface LoopIntakeDraftResult {
+  readonly draft: {
+    readonly confidence: number;
+    readonly proposal: ProposalRecord;
+    readonly requiresReview: true;
+    readonly signal: EventRecord;
+  } | null;
+  readonly proposals: ReadonlyArray<ProposalRecord>;
+  readonly signal: EventRecord;
+  readonly synthesis: SynthesisRecord;
 }
 
 export interface MemorySearchResult {
@@ -68,16 +69,12 @@ const sha256Hex = (value: string) =>
   });
 
 const memoryNamespaceForUser = (userId: string) =>
-  Effect.map(sha256Hex(userId), (hash) => `lares-user-${hash.slice(0, 48)}`);
+  Effect.map(sha256Hex(userId), (hash) => `nudge-user-${hash.slice(0, 48)}`);
 
 const turbopufferUrl = (config: TurbopufferMemoryIndexConfig, namespace: string, path = "") =>
   `https://${config.region}.turbopuffer.com/v2/namespaces/${namespace}${path}`;
 
-const turbopufferFetchJson = <A>(
-  config: TurbopufferMemoryIndexConfig,
-  url: string,
-  body: unknown,
-) =>
+const turbopufferFetchJson = (config: TurbopufferMemoryIndexConfig, url: string, body: unknown) =>
   Effect.tryPromise({
     try: async () => {
       const response = await (config.fetch ?? globalThis.fetch)(url, {
@@ -89,10 +86,72 @@ const turbopufferFetchJson = <A>(
         method: "POST",
       });
       if (!response.ok) throw new Error(`Turbopuffer request failed with ${response.status}`);
-      return (await response.json()) as A;
+      return await response.json();
     },
     catch: (error) => (error instanceof Error ? error : new Error("Turbopuffer request failed")),
   });
+
+function readObjectProperty(value: unknown, key: string) {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
+function readStringProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "string" ? property : undefined;
+}
+
+function readNumberProperty(value: unknown, key: string) {
+  const property = readObjectProperty(value, key);
+  return typeof property === "number" ? property : undefined;
+}
+
+function turbopufferSourceTypeFrom(value: string): MemoryChunkRecord["sourceType"] {
+  switch (value) {
+    case "daily_note":
+      return "daily_note";
+    case "note_revision":
+      return "note_revision";
+    case "extracted_item":
+      return "extracted_item";
+    case "summary":
+      return "summary";
+    case "journal_document":
+      return "journal_document";
+    case "journal_revision":
+      return "journal_revision";
+    case "signal":
+      return "signal";
+    case "proposal":
+      return "proposal";
+    case "commitment":
+      return "commitment";
+    default:
+      throw new Error(`Invalid Turbopuffer source type: ${value}`);
+  }
+}
+
+function turbopufferQueryRowFrom(value: unknown): ReadonlyArray<TurbopufferQueryRow> {
+  const id = readStringProperty(value, "id");
+  if (!id) return [];
+  const distance = readNumberProperty(value, "$dist");
+  const sourceId = readStringProperty(value, "source_id");
+  const sourceType = readStringProperty(value, "source_type");
+  const text = readStringProperty(value, "text");
+  return [
+    {
+      id,
+      ...(distance !== undefined ? { $dist: distance } : {}),
+      ...(sourceId ? { source_id: sourceId } : {}),
+      ...(sourceType ? { source_type: turbopufferSourceTypeFrom(sourceType) } : {}),
+      ...(text ? { text } : {}),
+    },
+  ];
+}
+
+function turbopufferQueryRowsFrom(value: unknown) {
+  const rows = readObjectProperty(value, "rows");
+  return Array.isArray(rows) ? rows.flatMap(turbopufferQueryRowFrom) : [];
+}
 
 const turbopufferDelete = (config: TurbopufferMemoryIndexConfig, url: string) =>
   Effect.tryPromise({
@@ -133,7 +192,7 @@ export class MemoryIndex extends Context.Service<
     }) => Effect.Effect<{ readonly results: ReadonlyArray<MemorySearchResult> }, Error, Db>;
     readonly deleteUserNamespace: (input: { readonly user: DbUser }) => Effect.Effect<void, Error>;
   }
->()("lares/MemoryIndex") {
+>()("nudge/MemoryIndex") {
   static readonly layerMemory = Layer.succeed(MemoryIndex)({
     deleteUserNamespace: () => Effect.void,
     indexPending: (input) =>
@@ -245,14 +304,16 @@ export class MemoryIndex extends Context.Service<
           const db = yield* Db;
           yield* db.ensureUser(input.user);
           const namespace = yield* memoryNamespaceForUser(input.user.id);
-          const response = yield* turbopufferFetchJson<{
-            readonly rows?: ReadonlyArray<TurbopufferQueryRow>;
-          }>(config, turbopufferUrl(config, namespace, "/query"), {
-            include_attributes: ["text", "source_type", "source_id"],
-            limit: input.limit,
-            rank_by: ["text", "BM25", input.query],
-          });
-          const results = (response.rows ?? []).flatMap((row) => {
+          const response = yield* turbopufferFetchJson(
+            config,
+            turbopufferUrl(config, namespace, "/query"),
+            {
+              include_attributes: ["text", "source_type", "source_id"],
+              limit: input.limit,
+              rank_by: ["text", "BM25", input.query],
+            },
+          );
+          const results = turbopufferQueryRowsFrom(response).flatMap((row) => {
             if (!row.text || !row.source_id || !row.source_type) return [];
             return [
               {
@@ -370,6 +431,42 @@ export const PrimitiveWorkflows = {
         created.push(yield* db.appendProposal(proposalInput));
       }
       return created;
+    }),
+
+  draftLoopIntake: (input: LoopIntakeDraftInput): Effect.Effect<LoopIntakeDraftResult, Error, Db> =>
+    Effect.gen(function* () {
+      const signal = yield* PrimitiveWorkflows.appendSignal({
+        idempotencyKey: input.idempotencyKey ?? `agent:${input.conversationId}:${input.message}`,
+        occurredAt: input.occurredAt ?? new Date().toISOString(),
+        payload: { note: input.message },
+        schemaVersion: 1,
+        source: input.source ?? "nudge_agent_intake",
+        type: "manual_check_in_submitted",
+        user: input.user,
+      });
+      const { synthesis } = yield* PrimitiveWorkflows.createSynthesis({
+        frameKey: "current_state",
+        user: input.user,
+      });
+      const proposals = yield* PrimitiveWorkflows.generateProposals({
+        frameKey: "current_state",
+        user: input.user,
+      });
+      const proposal = proposals[0];
+
+      return {
+        draft: proposal
+          ? {
+              confidence: 0.82,
+              proposal,
+              requiresReview: true,
+              signal,
+            }
+          : null,
+        proposals,
+        signal,
+        synthesis,
+      };
     }),
 
   listPendingProposals: (input: { readonly user: DbUser; readonly limit: number }) =>

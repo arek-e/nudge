@@ -1,18 +1,55 @@
 {
-  "name": "Lares",
-  "short_name": "Lares",
+  "name": "Nudge",
+  "short_name": "Nudge",
   "description": "A private daily operating loop for personal context and follow-through.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#1a2735",
+  "theme_color": "#1a2735",
+  "categories": ["productivity", "lifestyle"],
   "icons": [
     {
-      "src": "/icons/icon.svg",
+      "src": "/icons/nudge-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/nudge-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/nudge-app-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today",
+      "short_name": "Today",
+      "description": "Open today's operating loop.",
+      "url": "/",
+      "icons": [{ "src": "/icons/nudge-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Ask Nudge",
+      "short_name": "Ask",
+      "description": "Ask Nudge to read context and draft reviewable proposals.",
+      "url": "/ask",
+      "icons": [{ "src": "/icons/nudge-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Review inbox",
+      "short_name": "Review",
+      "description": "Review proposals and recent agent receipts.",
+      "url": "/review",
+      "icons": [{ "src": "/icons/nudge-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

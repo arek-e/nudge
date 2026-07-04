@@ -335,4 +335,25 @@ describe("Db", () => {
     expect(result.exportData.agentRuns).toHaveLength(1);
     expect(result.exportData.agentRunOutputs).toHaveLength(2);
   });
+
+  test("marks queued agent runs as running", async () => {
+    const program = Effect.gen(function* () {
+      const db = yield* Db;
+      const run = yield* db.startAgentRun({
+        userId: "user-a",
+        triggerType: "note_inactivity",
+        sourceType: "note_revision",
+        sourceId: "revision-a",
+        status: "queued",
+        metadata: {},
+      });
+
+      return yield* db.markAgentRunRunning({ userId: "user-a", runId: run.id });
+    });
+
+    const run = await Effect.runPromise(Effect.provide(program, Db.layerMemory));
+
+    expect(run.status).toBe("running");
+    expect(run.completedAt).toBeUndefined();
+  });
 });

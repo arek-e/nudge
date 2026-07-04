@@ -55,7 +55,7 @@ The system starts read-first and draft-first. External writes and behavior-chang
 37. As the developer, I want Cloudflare Agents SDK and Durable Objects to own live session coordination, so that per-user agent state and Resume Tokens have a durable runtime home.
 38. As the developer, I want D1 to own durable source-of-truth records, so that events, memories, Review Queue decisions, and evaluations are queryable and auditable.
 39. As the developer, I want Workers Workflows from the first build, so that the Digest flow can grow into scheduled and Human-in-the-Loop orchestration without a rewrite.
-40. As the developer, I want an AuthService seam with a hardcoded dev user, so that real auth can be swapped in later without reshaping domain services.
+40. As the developer, I want real auth plus an install-scoped anonymous identity, so that users can start without an account and later link their data to a signed-in profile.
 
 ## Implementation Decisions
 
@@ -80,10 +80,10 @@ The system starts read-first and draft-first. External writes and behavior-chang
 - Workers Workflows own long-running multi-step jobs such as Daily Digest generation, calendar sync, memory consolidation, Human-in-the-Loop pause/resume, and evaluation runs.
 - D1 stores source-of-truth records: users, events, memories, Review Queue items, Resume Tokens, decisions, feedback, Consent Grants, skills, golden cases, and evaluations.
 - Queues, R2, and Vectorize are later additions, not MVP dependencies.
-- The repo starts as a monorepo with one Cloudflare Worker app.
-- The initial app structure is `apps/web` for PWA UI, Hono routes, Workflows, and Agents SDK entrypoints; `packages/domain` for product/domain types and pure logic; `packages/effect-services` for service definitions and workflows; `packages/db` for D1 schema/migrations/repositories; `packages/evals` for golden cases and evaluators; and `packages/ui` later for shared UI.
-- The MVP starts in single-user local/dev mode, but every durable table includes `user_id` from day one.
-- An `AuthService` interface returns a hardcoded dev user initially and can later be backed by Clerk, WorkOS, Auth0, Ory, or Cloudflare Access.
+- The repo starts as a monorepo with one Nudge app layer backed by a Cloudflare Worker.
+- The app structure is `apps/web` for Hono routes, Workflows, Agents SDK entrypoints, the typed API contract, and the PWA App Surface; `apps/ios` for the native iOS App Surface; `packages/domain` for product/domain types and pure logic; `packages/effect-services` for service definitions and workflows; `packages/db` for D1 schema/migrations/repositories; `packages/evals` for golden cases and evaluators; and `packages/ui` for shared React UI.
+- The MVP starts with Clerk for signed-in users and an install-scoped anonymous identity for accountless use; user-data routes reject requests with neither identity.
+- Anonymous identities are explicit client identifiers, not a server-side dev fallback, so local data can later be linked to a real account without changing table ownership.
 - Daily Digest Skill is the first evolvable artifact.
 - Daily Digest Skill versions include prompt, sections, source selection policy, memory selection policy, Action Point style, and evaluation rubric.
 - Evolution is per-user by default.

@@ -2,7 +2,18 @@ node_modules/
 .tsbuild/
 .wrangler/
 .dev.vars
+.env.local
+.envrc.local
 dist/
 coverage/
 test-results/
 playwright-report/
+tmp/
+apps/desktop/release/
+apps/raycast/dist/
+apps/raycast/raycast-env.d.ts
+xcuserdata/
+*.xcodeproj/project.xcworkspace/
+# Added by Braintrust Wizard
+.env.braintrust
+.braintrust.json
