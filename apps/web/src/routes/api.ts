@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { DesktopSignInTokenFactory } from "../auth";
 import type { ResolveRequestApp } from "../request-context";
 import { conversationMessageInputSchema } from "../api-contract";
 import { makeApiHandler, type ApiContext } from "../api-router";
@@ -16,6 +17,7 @@ import { resolveCurrentUser } from "../request-auth";
 export function registerApiRoutes(
   app: Hono<ObservabilityHonoEnv>,
   resolveRequestApp: ResolveRequestApp,
+  createDesktopSignInToken: DesktopSignInTokenFactory,
 ) {
   const apiHandler = makeApiHandler();
 
@@ -36,22 +38,43 @@ export function registerApiRoutes(
     }
 
     const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
+    if (c.req.path === "/api/auth/desktop-ticket" && c.req.method === "POST") {
+      if (auth.authMode !== "clerk" || !auth.user) {
+        return c.json({ error: "Clerk session required" }, 401);
+      }
+      const signInToken = await createDesktopSignInToken({
+        env: appServices.env,
+        userId: auth.user.id,
+      });
+      return c.json(signInToken);
+    }
+
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
     const streamConversationId = conversationStreamPath(c.req.path);
     if (streamConversationId && c.req.method === "POST") {
-      const input = conversationMessageInputSchema.safeParse(await c.req.json().catch(() => null));
+      const input = conversationMessageInputSchema.safeParse(
+        await c.req.raw
+          .clone()
+          .json()
+          .catch(() => null),
+      );
       if (!input.success) {
         return c.json({ error: "Invalid conversation message" }, 400);
       }
-      return proxyConversationStream(
+      const response = await proxyConversationStream(
         appServices.agentSessions,
         appServices.agentInternalSecret,
         user,
         streamConversationId,
         input.data.message,
         requestTraceHeaders(c),
+        c.req.header("accept"),
       );
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        return response;
+      }
+      return responseWithMutableHeaders(response);
     }
 
     if (c.req.path === "/api/media" && c.req.method === "POST") {
@@ -86,6 +109,7 @@ export function registerApiRoutes(
       return new Response(object.body, { headers });
     }
 
+    const clientSurface = c.req.header("x-nudge-client");
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
@@ -101,11 +125,11 @@ export function registerApiRoutes(
             dailyAnalysisWorkflow: appServices.dailyAnalysisWorkflow,
             db: appServices.db,
             getOkfSandbox: () => appServices.okfSandboxFor(user),
+            ...(clientSurface !== undefined ? { clientSurface } : {}),
             recordSpan,
             runEffect,
             session: auth,
             traceHeaders: requestTraceHeaders(c),
-            traceDb: appServices.traceDb,
             ...(appServices.turbopuffer ? { turbopuffer: appServices.turbopuffer } : {}),
             user,
           },
@@ -121,9 +145,19 @@ export function registerApiRoutes(
   });
 }
 
+function responseWithMutableHeaders(response: Response) {
+  return new Response(response.body, {
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 function apiRouteWideEventFields(path: string) {
   if (path.startsWith("/api/captures")) {
     return { routeName: "api.captures" };
+  } else if (path.startsWith("/api/quick-captures")) {
+    return { routeName: "api.quick_captures" };
   } else if (path.startsWith("/api/media")) {
     return { routeName: "api.media" };
   } else if (path.startsWith("/api/conversations")) {
@@ -147,20 +181,22 @@ function apiRouteWideEventFields(path: string) {
     return { routeName: "api.syntheses" };
   } else if (path.startsWith("/api/proposals")) {
     return { routeName: "api.proposals" };
+  } else if (path.startsWith("/api/review-inbox")) {
+    return { routeName: "api.review-inbox" };
   } else if (path.startsWith("/api/commitments")) {
     return { routeName: "api.commitments" };
   } else if (path.startsWith("/api/reviews")) {
     return { routeName: "api.reviews" };
   } else if (path.startsWith("/api/outcomes")) {
     return { routeName: "api.outcomes" };
-  } else if (path.startsWith("/api/traces")) {
-    return { routeName: "api.traces" };
   } else if (path.startsWith("/api/voice")) {
     return { routeName: "api.voice" };
   } else if (path.startsWith("/api/events")) {
     return { routeName: "api.events" };
   } else if (path.startsWith("/api/session")) {
     return { routeName: "api.session" };
+  } else if (path.startsWith("/api/auth/desktop-ticket")) {
+    return { routeName: "api.auth.desktop_ticket" };
   } else if (path.startsWith("/api/export")) {
     return { routeName: "api.export" };
   } else if (path.startsWith("/api/okf")) {

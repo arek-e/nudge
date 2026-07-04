@@ -19,8 +19,6 @@ const anonymousMcpHeaders = {
 };
 
 const env = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",
@@ -32,22 +30,6 @@ const env = {
   EXTRACTION_MODEL: "@cf/zai-org/glm-4.7-flash",
   THINK_MODEL: "@cf/moonshotai/kimi-k2.6",
 } satisfies Env;
-
-const createTraceDb = () => {
-  const rows: Array<ReadonlyArray<unknown>> = [];
-  const db = {
-    prepare: (sql: string) => ({
-      bind: (...values: ReadonlyArray<unknown>) => ({
-        run: async () => {
-          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
-          return { success: true };
-        },
-      }),
-    }),
-  } as D1Database;
-
-  return { db, rows };
-};
 
 describe("web app", () => {
   test("GET / serves the Nudge Daily Operating Loop app", async () => {
@@ -89,7 +71,6 @@ describe("web app", () => {
       version: "test-version",
       bindings: {
         convex: true,
-        d1: true,
         dailyDigestWorkflow: true,
         userAgentSession: true,
       },
@@ -117,7 +98,8 @@ describe("web app", () => {
     const response = await app.request("/manifest.webmanifest", {}, env);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const manifest = await response.json();
+    expect(manifest).toMatchObject({
       name: "Nudge",
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
@@ -127,8 +109,12 @@ describe("web app", () => {
         expect.objectContaining({ sizes: "512x512", src: "/icons/nudge-app-icon-512.png" }),
         expect.objectContaining({ src: "/icons/nudge-app-icon.svg" }),
       ],
-      shortcuts: [expect.objectContaining({ name: "Today", url: "/" })],
     });
+    expect(manifest.shortcuts).toEqual([
+      expect.objectContaining({ name: "Today", url: "/" }),
+      expect.objectContaining({ name: "Ask Nudge", url: "/ask" }),
+      expect.objectContaining({ name: "Review inbox", url: "/review" }),
+    ]);
   });
 
   test("GET /icons/nudge-app-icon.svg serves the Nudge app icon", async () => {
@@ -161,6 +147,162 @@ describe("web app", () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication required" });
+  });
+
+  test("GET /__clerk proxies Clerk Frontend API requests through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+        { headers: { "CF-Connecting-IP": "203.0.113.10" } },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("clerk-js");
+      expect(proxiedRequests).toHaveLength(1);
+      expect(proxiedRequest.redirect).toBe("manual");
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
+      );
+      expect(proxiedRequest.headers.get("host")).toBeNull();
+      expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
+        "https://app.explorenudge.com/__clerk",
+      );
+      expect(proxiedRequest.headers.get("Clerk-Secret-Key")).toBe("sk_test_proxy");
+      expect(proxiedRequest.headers.get("X-Forwarded-For")).toBe("203.0.113.10");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk decodes Clerk package redirect paths before proxying", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return new Response("clerk-js", {
+        headers: { "content-type": "application/javascript" },
+      });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/%40clerk/clerk-js%406/dist/clerk.browser.js",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(200);
+      expect(proxiedRequest.url).toBe(
+        "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk/v1/proxy-health confirms the Worker proxy path without upstream fetch", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy health upstream request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/proxy-health?domain_id=dmn_test",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("ok");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("POST /__clerk forwards request bodies through the Worker", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedBodies: Array<string> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedBodies.push(await request.text());
+
+      return Response.json({ ok: true });
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/client",
+        {
+          body: JSON.stringify({ strategy: "oauth_google" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(proxiedBodies).toEqual([JSON.stringify({ strategy: "oauth_google" })]);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk fails closed when the Clerk secret is missing", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+        {},
+        env,
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "CLERK_SECRET_KEY is required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   test("POST /__internal/auth/test-account stays hidden without the seed secret", async () => {
@@ -260,171 +402,6 @@ describe("web app", () => {
     } finally {
       consoleLog.mockRestore();
     }
-  });
-
-  test("GET /health persists a safe trace event", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
-    const traceDb = createTraceDb();
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "persisted-ray", "user-agent": "persist-test" } },
-      { ...env, DB: traceDb.db },
-    );
-
-    expect(response.status).toBe(200);
-    expect(traceDb.rows).toHaveLength(1);
-    expect(traceDb.rows[0]).toEqual([
-      expect.any(String),
-      expect.any(String),
-      "http_request_completed",
-      "wide_event",
-      "nudge-web",
-      "test",
-      "test-version",
-      "persisted-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(Number),
-      "default",
-      null,
-      expect.stringContaining("persisted-ray"),
-      expect.any(String),
-    ]);
-  });
-
-  test("GET /health persists a root request trace span", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/health",
-      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(1);
-    expect(spanRows[0]).toEqual([
-      expect.stringMatching(/^[a-f0-9]{32}$/),
-      expect.stringMatching(/^[a-f0-9]{16}$/),
-      null,
-      "GET /health",
-      "server",
-      "ok",
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      "nudge-web",
-      "test",
-      "test-version",
-      "span-ray",
-      "health",
-      "GET",
-      "/health",
-      200,
-      "success",
-      expect.any(String),
-      expect.any(String),
-    ]);
-  });
-
-  test("POST /api/syntheses records framework and primitive child spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/syntheses",
-      {
-        method: "POST",
-        headers: { ...anonymousJsonHeaders, "cf-ray": "synthesis-ray" },
-        body: JSON.stringify({ frameKey: "current_state" }),
-      },
-      { ...env, DB: traceDb },
-    );
-
-    const names = spanRows.map((row) => row[3]);
-    const traceIds = new Set(spanRows.map((row) => row[0]));
-    const rootSpan = spanRows.find((row) => row[2] === null);
-    const childSpans = spanRows.filter((row) => row[2] !== null);
-
-    expect(response.status).toBe(200);
-    expect(names).toContain("POST /api/syntheses");
-    expect(names).toContain("app.resolve");
-    expect(names).toContain("auth.current_user");
-    expect(names).toContain("orpc.handle");
-    expect(names).toContain("syntheses.create");
-    expect(traceIds.size).toBe(1);
-    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
-    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
-  });
-
-  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          all: async () => ({ results: [] }),
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(spanRows).toHaveLength(0);
-  });
-
-  test("GET /api/version bypasses db and auth spans", async () => {
-    const spanRows: Array<ReadonlyArray<unknown>> = [];
-    const traceDb = {
-      prepare: (sql: string) => ({
-        bind: (...values: ReadonlyArray<unknown>) => ({
-          run: async () => {
-            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
-            return { success: true };
-          },
-        }),
-      }),
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
-
-    expect(response.status).toBe(200);
-    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
   });
 
   test("request errors still emit one wide request completion log", async () => {
@@ -549,66 +526,6 @@ describe("web app", () => {
       payload: { text: "Log that I need to follow up with Maya tomorrow" },
       source: "ios_siri",
       type: "capture.voice_log",
-    });
-  });
-
-  test("GET /api/traces/recent lists safe trace span summaries", async () => {
-    const rows = [
-      {
-        id: "span-1",
-        trace_id: "trace-1",
-        parent_span_id: null,
-        name: "GET /health",
-        kind: "server",
-        status: "ok",
-        started_at: "2026-06-12T10:00:00.000Z",
-        ended_at: "2026-06-12T10:00:00.125Z",
-        duration_ms: 125,
-        route_name: "health",
-        method: "GET",
-        path: "/health",
-      },
-    ];
-    let capturedSelectSql = "";
-    const traceDb = {
-      prepare: (sql: string) => {
-        if (sql.includes("SELECT")) capturedSelectSql = sql;
-        return {
-          bind: () => ({
-            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
-            run: async () => ({ success: true }),
-          }),
-        };
-      },
-    } as D1Database;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/traces/recent",
-      { headers: anonymousHeaders },
-      { ...env, DB: traceDb },
-    );
-
-    expect(response.status).toBe(200);
-    expect(capturedSelectSql).toContain("span_id AS id");
-    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
-    expect(await response.json()).toEqual({
-      spans: [
-        {
-          id: "span-1",
-          traceId: "trace-1",
-          parentSpanId: null,
-          name: "GET /health",
-          kind: "server",
-          status: "ok",
-          startedAt: "2026-06-12T10:00:00.000Z",
-          endedAt: "2026-06-12T10:00:00.125Z",
-          durationMs: 125,
-          routeName: "health",
-          method: "GET",
-          path: "/health",
-        },
-      ],
     });
   });
 
@@ -982,6 +899,91 @@ describe("web app", () => {
     expect(await response.text()).toBe("Hello streamed reply");
   });
 
+  test("POST /api/conversations/:conversationId/messages/stream returns progress and receipt frames", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNames: Array<string> = [];
+    const agentNamespace = {
+      idFromName: (name: string) => {
+        agentNames.push(name);
+        return { name };
+      },
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwardedRequests.push(request);
+          expect(await request.json()).toEqual({ message: "Stream events" });
+          return Response.json({
+            conversationId: "focus",
+            draft: {
+              confidence: 0.82,
+              signal: {
+                id: "signal-1",
+                userId: anonymousUserId,
+                type: "manual_check_in_submitted",
+                source: "nudge_agent_intake",
+                occurredAt: "2026-06-12T10:00:00.000Z",
+                schemaVersion: 1,
+                payload: { note: "Stream events" },
+                createdAt: "2026-06-12T10:00:00.000Z",
+              },
+              proposal: {
+                id: "proposal-1",
+                userId: anonymousUserId,
+                synthesisId: "synthesis-1",
+                kind: "commit",
+                status: "pending",
+                title: "Clarify the next step",
+                body: "Choose one concrete next action.",
+                rationale: "Generated from the latest user message.",
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-12T10:00:00.000Z",
+              },
+              requiresReview: true,
+            },
+            message: "Stream events",
+            memoryResults: [],
+            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+            receipt: {
+              id: "receipt-1",
+              action: "proposal.generated",
+              changed: { proposalId: "proposal-1", status: "pending" },
+              createdAt: "2026-06-12T10:00:00.000Z",
+              signalIds: ["signal-1"],
+              why: "Generated from the latest user message.",
+            },
+            reply: "I drafted a reviewable next step from your message.",
+            skillsApplied: ["intake-loop"],
+            subAgentsUsed: ["loopIntakeThink"],
+            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+            workflowHooks: ["dailyDigest"],
+          });
+        },
+      }),
+    } as DurableObjectNamespace;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, accept: "text/event-stream" },
+        body: JSON.stringify({ message: "Stream events" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
+    expect(response.headers.get("content-type")).toContain("application/x-nudge-event-stream");
+    expect(body).toContain("event: progress");
+    expect(body).toContain("event: sources");
+    expect(body).toContain("event: receipt");
+    expect(body).toContain("proposal.generated");
+    expect(body).toContain("event: done");
+  });
+
   test("custom integrations can append and list current user's events", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
@@ -1232,6 +1234,51 @@ describe("web app", () => {
     });
   });
 
+  test("desktop browser auth rejects anonymous sessions", async () => {
+    const app = createApp({
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async () => {
+        throw new Error("unexpected desktop token mint");
+      },
+    });
+
+    const response = await app.request(
+      "/api/auth/desktop-ticket",
+      { headers: anonymousHeaders, method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Clerk session required" });
+  });
+
+  test("desktop browser auth mints a short-lived Clerk sign-in ticket", async () => {
+    const calls: Array<{ readonly appVersion: string; readonly userId: string }> = [];
+    const app = createApp({
+      authSessionResolver: async () => ({
+        user: {
+          email: "lana@example.com",
+          id: "auth-user-1",
+          name: "Lana",
+        },
+      }),
+      dbLayer: Db.layerMemory,
+      desktopSignInTokenFactory: async ({ env: requestEnv, userId }) => {
+        calls.push({ appVersion: requestEnv.APP_VERSION, userId });
+        return { expiresInSeconds: 120, ticket: "test-desktop-ticket" };
+      },
+    });
+
+    const response = await app.request("/api/auth/desktop-ticket", { method: "POST" }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      expiresInSeconds: 120,
+      ticket: "test-desktop-ticket",
+    });
+    expect(calls).toEqual([{ appVersion: "test-version", userId: "auth-user-1" }]);
+  });
+
   test("custom integrations can export and delete the current user's data", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
@@ -1452,63 +1499,6 @@ describe("web app", () => {
         signalCount: 1,
       },
     ]);
-  });
-
-  test("POST /api/journal persists AI context as a debug-wide event", async () => {
-    const traceDb = createTraceDb();
-    const workflow = {
-      create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
-    } as Workflow;
-    const app = createApp({ dbLayer: Db.layerMemory });
-
-    const response = await app.request(
-      "/api/journal",
-      {
-        method: "POST",
-        headers: {
-          ...anonymousJsonHeaders,
-          "cf-ray": "journal-ray",
-          "content-type": "application/json",
-          "user-agent": "Nudge/1",
-        },
-        body: JSON.stringify({
-          bodyText: "I need to work on the guest list",
-          localDate: "2026-07-01",
-          title: "July 1",
-        }),
-      },
-      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
-    );
-
-    expect(response.status).toBe(200);
-    const saved = await response.json();
-    expect(traceDb.rows).toHaveLength(1);
-
-    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
-    expect(payload).toMatchObject({
-      event: "http_request_completed",
-      routeName: "api.journal",
-      aiErrorCode: null,
-      aiModel: "@cf/zai-org/glm-4.7-flash",
-      aiRunId: saved.analysisRun.id,
-      aiSourceType: "note_revision",
-      aiSystem: "cloudflare-think",
-      noteLocalDate: "2026-07-01",
-      "otel.name": "api.journal",
-      "otel.status_code": "OK",
-      "http.request.method": "POST",
-      "http.route": "api.journal",
-      "http.response.status_code": 200,
-      "url.path": "/api/journal",
-      "user_agent.original": "Nudge/1",
-      "service.name": "nudge-web",
-      "deployment.environment.name": "test",
-      "nudge.debug_kind": "ai",
-      "nudge.ai.system": "cloudflare-think",
-      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
-      "nudge.ai.run_id": saved.analysisRun.id,
-      "nudge.ai.error_code": null,
-    });
   });
 
   test("custom integrations can fetch a queued agent run by id", async () => {
@@ -2118,6 +2108,47 @@ describe("web app", () => {
         payload: { note: "primitive route" },
       }),
     ]);
+  });
+
+  test("POST /api/quick-captures stores a capture and returns a reviewable draft", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/quick-captures",
+      {
+        method: "POST",
+        headers: { ...anonymousJsonHeaders, "x-nudge-client": "desktop" },
+        body: JSON.stringify({
+          idempotencyKey: "quick-capture-retry-1",
+          note: "Travel this week and follow up with work",
+          occurredAt: "2026-06-12T10:00:00.000Z",
+        }),
+      },
+      env,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      capture: expect.objectContaining({
+        userId: anonymousUserId,
+        type: "manual_check_in_submitted",
+        source: "desktop_app",
+        occurredAt: "2026-06-12T10:00:00.000Z",
+        schemaVersion: 1,
+        idempotencyKey: "quick-capture-retry-1",
+        payload: { note: "Travel this week and follow up with work" },
+      }),
+      draft: {
+        confidence: 0.82,
+        proposal: expect.objectContaining({
+          status: "pending",
+          title: "Clarify next attention point",
+        }),
+        requiresReview: true,
+      },
+      processingStatus: "drafted",
+    });
   });
 
   test("voice logs append a primitive signal without queuing analysis", async () => {

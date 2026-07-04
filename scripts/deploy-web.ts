@@ -1,11 +1,13 @@
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
+const wrangler = `${root}node_modules/.bin/wrangler`;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
+const containersRolloutArg = process.argv.find((arg) => arg.startsWith("--containers-rollout="));
 const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
 const requestedVersion = versionArg?.slice("--version=".length).trim();
 
@@ -54,7 +56,8 @@ const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : 
 const deployEnvironment = env ?? "production";
 const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
   production: {
-    VITE_CLERK_PUBLISHABLE_KEY: "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
+    VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
+    VITE_CLERK_PROXY_URL: "/__clerk",
     VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
   },
   staging: {
@@ -70,8 +73,11 @@ if (!clientEnvironment) {
 }
 const deployTargetArgs = [`--env ${deployEnvironment}`];
 const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
+const containersRollout =
+  containersRolloutArg ?? (deployEnvironment === "production" ? "--containers-rollout=none" : "");
 const deployArgs = [
   ...deployTargetArgs,
+  containersRollout,
   dryRun ? "--dry-run" : "",
   `--var ENVIRONMENT:${deployEnvironment}`,
   `--var APP_VERSION:${version}`,
@@ -82,8 +88,8 @@ const deployArgs = [
   .filter(Boolean)
   .join(" ");
 
-run("mise exec -- bun run build", { cwd: web, env: clientEnvironment });
-run(`mise exec -- bunx wrangler deploy ${deployArgs}`, { cwd: web });
+run("bun run build", { cwd: web, env: clientEnvironment });
+run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
 
 console.log(
   `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,

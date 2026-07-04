@@ -17,16 +17,23 @@ export type AuthSessionResolver = (input: {
   readonly request: Request;
 }) => Promise<AuthSession | null>;
 
+export type DesktopSignInToken = {
+  readonly expiresInSeconds: number;
+  readonly ticket: string;
+};
+
+export type DesktopSignInTokenFactory = (input: {
+  readonly env: Env;
+  readonly userId: string;
+}) => Promise<DesktopSignInToken>;
+
+export const desktopSignInTokenExpiresInSeconds = 120;
+
 export const isClerkConfigured = (env: Env) => Boolean(env.CLERK_SECRET_KEY);
 
 export const resolveClerkSession: AuthSessionResolver = async ({ env, request }) => {
   const secretKey = env.CLERK_SECRET_KEY;
-  if (!secretKey) {
-    if (env.ENVIRONMENT === "production") {
-      throw new Error("CLERK_SECRET_KEY is required to authenticate production requests");
-    }
-    return null;
-  }
+  if (!secretKey) return null;
 
   const clerk = createClerkClient({
     ...(env.CLERK_PUBLISHABLE_KEY ? { publishableKey: env.CLERK_PUBLISHABLE_KEY } : {}),
@@ -49,6 +56,24 @@ export const resolveClerkSession: AuthSessionResolver = async ({ env, request })
       id: auth.userId,
       name: clerkDisplayName(user),
     },
+  };
+};
+
+export const createClerkDesktopSignInToken: DesktopSignInTokenFactory = async ({ env, userId }) => {
+  const secretKey = env.CLERK_SECRET_KEY;
+  if (!secretKey) throw new Error("CLERK_SECRET_KEY is required to create desktop sign-in tokens");
+
+  const clerk = createClerkClient({
+    ...(env.CLERK_PUBLISHABLE_KEY ? { publishableKey: env.CLERK_PUBLISHABLE_KEY } : {}),
+    secretKey,
+  });
+  const signInToken = await clerk.signInTokens.createSignInToken({
+    expiresInSeconds: desktopSignInTokenExpiresInSeconds,
+    userId,
+  });
+  return {
+    expiresInSeconds: desktopSignInTokenExpiresInSeconds,
+    ticket: signInToken.token,
   };
 };
 

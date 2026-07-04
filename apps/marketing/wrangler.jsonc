@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nudge-marketing",
+  "compatibility_date": "2026-06-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "explorenudge.com",
+      "custom_domain": true,
+    },
+    {
+      "pattern": "www.explorenudge.com",
+      "custom_domain": true,
+    },
+  ],
+}

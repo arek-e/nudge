@@ -243,6 +243,54 @@ describe("surface note sync logic", () => {
     });
   });
 
+  test("submits quick captures through the shared Engine service", async () => {
+    const requests: Array<Request> = [];
+    const client = createSurfaceEngineClient({
+      anonymousUserId: "anon_550e8400-e29b-41d4-a716-446655440000",
+      baseUrl: "https://nudge.example",
+      fetch: async (request) => {
+        requests.push(request);
+        return jsonResponse({
+          capture: {
+            id: "event-1",
+            userId: "anon_550e8400-e29b-41d4-a716-446655440000",
+            type: "manual_check_in_submitted",
+            source: "desktop_app",
+            occurredAt: "2026-07-03T10:00:00.000Z",
+            schemaVersion: 1,
+            idempotencyKey: "quick-capture-1",
+            payload: { note: "Shared quick capture" },
+            createdAt: "2026-07-03T10:00:01.000Z",
+          },
+          draft: null,
+          processingStatus: "captured",
+        });
+      },
+      surface: "desktop",
+    });
+
+    const result = await client.submitQuickCapture({
+      idempotencyKey: "quick-capture-1",
+      note: " Shared quick capture ",
+      occurredAt: "2026-07-03T10:00:00.000Z",
+    });
+
+    expect(result.capture).toMatchObject({
+      id: "event-1",
+      source: "desktop_app",
+      type: "manual_check_in_submitted",
+    });
+    expect(result.processingStatus).toBe("captured");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://nudge.example/api/quick-captures");
+    expect(requests[0]?.headers.get("x-nudge-client")).toBe("desktop");
+    expect(await requests[0]?.json()).toEqual({
+      idempotencyKey: "quick-capture-1",
+      note: "Shared quick capture",
+      occurredAt: "2026-07-03T10:00:00.000Z",
+    });
+  });
+
   test("saves daily journals through the shared Engine service", async () => {
     const requests: Array<Request> = [];
     const client = createSurfaceEngineClient({

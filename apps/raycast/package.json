@@ -1,7 +1,6 @@
 {
   "name": "@nudge/raycast",
   "version": "0.1.0",
-  "private": true,
   "description": "Capture notes into the Nudge Engine and review current context.",
   "categories": [
     "Productivity"
@@ -10,8 +9,9 @@
   "author": "teampitch",
   "type": "module",
   "scripts": {
-    "build": "ray build",
+    "build": "ray build -e dist -o dist",
     "dev": "ray develop",
+    "publish": "ray publish",
     "test": "bun test ./src",
     "test:e2e": "bun test ./src/raycast-service-e2e.test.ts"
   },

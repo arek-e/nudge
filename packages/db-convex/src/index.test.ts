@@ -1,11 +1,7 @@
 import type { FunctionReference } from "convex/server";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import {
-  withRuntimeTraceContext,
-  type RuntimeTraceContext,
-  type SqlInsertRow,
-} from "@nudge/observability";
+import { withRuntimeTraceContext, type RuntimeTraceContext } from "@nudge/observability";
 import { makeConvexDbService, type ConvexClient, type ConvexDbStoreApi } from "./index";
 
 type PublicMutation = FunctionReference<"mutation", "public">;
@@ -42,17 +38,14 @@ const store = new Proxy(
 ) as ConvexDbStoreApi;
 
 describe("Convex DB adapter observability", () => {
-  test("propagates runtime trace metadata and records a Convex client span", async () => {
+  test("propagates runtime trace metadata to Convex calls", async () => {
     const client = new FakeConvexClient();
-    const spanRows: SqlInsertRow[] = [];
     const traceContext: RuntimeTraceContext = {
-      cacheable: true,
       environment: "test",
       flags: "01",
       method: "POST",
       parentSpanId: "parent-span",
       path: "/api/events",
-      recordSpan: (row) => spanRows.push(row),
       requestId: "ray-1",
       rootSpanId: "root-span",
       routeName: "api.events",
@@ -95,35 +88,6 @@ describe("Convex DB adapter observability", () => {
           version: "test-version",
         },
       },
-    });
-
-    expect(spanRows).toHaveLength(1);
-    expect(spanRows[0]?.values).toEqual([
-      "0123456789abcdef0123456789abcdef",
-      expect.stringMatching(/^[a-f0-9]{16}$/),
-      "parent-span",
-      "Convex store.ensureUser",
-      "client",
-      "ok",
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      "nudge-web",
-      "test",
-      "test-version",
-      "ray-1",
-      "api.events",
-      "POST",
-      "/api/events",
-      null,
-      "success",
-      expect.stringContaining('"db.system.name":"convex"'),
-      expect.any(String),
-    ]);
-    expect(JSON.parse(String(spanRows[0]?.values[18]))).toMatchObject({
-      "convex.operation": "ensureUser",
-      "server.address": "grandiose-hamster-855.eu-west-1.convex.cloud",
-      "nudge.db.provider": "convex",
     });
   });
 });

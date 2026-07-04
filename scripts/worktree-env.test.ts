@@ -41,6 +41,7 @@ function loadWorktreeEnv(root: string, env: Record<string, string> = {}) {
   const exportLine = Object.keys(env).length === 0 ? "" : `export ${Object.keys(env).join(" ")}`;
   const command = `
     set -eu
+    unset NUDGE_WORKTREE_ROOT NUDGE_DEV_PORT NUDGE_DEV_URL NUDGE_WRANGLER_INSPECTOR_PORT NUDGE_WRANGLER_PERSIST_TO CLERK_PUBLISHABLE_KEY VITE_CLERK_PUBLISHABLE_KEY
     ${assignments}
     ${exportLine}
     . ./scripts/worktree-env.sh

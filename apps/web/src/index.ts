@@ -22,10 +22,8 @@ import {
   createSpanId,
   createTraceId,
   parseTraceparent,
-  persistTraceCacheSpan,
   traceparentHeader,
   type RuntimeTraceContext,
-  type SqlInsertRow,
   withRuntimeTraceContext,
 } from "@nudge/observability";
 import type { Env } from "./env";
@@ -51,12 +49,6 @@ const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODE
 
 export default app;
 
-const safeRecordSpan = (env: Env) => (row: SqlInsertRow) => {
-  if (typeof env.DB?.prepare !== "function") return;
-  const persistence = persistTraceCacheSpan(env.DB, row).pipe(Effect.catch(() => Effect.void));
-  void Effect.runPromise(persistence);
-};
-
 const runtimeTraceContextFromRequest = (
   env: Env,
   request: Request,
@@ -70,13 +62,11 @@ const runtimeTraceContextFromRequest = (
   const path = new URL(request.url).pathname;
 
   return {
-    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: request.method,
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path,
-    recordSpan: safeRecordSpan(env),
     requestId,
     rootSpanId,
     routeName,
@@ -97,13 +87,11 @@ const runtimeTraceContextFromWorkflow = (
   const rootSpanId = createSpanId();
 
   return {
-    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: "WORKFLOW",
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path: routeName,
-    recordSpan: safeRecordSpan(env),
     requestId: input.kind === "daily-note-analysis" ? (input.requestId ?? null) : null,
     rootSpanId,
     routeName,
@@ -176,6 +164,15 @@ interface LoopIntakeReplyStreamInput extends LoopIntakeDraftInput {
     readonly title: string;
   } | null;
   readonly fallbackReply: string;
+}
+
+interface AgentReceiptView {
+  readonly id: string;
+  readonly action: string;
+  readonly changed: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly signalIds: ReadonlyArray<string>;
+  readonly why: string;
 }
 
 const thinkExtractedItemSchema = z.object({
@@ -513,6 +510,7 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       memoryResults,
       message,
       reasoningHarness,
+      receipt: draft.receipt,
       reply: draft.reply,
       skillsApplied: ["intake-loop"],
       subAgentsUsed: ["loopIntakeThink"],
@@ -764,6 +762,40 @@ export class LoopIntakeThinkAgent extends Think<Env> {
       PrimitiveWorkflows.generateProposals({ frameKey: "current_state", user: input.user }),
     );
     const proposal = proposals[0];
+    let receipt: AgentReceiptView | null = null;
+    if (proposal) {
+      const changed = {
+        proposalId: proposal.id,
+        status: proposal.status,
+        title: proposal.title,
+      };
+      const receiptSignal = await runRuntimeDbEffect(
+        this.env,
+        input.traceContext,
+        PrimitiveWorkflows.appendSignal({
+          idempotencyKey: `agent-receipt:proposal.generated:${proposal.id}`,
+          occurredAt: new Date().toISOString(),
+          payload: {
+            action: "proposal.generated",
+            changed,
+            signalIds: [signal.id],
+            why: proposal.rationale,
+          },
+          schemaVersion: 1,
+          source: "nudge_agent_session",
+          type: "agent.receipt",
+          user: input.user,
+        }),
+      );
+      receipt = {
+        id: receiptSignal.id,
+        action: "proposal.generated",
+        changed,
+        createdAt: receiptSignal.createdAt,
+        signalIds: [signal.id],
+        why: proposal.rationale,
+      };
+    }
 
     return {
       draft: proposal
@@ -794,6 +826,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
             },
           }
         : null,
+      receipt,
       reply: proposal
         ? input.memoryResults.length > 0
           ? `I found ${input.memoryResults.length} related memory and drafted a reviewable next step from your message.`

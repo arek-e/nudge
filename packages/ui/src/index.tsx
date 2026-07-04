@@ -136,6 +136,7 @@ export interface ReviewActionSurfaceProps {
 export interface SettingsSurfaceProps {
   readonly accountName: string;
   readonly deleteDisabled: boolean;
+  readonly desktopSlot?: ReactNode;
   readonly engineLabel: string;
   readonly exportDisabled: boolean;
   readonly sessionLabel: string;
@@ -482,6 +483,8 @@ export function SettingsSurface(props: SettingsSurfaceProps) {
             value={props.sessionLabel}
           />
         </SettingsSectionSurface>
+
+        {props.desktopSlot ? props.desktopSlot : null}
 
         <SettingsSectionSurface title="Sync">
           <SettingsRowSurface

@@ -6,7 +6,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   }
 }

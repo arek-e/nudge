@@ -9,6 +9,8 @@ coverage/
 test-results/
 playwright-report/
 tmp/
+apps/desktop/release/
+apps/raycast/dist/
 apps/raycast/raycast-env.d.ts
 xcuserdata/
 *.xcodeproj/project.xcworkspace/

@@ -79,6 +79,21 @@ export const proposalRecordSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const proposalExplanationSchema = z.object({
+  source: z.object({
+    label: z.string(),
+    signalIds: z.array(z.string()),
+    type: z.literal("signals"),
+  }),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  nextAction: z.string(),
+});
+
+export const proposalWithExplanationSchema = proposalRecordSchema.extend({
+  explanation: proposalExplanationSchema,
+});
+
 export const reviewRecordSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -88,6 +103,22 @@ export const reviewRecordSchema = z.object({
   editedBody: z.string().optional(),
   editedBodyDocument: z.unknown().optional(),
   createdAt: z.string(),
+});
+
+export const agentReceiptSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  changed: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+  signalIds: z.array(z.string()),
+  why: z.string(),
+});
+
+export const reviewInboxItemSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  kind: z.literal("proposal"),
+  proposal: proposalWithExplanationSchema,
 });
 
 export const commitmentRecordSchema = z.object({
@@ -309,21 +340,6 @@ const summaryListInputSchema = z.object({
   periodType: z.enum(["day", "week", "month", "quarter", "year", "custom"]).optional(),
 });
 
-export const traceSpanSummarySchema = z.object({
-  id: z.string(),
-  traceId: z.string(),
-  parentSpanId: z.string().nullable(),
-  name: z.string(),
-  kind: z.string(),
-  status: z.string(),
-  startedAt: z.string(),
-  endedAt: z.string().nullable(),
-  durationMs: z.number().nullable(),
-  routeName: z.string().nullable(),
-  method: z.string().nullable(),
-  path: z.string().nullable(),
-});
-
 export const conversationToolEventSchema = z.object({
   at: z.string(),
   resultCount: z.number().int().min(0),
@@ -397,6 +413,7 @@ export const conversationMessageResponseSchema = z.object({
     runtime: z.literal("cloudflare-agents"),
   }),
   reply: z.string(),
+  receipt: agentReceiptSchema.nullable().optional(),
   skillsApplied: z.array(z.enum(["intake-loop"])),
   subAgentsUsed: z.array(z.enum(["loopIntakeThink"])),
   usedTools: z.array(
@@ -523,6 +540,22 @@ export const voiceLogResponseSchema = z.object({
   route: voiceLogRouteSchema,
   spokenResponse: z.string(),
 });
+const quickCaptureInputSchema = z.object({
+  idempotencyKey: z.string().min(1).max(256).optional(),
+  note: z.string().trim().min(1).max(5_000),
+  occurredAt: z.string().datetime().optional(),
+});
+export const quickCaptureResponseSchema = z.object({
+  capture: eventRecordSchema,
+  draft: z
+    .object({
+      confidence: z.number().min(0).max(1),
+      proposal: proposalRecordSchema,
+      requiresReview: z.literal(true),
+    })
+    .nullable(),
+  processingStatus: z.enum(["captured", "drafted"]),
+});
 
 export const apiContract = {
   actions: {
@@ -577,6 +610,12 @@ export const apiContract = {
       .route({ method: "POST", path: "/captures" })
       .input(eventInputSchema)
       .output(eventRecordSchema),
+  },
+  quickCaptures: {
+    submit: oc
+      .route({ method: "POST", path: "/quick-captures" })
+      .input(quickCaptureInputSchema)
+      .output(quickCaptureResponseSchema),
   },
   calendar: {
     days: oc
@@ -645,11 +684,22 @@ export const apiContract = {
     generate: oc
       .route({ method: "POST", path: "/proposals/generate" })
       .input(proposalsInputSchema)
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
     list: oc
       .route({ method: "GET", path: "/proposals" })
       .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
-      .output(z.object({ proposals: z.array(proposalRecordSchema) })),
+      .output(z.object({ proposals: z.array(proposalWithExplanationSchema) })),
+  },
+  reviewInbox: {
+    list: oc
+      .route({ method: "GET", path: "/review-inbox" })
+      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }))
+      .output(
+        z.object({
+          items: z.array(reviewInboxItemSchema),
+          receipts: z.array(agentReceiptSchema),
+        }),
+      ),
   },
   commitments: {
     list: oc
@@ -682,12 +732,6 @@ export const apiContract = {
       .route({ method: "GET", path: "/syntheses/latest" })
       .input(synthesisInputSchema)
       .output(synthesisResponseSchema),
-  },
-  traces: {
-    recent: oc
-      .route({ method: "GET", path: "/traces/recent" })
-      .input(z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }))
-      .output(z.object({ spans: z.array(traceSpanSummarySchema) })),
   },
   voice: {
     log: oc

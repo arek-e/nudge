@@ -93,11 +93,10 @@
     },
     {
       "name": "db-service-anchor",
-      "description": "The persistence package keeps its Effect service and D1 factory as public anchors.",
+      "description": "The persistence package keeps its Effect service as the public anchor.",
       "paths": "packages/db/src/index.ts",
       "must": {
         "exportClasses": ["Db"],
-        "exportConstants": ["createD1DrizzleDatabase"],
         "exportInterfaces": ["DbService"]
       }
     },
@@ -114,11 +113,10 @@
     },
     {
       "name": "db-convex-observability-anchor",
-      "description": "The Convex DB adapter records request-linked client spans and reads request trace context through the shared observability FiberRef.",
+      "description": "The Convex DB adapter forwards request trace context through the shared observability FiberRef.",
       "paths": "packages/db-convex/src/index.ts",
       "must": {
         "import": [
-          { "name": "buildTraceSpanRow", "from": "@nudge/observability" },
           { "name": "currentRuntimeTraceContext", "from": "@nudge/observability" },
           { "name": "traceparentHeader", "from": "@nudge/observability" }
         ]

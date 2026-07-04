@@ -8,15 +8,6 @@ const processingAgentRunStatuses = new Set([
   "running",
 ]);
 
-declare global {
-  interface Window {
-    readonly nudgeDesktop?: {
-      readonly appVersion?: string;
-      readonly surface?: string;
-    };
-  }
-}
-
 function appSurfaceFrom(value: string | undefined): AppSurface | null {
   switch (value) {
     case "desktop":

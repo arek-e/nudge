@@ -3,10 +3,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { Context, Effect, Layer } from "effect";
 import { Db, type DbService, type DbUser } from "@nudge/db";
 import {
-  buildTraceSpanRow,
   createSpanId,
   currentRuntimeTraceContext,
-  safeExceptionAttributes,
   traceparentHeader,
   type RuntimeTraceContext,
 } from "@nudge/observability";
@@ -150,63 +148,6 @@ const runtimeTraceArg = (
       }
     : undefined;
 
-const recordConvexSpan = (input: {
-  readonly attributes: Readonly<Record<string, unknown>>;
-  readonly durationMs: number;
-  readonly endedAt: string;
-  readonly operation: string;
-  readonly spanId: string;
-  readonly startedAt: string;
-  readonly status: "ok" | "error";
-  readonly traceContext: RuntimeTraceContext | null;
-}) => {
-  const traceContext = input.traceContext;
-  if (!traceContext?.cacheable || !traceContext.recordSpan) return;
-  traceContext.recordSpan(
-    buildTraceSpanRow({
-      attributes: input.attributes,
-      durationMs: input.durationMs,
-      endedAt: input.endedAt,
-      environment: traceContext.environment,
-      kind: "client",
-      method: traceContext.method ?? null,
-      name: `Convex store.${input.operation}`,
-      outcome: input.status === "error" ? "error" : "success",
-      parentSpanId: traceContext.parentSpanId,
-      path: traceContext.path ?? null,
-      requestId: traceContext.requestId ?? null,
-      routeName: traceContext.routeName ?? null,
-      service: traceContext.service,
-      spanId: input.spanId,
-      startedAt: input.startedAt,
-      status: input.status,
-      traceId: traceContext.traceId,
-      version: traceContext.version,
-    }),
-  );
-};
-
-const nowMs = () => {
-  try {
-    return performance.now();
-  } catch {
-    return Date.now();
-  }
-};
-
-const convexSpanAttributes = (
-  operation: string,
-  traceContext: RuntimeTraceContext | null,
-  failureAttributes: Readonly<Record<string, unknown>>,
-) => ({
-  "db.system.name": "convex",
-  "convex.operation": operation,
-  "convex.runtime": "cloudflare",
-  "nudge.db.provider": "convex",
-  "nudge.request_id": traceContext?.requestId ?? null,
-  ...failureAttributes,
-});
-
 export const convexDbLayer = Layer.effect(
   Db,
   Effect.gen(function* () {
@@ -242,36 +183,9 @@ export function makeConvexDbService(convex: ConvexRuntimeService): DbService {
     Effect.gen(function* () {
       const traceContext = yield* currentRuntimeTraceContext;
       const spanId = createSpanId();
-      const startedAt = new Date().toISOString();
-      const startedMs = nowMs();
       const trace = runtimeTraceArg(traceContext, operation, spanId);
-      let status: "ok" | "error" = "ok";
-      let failureAttributes: Readonly<Record<string, unknown>> = {};
 
-      return yield* Effect.promise(async () => {
-        try {
-          return await task(trace);
-        } catch (cause) {
-          status = "error";
-          failureAttributes = safeExceptionAttributes(cause);
-          throw cause;
-        } finally {
-          const endedAt = new Date().toISOString();
-          recordConvexSpan({
-            attributes: {
-              ...convexSpanAttributes(operation, traceContext, failureAttributes),
-              "server.address": new URL(convex.url).host,
-            },
-            durationMs: Number((nowMs() - startedMs).toFixed(2)),
-            endedAt,
-            operation,
-            spanId,
-            startedAt,
-            status,
-            traceContext,
-          });
-        }
-      }).pipe(
+      return yield* Effect.promise(() => task(trace)).pipe(
         Effect.withSpan(`Db.${operation}`, {
           attributes: {
             provider: "convex",

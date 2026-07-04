@@ -8,8 +8,6 @@ const testWorkflow = {
 } as Workflow;
 
 const baseEnv = {
-  DB: {} as D1Database,
-  TRACE_ARTIFACTS: {} as R2Bucket,
   DAILY_DIGEST_WORKFLOW: testWorkflow,
   USER_AGENT_SESSION: {} as DurableObjectNamespace,
   ENVIRONMENT: "test",

@@ -30,7 +30,6 @@ export interface NudgeAppService {
   readonly mediaFiles?: R2Bucket;
   readonly okfSandboxFor: (user: NudgeUser) => Promise<OkfSandbox | null>;
   readonly resolveSession: AuthSessionResolver;
-  readonly traceDb: D1Database;
   readonly turbopuffer?: {
     readonly apiKey: string;
     readonly region: string;
