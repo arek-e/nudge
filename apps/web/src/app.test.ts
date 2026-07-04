@@ -226,6 +226,31 @@ describe("web app", () => {
     }
   });
 
+  test("GET /__clerk/v1/proxy-health confirms the Worker proxy path without upstream fetch", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected Clerk proxy health upstream request");
+    });
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/proxy-health?domain_id=dmn_test",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("ok");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("POST /__clerk forwards request bodies through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const proxiedBodies: Array<string> = [];
