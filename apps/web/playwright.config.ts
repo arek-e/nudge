@@ -50,8 +50,8 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "mobile-safari",
-      use: { ...devices["iPhone 15"] },
+      name: "desktop-chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });
