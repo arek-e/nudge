@@ -742,6 +742,397 @@ export const renderCodexEvalReport = (report: AgentEvalReport) => {
   ].join("\n");
 };
 
+export const defaultBraintrustEvalProjectName = "Nudge";
+export const defaultBraintrustEvalSuiteName = "agent-workflow";
+
+export type BraintrustAgentEvalResultType = "agent_result" | "guidance_result" | "judge_result";
+
+export type BraintrustAgentEvalScoreName = "deterministic" | "guidance" | "judge";
+
+export interface BraintrustAgentEvalInput {
+  readonly candidateId: string;
+  readonly caseId: string;
+  readonly note?: string;
+  readonly resultType: BraintrustAgentEvalResultType;
+  readonly rowId: string;
+}
+
+export interface BraintrustAgentEvalExpected {
+  readonly notes: ReadonlyArray<string>;
+  readonly passed: boolean;
+  readonly score: number;
+  readonly scoreName: BraintrustAgentEvalScoreName;
+}
+
+export interface BraintrustAgentEvalMetadata {
+  readonly [key: string]: unknown;
+  readonly agent?: string;
+  readonly candidateId: string;
+  readonly caseId: string;
+  readonly judge?: string;
+  readonly resultType: BraintrustAgentEvalResultType;
+}
+
+export interface BraintrustAgentEvalRow {
+  readonly expected: BraintrustAgentEvalExpected;
+  readonly id: string;
+  readonly input: BraintrustAgentEvalInput;
+  readonly metadata: BraintrustAgentEvalMetadata;
+  readonly output: unknown;
+  readonly tags: string[];
+}
+
+export interface BraintrustAgentEvalDataRow {
+  readonly expected: BraintrustAgentEvalExpected;
+  readonly id: string;
+  readonly input: BraintrustAgentEvalInput;
+  readonly metadata: BraintrustAgentEvalMetadata;
+  readonly tags: string[];
+}
+
+export interface BraintrustEvalTaskHooks {
+  readonly expected: BraintrustAgentEvalExpected;
+  readonly meta: (info: BraintrustAgentEvalMetadata) => void;
+  readonly metadata: BraintrustAgentEvalMetadata;
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly reportProgress: (progress: unknown) => void;
+  readonly span: unknown;
+  readonly tags?: string[];
+  readonly trialIndex: number;
+}
+
+export interface BraintrustEvalScorerInput {
+  readonly error?: unknown;
+  readonly expected: BraintrustAgentEvalExpected;
+  readonly id?: string;
+  readonly input: BraintrustAgentEvalInput;
+  readonly metadata: BraintrustAgentEvalMetadata;
+  readonly output: unknown;
+  readonly scores?: Record<string, number | null>;
+  readonly tags?: string[];
+}
+
+export interface BraintrustEvalScore {
+  readonly metadata?: Record<string, unknown>;
+  readonly name: string;
+  readonly score: number | null;
+}
+
+export interface BraintrustAgentEvaluator {
+  readonly data: BraintrustAgentEvalDataRow[];
+  readonly experimentName: string;
+  readonly metadata: Record<string, unknown>;
+  readonly projectId?: string;
+  readonly scores: Array<
+    (input: BraintrustEvalScorerInput) => BraintrustEvalScore[] | Promise<BraintrustEvalScore[]>
+  >;
+  readonly tags: string[];
+  readonly task: (input: BraintrustAgentEvalInput, hooks: unknown) => unknown;
+}
+
+export interface BraintrustEvalRunOptions {
+  readonly enableCache?: boolean;
+  readonly returnResults?: boolean;
+}
+
+export interface BraintrustEvalSummary {
+  readonly experimentId?: string;
+  readonly experimentName: string;
+  readonly experimentUrl?: string;
+  readonly projectName: string;
+  readonly projectUrl?: string;
+}
+
+export interface BraintrustEvalRunInput {
+  readonly evaluator: BraintrustAgentEvaluator;
+  readonly options: BraintrustEvalRunOptions;
+  readonly projectName: string;
+}
+
+export interface BraintrustEvalRunOutput {
+  readonly summary: BraintrustEvalSummary;
+}
+
+export interface BraintrustEvalRunner {
+  readonly run: (input: BraintrustEvalRunInput) => Promise<BraintrustEvalRunOutput>;
+}
+
+export interface BraintrustAgentEvalPublishConfig {
+  readonly apiKey?: string;
+  readonly experimentName?: string;
+  readonly now?: () => string;
+  readonly orgName?: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly runner?: BraintrustEvalRunner;
+}
+
+export interface BraintrustAgentEvalPublishResult {
+  readonly experimentId?: string;
+  readonly experimentName: string;
+  readonly experimentUrl?: string;
+  readonly projectName: string;
+  readonly projectUrl?: string;
+  readonly rowCount: number;
+}
+
+const braintrustRowId = (input: {
+  readonly candidateId: string;
+  readonly caseId: string;
+  readonly resultType: BraintrustAgentEvalResultType;
+}) => `${input.resultType}:${input.candidateId}:${input.caseId}`;
+
+const braintrustTagsFor = (resultType: BraintrustAgentEvalResultType) => [
+  "agent-eval",
+  defaultBraintrustEvalSuiteName,
+  resultType,
+];
+
+const defaultBraintrustExperimentName = (now: string) =>
+  `nudge-agent-eval-${now.replaceAll(":", "-").replaceAll(".", "-")}`;
+
+const agentCaseNotes = (
+  cases: ReadonlyArray<AgentEvalCase>,
+  result: Pick<AgentEvalResult, "caseId">,
+) => cases.find((evalCase) => evalCase.id === result.caseId)?.input.note;
+
+const agentResultBraintrustRow = (
+  result: AgentEvalResult,
+  cases: ReadonlyArray<AgentEvalCase>,
+): BraintrustAgentEvalRow => {
+  const resultType: BraintrustAgentEvalResultType = "agent_result";
+  const rowId = braintrustRowId({
+    candidateId: result.candidateId,
+    caseId: result.caseId,
+    resultType,
+  });
+  const note = agentCaseNotes(cases, result);
+
+  return {
+    expected: {
+      notes: result.notes,
+      passed: result.passed,
+      score: result.score,
+      scoreName: "deterministic",
+    },
+    id: rowId,
+    input: {
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      ...(note ? { note } : {}),
+      resultType,
+      rowId,
+    },
+    metadata: {
+      agent: result.agent,
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      resultType,
+    },
+    output: result.output,
+    tags: braintrustTagsFor(resultType),
+  };
+};
+
+const guidanceResultBraintrustRow = (result: AgentGuidanceEvalResult): BraintrustAgentEvalRow => {
+  const resultType: BraintrustAgentEvalResultType = "guidance_result";
+  const rowId = braintrustRowId({
+    candidateId: result.candidateId,
+    caseId: result.caseId,
+    resultType,
+  });
+
+  return {
+    expected: {
+      notes: result.notes,
+      passed: result.passed,
+      score: result.score,
+      scoreName: "guidance",
+    },
+    id: rowId,
+    input: {
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      resultType,
+      rowId,
+    },
+    metadata: {
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      resultType,
+    },
+    output: result.output,
+    tags: braintrustTagsFor(resultType),
+  };
+};
+
+const judgeResultBraintrustRow = (result: AgentJudgeResult): BraintrustAgentEvalRow => {
+  const resultType: BraintrustAgentEvalResultType = "judge_result";
+  const rowId = braintrustRowId({
+    candidateId: result.candidateId,
+    caseId: result.caseId,
+    resultType,
+  });
+
+  return {
+    expected: {
+      notes: result.improvements,
+      passed: result.passed,
+      score: result.score,
+      scoreName: "judge",
+    },
+    id: rowId,
+    input: {
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      resultType,
+      rowId,
+    },
+    metadata: {
+      candidateId: result.candidateId,
+      caseId: result.caseId,
+      judge: result.judge,
+      resultType,
+    },
+    output: {
+      improvements: result.improvements,
+      judge: result.judge,
+      rationale: result.rationale,
+    },
+    tags: braintrustTagsFor(resultType),
+  };
+};
+
+export const createBraintrustAgentEvalRows = (
+  report: AgentEvalReport,
+  input: { readonly cases?: ReadonlyArray<AgentEvalCase> } = {},
+): BraintrustAgentEvalRow[] => {
+  const cases = input.cases ?? agentEvalCases;
+  return [
+    ...report.results.map((result) => agentResultBraintrustRow(result, cases)),
+    ...report.guidanceResults.map(guidanceResultBraintrustRow),
+    ...report.judgeResults.map(judgeResultBraintrustRow),
+  ];
+};
+
+const braintrustDataRow = (row: BraintrustAgentEvalRow): BraintrustAgentEvalDataRow => ({
+  expected: row.expected,
+  id: row.id,
+  input: row.input,
+  metadata: row.metadata,
+  tags: row.tags,
+});
+
+const braintrustReportScores = (input: BraintrustEvalScorerInput): BraintrustEvalScore[] => [
+  {
+    metadata: {
+      notes: input.expected.notes,
+      passed: input.expected.passed,
+      resultType: input.input.resultType,
+    },
+    name: "overall",
+    score: input.expected.score,
+  },
+  {
+    name: "passed",
+    score: input.expected.passed ? 1 : 0,
+  },
+  {
+    name: input.expected.scoreName,
+    score: input.expected.score,
+  },
+];
+
+export const createBraintrustAgentEvaluator = (
+  report: AgentEvalReport,
+  config: BraintrustAgentEvalPublishConfig = {},
+): BraintrustAgentEvaluator => {
+  const rows = createBraintrustAgentEvalRows(report);
+  const outputByRowId = new Map(rows.map((row) => [row.input.rowId, row.output]));
+  const now = config.now?.() ?? new Date().toISOString();
+  const experimentName = config.experimentName?.trim() || defaultBraintrustExperimentName(now);
+  return {
+    data: rows.map(braintrustDataRow),
+    experimentName,
+    metadata: {
+      candidateSummaries: report.candidateSummaries,
+      localPassed: report.passed,
+      localScore: report.score,
+      source: "@nudge/evals",
+      suite: defaultBraintrustEvalSuiteName,
+    },
+    ...(config.projectId?.trim() ? { projectId: config.projectId.trim() } : {}),
+    scores: [braintrustReportScores],
+    tags: ["agent-eval", defaultBraintrustEvalSuiteName],
+    task: (input) => {
+      const output = outputByRowId.get(input.rowId);
+      if (output === undefined) {
+        throw new Error(`No Braintrust eval output found for ${input.rowId}`);
+      }
+      return output;
+    },
+  };
+};
+
+const createDefaultBraintrustEvalRunner = async (input: {
+  readonly apiKey: string;
+  readonly orgName?: string;
+}): Promise<BraintrustEvalRunner> => {
+  const braintrust = await import("braintrust");
+  const orgName = input.orgName?.trim();
+  const state = await braintrust.loginToState({
+    apiKey: input.apiKey,
+    noExitFlush: true,
+    ...(orgName ? { orgName } : {}),
+  });
+  return {
+    run: async (runInput) => {
+      const result = await braintrust.Eval(
+        runInput.projectName,
+        { ...runInput.evaluator, state },
+        runInput.options,
+      );
+      return { summary: result.summary };
+    },
+  };
+};
+
+export const publishAgentEvalReportToBraintrust = async (
+  report: AgentEvalReport,
+  config: BraintrustAgentEvalPublishConfig = {},
+): Promise<BraintrustAgentEvalPublishResult> => {
+  const projectName = config.projectName?.trim() || defaultBraintrustEvalProjectName;
+  const apiKey = config.apiKey?.trim();
+  let runner = config.runner;
+  if (!runner) {
+    if (!apiKey) {
+      throw new Error("BRAINTRUST_API_KEY is required to publish evals to Braintrust");
+    }
+    runner = await createDefaultBraintrustEvalRunner({
+      apiKey,
+      ...(config.orgName?.trim() ? { orgName: config.orgName.trim() } : {}),
+    });
+  }
+  const evaluator = createBraintrustAgentEvaluator(report, config);
+  const output = await runner.run({
+    evaluator,
+    options: {
+      enableCache: false,
+      returnResults: true,
+    },
+    projectName,
+  });
+
+  return {
+    ...(output.summary.experimentId ? { experimentId: output.summary.experimentId } : {}),
+    experimentName: output.summary.experimentName,
+    ...(output.summary.experimentUrl ? { experimentUrl: output.summary.experimentUrl } : {}),
+    projectName: output.summary.projectName,
+    ...(output.summary.projectUrl ? { projectUrl: output.summary.projectUrl } : {}),
+    rowCount: evaluator.data.length,
+  };
+};
+
 export interface OpenAiCompatibleJudgeConfig {
   readonly apiKey: string;
   readonly endpoint?: string;

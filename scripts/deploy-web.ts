@@ -1,4 +1,9 @@
-import { validateDeployVersion, wranglerDeployArgs } from "./deploy-web-config";
+import {
+  parseWranglerSecretNames,
+  requiredDeploySecretNames,
+  validateDeployVersion,
+  wranglerDeployArgs,
+} from "./deploy-web-config";
 import { uploadSentrySourcemaps } from "./sentry-artifacts";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -35,9 +40,9 @@ const run = (
   }
 };
 
-const output = (command: readonly string[]) => {
+const output = (command: readonly string[], options: { readonly cwd?: string } = {}) => {
   const result = Bun.spawnSync(command, {
-    cwd: root,
+    cwd: options.cwd ?? root,
     stderr: "pipe",
     stdout: "pipe",
   });
@@ -84,6 +89,10 @@ const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = 
     VITE_SENTRY_TRACES_SAMPLE_RATE: "0.05",
   },
 };
+const aiProviderByDeployTarget: Record<string, string | undefined> = {
+  production: "braintrust-gateway",
+  staging: "braintrust-gateway",
+};
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
 if (!clientEnvironment) {
   console.error(`Unknown deploy environment: ${deployEnvironment}`);
@@ -91,6 +100,27 @@ if (!clientEnvironment) {
 }
 const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
 const deployArgs = wranglerDeployArgs({ deployEnvironment, dryRun, serverConvexUrl, version });
+
+if (!dryRun) {
+  const secretNames = parseWranglerSecretNames(
+    output(["bunx", "wrangler", "secret", "list", "--env", deployEnvironment], { cwd: web }),
+  );
+  const missingSecretNames = requiredDeploySecretNames({
+    aiProvider: aiProviderByDeployTarget[deployEnvironment],
+    secretNames,
+  });
+  if (missingSecretNames.length > 0) {
+    console.error(
+      `Refusing to deploy ${deployEnvironment}: missing Cloudflare secret(s) ${missingSecretNames.join(
+        ", ",
+      )}.`,
+    );
+    console.error(
+      `Set it with: bunx wrangler secret put ${missingSecretNames[0]} --env ${deployEnvironment}`,
+    );
+    process.exit(1);
+  }
+}
 
 run(["mise", "exec", "--", "bun", "run", "check"], {
   processEnv: processEnvWithoutDeploySecrets(process.env),

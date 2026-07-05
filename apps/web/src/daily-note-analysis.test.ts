@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   DailyNoteExtractionHttpError,
+  dailyNoteExtractionFromObject,
+  dailyNoteExtractionObjectSchema,
   dailyNoteAnalysisErrorCode,
   dailyNoteAnalysisExtractionStepConfig,
+  emptyDailyNoteExtraction,
 } from "./daily-note-analysis";
 
 describe("daily note analysis", () => {
@@ -55,5 +58,70 @@ describe("daily note analysis", () => {
         ),
       ),
     ).toBe("AI_EXTRACTION_HTTP_502");
+  });
+
+  test("builds empty extraction fallback results", () => {
+    expect(
+      emptyDailyNoteExtraction({
+        model: "@cf/test/model",
+        provider: "cloudflare-workers-ai",
+      }),
+    ).toEqual({
+      items: [],
+      model: "@cf/test/model",
+      provider: "cloudflare-workers-ai",
+    });
+  });
+
+  test("normalizes generated extraction objects with provider metadata", () => {
+    const result = dailyNoteExtractionFromObject({
+      model: "@cf/test/model",
+      object: {
+        dailySummary: undefined,
+        items: [
+          {
+            body: "Ask Maya for launch copy.",
+            kind: "follow_up",
+            title: "Ask Maya for launch copy",
+          },
+        ],
+      },
+      provider: "cloudflare-workers-ai",
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.provider).toBe("cloudflare-workers-ai");
+  });
+
+  test("normalizes null optional model fields before persisting extraction output", () => {
+    const result = dailyNoteExtractionFromObject({
+      model: "glm-5.2",
+      object: dailyNoteExtractionObjectSchema.parse({
+        dailySummary: null,
+        items: [
+          {
+            body: "Follow up with Maya tomorrow.",
+            confidence: null,
+            dueAt: "2026-07-06",
+            eventEndsAt: null,
+            eventStartsAt: null,
+            kind: "follow_up",
+            remindAt: null,
+            title: "Follow up with Maya",
+          },
+        ],
+      }),
+      provider: "braintrust-gateway",
+    });
+
+    expect(result.dailySummary).toBeUndefined();
+    expect(result.items).toEqual([
+      {
+        body: "Follow up with Maya tomorrow.",
+        dueAt: "2026-07-06",
+        kind: "follow_up",
+        title: "Follow up with Maya",
+      },
+    ]);
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
+import {
+  dailyNoteExtractionPrompt,
+  loopIntakeSystemPrompt,
+  loopReplyPrompt,
+} from "./agent-prompts";
 
 describe("agent prompts", () => {
   test("guides agents to use OKF context and reviewable writes", () => {
@@ -17,7 +21,31 @@ describe("agent prompts", () => {
     });
 
     expect(prompt).toContain("Return only facts grounded in the note");
+    expect(prompt).toContain("Return only a valid JSON object");
+    expect(prompt).toContain('"items"');
     expect(prompt).toContain("2026-06-30");
     expect(prompt).toContain("Follow up with Maya");
+  });
+
+  test("builds loop reply prompts from draft and memory context", () => {
+    const prompt = loopReplyPrompt({
+      draft: {
+        body: "Follow up with Maya about launch notes.",
+        kind: "follow_up",
+        rationale: "Grounded in the user's message.",
+        title: "Follow up with Maya",
+      },
+      fallbackReply: "Captured.",
+      memoryResults: [{ text: "Maya owns launch copy." }],
+      message: "Remind me what to do next.",
+      user: {
+        displayName: "Alex",
+        id: "user_123",
+      },
+    });
+
+    expect(prompt).toContain("Maya owns launch copy");
+    expect(prompt).toContain("Draft title: Follow up with Maya");
+    expect(prompt).toContain("Do not claim external side effects were completed");
   });
 });

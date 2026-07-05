@@ -24,6 +24,7 @@ export interface NudgeAppService {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
   readonly aiModel: string;
+  readonly aiProvider: string;
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;
   readonly env: Env;

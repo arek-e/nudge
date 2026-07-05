@@ -36,7 +36,7 @@ function dailyNoteAnalysisScheduler(
           {
             attributes: {
               "nudge.ai.source_type": "note_revision",
-              "nudge.ai.system": "cloudflare-think",
+              "nudge.ai.system": context.aiProvider,
               "workflow.name": "daily-note-analysis",
             },
             kind: "client",
@@ -120,6 +120,7 @@ export function saveJournalCapture(
     effect: Effect.gen(function* () {
       const saveResult = yield* NoteAnalysisWorkflows.saveJournalCapture({
         aiModel: input.context.aiModel,
+        analysisProvider: input.context.aiProvider,
         bodyText: input.bodyText,
         ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
         ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),

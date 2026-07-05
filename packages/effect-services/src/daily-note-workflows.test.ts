@@ -37,7 +37,7 @@ describe("NoteAnalysisWorkflows", () => {
       aiModel: "@cf/meta/llama",
       aiRunId: result.analysisRun?.id,
       aiSourceType: "note_revision",
-      aiSystem: "cloudflare-think",
+      aiSystem: "cloudflare-workers-ai",
       noteLocalDate: "2026-07-03",
     });
     expect(scheduledParams).toHaveLength(1);
@@ -112,7 +112,7 @@ describe("NoteAnalysisWorkflows", () => {
               },
             ],
             model: "@cf/meta/llama",
-            provider: "cloudflare-think",
+            provider: "cloudflare-workers-ai",
           },
           localDate: "2026-07-03",
           noteId: saved.dailyNote.note.id,

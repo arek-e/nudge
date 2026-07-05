@@ -1,0 +1,13 @@
+{
+  "name": "@nudge/ai",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "catalog:",
+    "ai": "catalog:",
+    "workers-ai-provider": "catalog:"
+  }
+}

@@ -8,6 +8,7 @@ export interface ApiContext {
   readonly agentSessions: DurableObjectNamespace;
   readonly agentInternalSecret?: string;
   readonly aiModel: string;
+  readonly aiProvider: string;
   readonly clientSurface?: string;
   readonly dailyAnalysisWorkflow: Workflow;
   readonly db: DbService;

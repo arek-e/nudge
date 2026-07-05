@@ -287,7 +287,7 @@ describe("web app", () => {
     try {
       const response = await app.request(
         "/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
-        { headers: { "CF-Connecting-IP": "203.0.113.10" } },
+        { headers: { "Accept-Encoding": "gzip, br", "CF-Connecting-IP": "203.0.113.10" } },
         {
           ...env,
           CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
@@ -304,6 +304,7 @@ describe("web app", () => {
       expect(proxiedRequest.url).toBe(
         "https://frontend-api.clerk.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js?cache=1",
       );
+      expect(proxiedRequest.headers.get("accept-encoding")).toBeNull();
       expect(proxiedRequest.headers.get("host")).toBeNull();
       expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
         "https://app.explorenudge.com/__clerk",
@@ -374,7 +375,7 @@ describe("web app", () => {
     }
   });
 
-  test("GET /__clerk/v1/environment normalizes stale upstream Clerk branding", async () => {
+  test("GET /__clerk/v1/environment proxies Clerk environment responses through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const staleApplicationName = String.fromCharCode(
       86,
@@ -391,15 +392,25 @@ describe("web app", () => {
       110,
       103,
     );
-    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () =>
-      Response.json({
-        display_config: {
-          application_name: staleApplicationName,
-          branded: true,
-          object: "display_config",
-        },
-        object: "environment",
-      }),
+    const upstreamBody = JSON.stringify({
+      display_config: {
+        application_name: staleApplicationName,
+        branded: true,
+        object: "display_config",
+      },
+      object: "environment",
+    });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(upstreamBody, {
+          headers: {
+            connection: "keep-alive",
+            "content-encoding": "br",
+            "content-type": "application/json",
+            etag: "stale-upstream-body",
+            "transfer-encoding": "chunked",
+          },
+        }),
     );
 
     try {
@@ -412,18 +423,13 @@ describe("web app", () => {
           CLERK_SECRET_KEY: "sk_test_proxy",
         },
       );
-      const body = await response.json();
 
       expect(response.status).toBe(200);
-      expect(body).toEqual({
-        display_config: {
-          application_name: "Nudge",
-          branded: true,
-          object: "display_config",
-        },
-        object: "environment",
-      });
-      expect(JSON.stringify(body)).not.toContain(staleApplicationName);
+      expect(response.headers.get("connection")).toBeNull();
+      expect(response.headers.get("content-encoding")).toBe("br");
+      expect(response.headers.get("etag")).toBe("stale-upstream-body");
+      expect(response.headers.get("transfer-encoding")).toBeNull();
+      expect(await response.text()).toBe(upstreamBody);
     } finally {
       fetchMock.mockRestore();
     }
@@ -2354,7 +2360,15 @@ describe("web app", () => {
           title: "July 1",
         }),
       },
-      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
+      {
+        ...env,
+        AI_PROVIDER: "braintrust-gateway",
+        BRAINTRUST_API_KEY: "bt-st-test",
+        DB: traceDb.db,
+        DAILY_DIGEST_WORKFLOW: workflow,
+        EXTRACTION_MODEL: "glm-5.2",
+        THINK_MODEL: "glm-5.2",
+      },
     );
 
     expect(response.status).toBe(200);
@@ -2366,10 +2380,10 @@ describe("web app", () => {
       event: "http_request_completed",
       routeName: "api.journal",
       aiErrorCode: null,
-      aiModel: "@cf/zai-org/glm-4.7-flash",
+      aiModel: "glm-5.2",
       aiRunId: saved.analysisRun.id,
       aiSourceType: "note_revision",
-      aiSystem: "cloudflare-think",
+      aiSystem: "braintrust-gateway",
       noteLocalDate: "2026-07-01",
       "otel.name": "api.journal",
       "otel.status_code": "OK",
@@ -2381,8 +2395,8 @@ describe("web app", () => {
       "service.name": "nudge-web",
       "deployment.environment.name": "test",
       "nudge.debug_kind": "ai",
-      "nudge.ai.system": "cloudflare-think",
-      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "nudge.ai.system": "braintrust-gateway",
+      "nudge.ai.model": "glm-5.2",
       "nudge.ai.run_id": saved.analysisRun.id,
       "nudge.ai.error_code": null,
     });

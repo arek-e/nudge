@@ -3,6 +3,7 @@ import {
   createHttpAgentRunner,
   createOpenAiCompatibleJudge,
   currentPromptCandidate,
+  publishAgentEvalReportToBraintrust,
   renderCodexEvalReport,
   runAgentEvalSuite,
   type AgentEvalArtifact,
@@ -16,9 +17,14 @@ const codexReportArg = args.find((arg) => arg.startsWith("--codex-report="));
 const candidateArgs = args.filter((arg) => arg.startsWith("--candidate="));
 const judgeArg = args.find((arg) => arg.startsWith("--judge="));
 const agentUrlArg = args.find((arg) => arg.startsWith("--agent-url="));
+const braintrustExperimentArg = args.find((arg) => arg.startsWith("--braintrust-experiment="));
 const judgeApiKey = process.env.EVAL_JUDGE_API_KEY;
 const agentUrl = agentUrlArg?.slice("--agent-url=".length) ?? process.env.EVAL_AGENT_URL;
 const judgeMode = judgeArg?.slice("--judge=".length);
+const braintrustEnabled = args.includes("--braintrust") || process.env.BRAINTRUST_EVALS === "true";
+const braintrustExperimentName =
+  braintrustExperimentArg?.slice("--braintrust-experiment=".length) ??
+  process.env.BRAINTRUST_EXPERIMENT_NAME;
 
 const readCandidate = async (arg: string): Promise<AgentPromptCandidate> => {
   const spec = arg.slice("--candidate=".length);
@@ -102,6 +108,18 @@ if (codexReportArg) {
   await writeFile(codexReportArg.slice("--codex-report=".length), renderCodexEvalReport(report));
 }
 
+const braintrustPublish = braintrustEnabled
+  ? await publishAgentEvalReportToBraintrust(report, {
+      ...(process.env.BRAINTRUST_API_KEY ? { apiKey: process.env.BRAINTRUST_API_KEY } : {}),
+      ...(braintrustExperimentName ? { experimentName: braintrustExperimentName } : {}),
+      ...(process.env.BRAINTRUST_ORG_NAME ? { orgName: process.env.BRAINTRUST_ORG_NAME } : {}),
+      ...(process.env.BRAINTRUST_PROJECT_ID
+        ? { projectId: process.env.BRAINTRUST_PROJECT_ID }
+        : {}),
+      projectName: process.env.BRAINTRUST_PROJECT_NAME ?? "Nudge",
+    })
+  : null;
+
 for (const result of report.results) {
   const status = result.passed ? "PASS" : "FAIL";
   console.log(`${status} ${result.candidateId}/${result.caseId} score=${result.score.toFixed(2)}`);
@@ -138,6 +156,15 @@ for (const summary of report.candidateSummaries) {
 }
 
 console.log(`Agent eval score=${report.score.toFixed(2)}`);
+
+if (braintrustPublish) {
+  console.log(
+    `Braintrust experiment=${braintrustPublish.experimentName} rows=${braintrustPublish.rowCount}`,
+  );
+  if (braintrustPublish.experimentUrl) {
+    console.log(`Braintrust url=${braintrustPublish.experimentUrl}`);
+  }
+}
 
 if (!report.passed) {
   throw new Error("Agent eval suite failed");

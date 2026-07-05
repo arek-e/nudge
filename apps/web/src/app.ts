@@ -101,6 +101,7 @@ export function createApp(options: CreateAppOptions = {}) {
     targetUrl.search = requestUrl.search;
 
     const proxyHeaders = new Headers(c.req.raw.headers);
+    proxyHeaders.delete("accept-encoding");
     proxyHeaders.delete("host");
     proxyHeaders.delete("content-length");
     proxyHeaders.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
@@ -118,7 +119,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const proxyRequest = new Request(targetUrl.toString(), proxyInit);
     const response = await fetch(proxyRequest);
 
-    return clerkProxyResponse(response, clerkPath);
+    return clerkProxyResponse(response);
   });
 
   app.post(
@@ -222,52 +223,25 @@ function clerkProxyBody(request: Request) {
   return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 }
 
-async function clerkProxyResponse(response: Response, clerkPath: string) {
-  if (clerkPath === "/v1/environment" && isJsonResponse(response)) {
-    const normalized = normalizeClerkEnvironmentBranding(await response.json());
-    const headers = clerkProxyResponseHeaders(response.headers);
-    headers.set("content-type", "application/json");
-    return new Response(JSON.stringify(normalized), {
-      headers,
-      status: response.status,
-      statusText: response.statusText,
-    });
-  }
-
+function clerkProxyResponse(response: Response) {
   return new Response(response.body, {
-    headers: new Headers(response.headers),
+    headers: clerkProxyResponseHeaders(response.headers),
     status: response.status,
     statusText: response.statusText,
   });
 }
 
-function isJsonResponse(response: Response) {
-  return response.headers.get("content-type")?.toLowerCase().includes("application/json") === true;
-}
-
 function clerkProxyResponseHeaders(headers: Headers) {
-  const nextHeaders = new Headers(headers);
-  nextHeaders.delete("content-length");
-  return nextHeaders;
-}
-
-function normalizeClerkEnvironmentBranding(value: unknown) {
-  if (!isRecord(value)) return value;
-
-  const displayConfig = value.display_config;
-  if (!isRecord(displayConfig)) return value;
-
-  return {
-    ...value,
-    display_config: {
-      ...displayConfig,
-      application_name: "Nudge",
-    },
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  const proxyHeaders = new Headers(headers);
+  proxyHeaders.delete("connection");
+  proxyHeaders.delete("keep-alive");
+  proxyHeaders.delete("proxy-authenticate");
+  proxyHeaders.delete("proxy-authorization");
+  proxyHeaders.delete("te");
+  proxyHeaders.delete("trailer");
+  proxyHeaders.delete("transfer-encoding");
+  proxyHeaders.delete("upgrade");
+  return proxyHeaders;
 }
 
 function decodeClerkProxyPath(path: string) {

@@ -3,6 +3,7 @@ import {
   appendWebCapture,
   captureResultFromSavedWebCapture,
   saveWebCapture,
+  saveWebDailyNoteDraft,
   uploadWebMediaAttachment,
 } from "./web-capture";
 
@@ -150,6 +151,71 @@ describe("web capture", () => {
     ]);
     expect(saved.journal.bodyText).toBe("Morning plan\n\nFollow up with Sam.");
     expect(saved.capture.source).toBe("web_app");
+    expect(saved.analysisRun?.status).toBe("queued");
+  });
+
+  test("autosaves a typed daily note through the journal without appending a capture signal", async () => {
+    const calls: unknown[] = [];
+
+    const saved = await saveWebDailyNoteDraft(
+      {
+        existingJournalText: "Morning plan",
+        idempotencyKey: "web:autosave-1",
+        localDate: "2026-07-03",
+        note: " Follow up with Sam after the launch review. ",
+      },
+      async () => ({
+        saveJournal: async (input) => {
+          calls.push({ input, type: "journal" });
+          return {
+            analysisRun: {
+              id: "run-autosave",
+              metadata: { itemCount: 1 },
+              sourceId: "revision-autosave",
+              sourceType: "note_revision",
+              startedAt: "2026-07-03T08:30:00.000Z",
+              status: "queued",
+              triggerType: "note_inactivity",
+              userId: "user-1",
+            },
+            document: {
+              bodyText: input.bodyText,
+              createdAt: "2026-07-03T08:30:00.000Z",
+              id: "journal-autosave",
+              localDate: input.localDate,
+              title: input.title,
+              updatedAt: "2026-07-03T08:30:00.000Z",
+              userId: "user-1",
+            },
+            revision: {
+              bodyText: input.bodyText,
+              changeHash: "autosave",
+              changedText: "Follow up with Sam after the launch review.",
+              createdAt: "2026-07-03T08:30:00.000Z",
+              documentId: "journal-autosave",
+              id: "revision-autosave",
+              revisionNumber: 2,
+              userId: "user-1",
+            },
+          };
+        },
+      }),
+    );
+
+    expect(calls).toEqual([
+      {
+        input: {
+          bodyText: "Morning plan\n\nFollow up with Sam after the launch review.",
+          idempotencyKey: "web:autosave-1",
+          localDate: "2026-07-03",
+          title: "2026-07-03",
+        },
+        type: "journal",
+      },
+    ]);
+    expect(saved.journal.bodyText).toBe(
+      "Morning plan\n\nFollow up with Sam after the launch review.",
+    );
     expect(saved.analysisRun?.status).toBe("queued");
   });
 

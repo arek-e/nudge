@@ -1,4 +1,5 @@
 import type { Sandbox } from "@cloudflare/sandbox";
+import type { NudgeAiProvider } from "@nudge/ai";
 
 export interface Env {
   DB?: D1Database;
@@ -16,7 +17,11 @@ export interface Env {
   SENTRY_DSN?: string;
   SENTRY_ENABLED?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
+  AI_PROVIDER?: NudgeAiProvider;
   BRAINTRUST_API_KEY?: string;
+  BRAINTRUST_GATEWAY_URL?: string;
+  BRAINTRUST_ORG_NAME?: string;
+  BRAINTRUST_PROJECT_ID?: string;
   BRAINTRUST_RAW_AI_TELEMETRY?: string;
   AI_AGENT_RATE_LIMIT_MAX?: string;
   AI_AGENT_RATE_LIMIT_WINDOW_SECONDS?: string;

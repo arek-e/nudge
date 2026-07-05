@@ -23,6 +23,7 @@
     "@cloudflare/sandbox": "catalog:",
     "@cloudflare/think": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@nudge/ai": "workspace:*",
     "@nudge/db": "workspace:*",
     "@nudge/db-convex": "workspace:*",
     "@nudge/domain": "workspace:*",
@@ -51,7 +52,6 @@
     "hono": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "workers-ai-provider": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

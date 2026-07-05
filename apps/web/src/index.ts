@@ -2,10 +2,10 @@ import { Think } from "@cloudflare/think";
 export { ContainerProxy, Sandbox } from "@cloudflare/sandbox";
 import { Agent } from "agents";
 import { generateObject, smoothStream, streamText, type LanguageModel } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { Effect } from "effect";
+import { resolveNudgeAiModelConfig, resolveNudgeAiModels } from "@nudge/ai";
 import { Db } from "@nudge/db";
 import {
   currentWorkflowVersion,
@@ -32,7 +32,11 @@ import {
   withRuntimeTraceContext,
 } from "@nudge/observability";
 import type { Env } from "./env";
-import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
+import {
+  dailyNoteExtractionPrompt,
+  loopIntakeSystemPrompt,
+  loopReplyPrompt,
+} from "./agent-prompts";
 import {
   aiRateLimitResponse,
   aiRouteQuotaRequestSchema,
@@ -48,10 +52,15 @@ import {
 } from "./braintrust-tracing";
 import {
   DailyNoteExtractionHttpError,
+  dailyNoteExtractionObjectSchema,
+  dailyNoteExtractionFromObject,
+  dailyNoteExtractionSchema,
   dailyNoteAnalysisErrorCode,
   dailyNoteAnalysisExtractionStepConfig,
   dailyNoteAnalysisHttpStatus,
   dailyNoteAnalysisResponseError,
+  emptyDailyNoteExtraction,
+  type DailyNoteExtraction,
 } from "./daily-note-analysis";
 import { resolveDbLayerForEnv } from "./db-layer";
 
@@ -59,7 +68,24 @@ const app = createApp();
 const baseAI = { generateObject, smoothStream, streamText };
 const aiSdkForEnv = (env: Env) =>
   wrapBraintrustAISDK(baseAI, { rawTelemetry: braintrustRawAiTelemetryEnabled(env) });
-const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
+const aiModelConfigForEnv = (env: Env) =>
+  resolveNudgeAiModelConfig({
+    braintrustApiKey: env.BRAINTRUST_API_KEY,
+    extractionModel: env.EXTRACTION_MODEL,
+    provider: env.AI_PROVIDER,
+    thinkModel: env.THINK_MODEL,
+  });
+const aiModelsForEnv = (env: Env) =>
+  resolveNudgeAiModels({
+    braintrustApiKey: env.BRAINTRUST_API_KEY,
+    braintrustGatewayUrl: env.BRAINTRUST_GATEWAY_URL,
+    braintrustOrgName: env.BRAINTRUST_ORG_NAME,
+    braintrustProjectId: env.BRAINTRUST_PROJECT_ID,
+    extractionModel: env.EXTRACTION_MODEL,
+    provider: env.AI_PROVIDER,
+    thinkModel: env.THINK_MODEL,
+    workersAi: env.AI,
+  });
 
 export default app;
 
@@ -226,22 +252,6 @@ interface AgentReceiptView {
   readonly why: string;
 }
 
-const thinkExtractedItemSchema = z.object({
-  body: z.string().min(1).max(2_000),
-  confidence: z.number().min(0).max(1).optional(),
-  dueAt: z.string().optional(),
-  eventEndsAt: z.string().optional(),
-  eventStartsAt: z.string().optional(),
-  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
-  remindAt: z.string().optional(),
-  title: z.string().min(1).max(200),
-});
-
-const thinkDailyNoteExtractionSchema = z.object({
-  dailySummary: z.string().max(2_000).optional(),
-  items: z.array(thinkExtractedItemSchema).default([]),
-});
-
 const replyRequestBodySchema = z.object({
   message: z.string().optional(),
 });
@@ -258,13 +268,8 @@ const extractionHttpErrorBodySchema = z.object({
   errorCode: z.string().optional(),
 });
 
-type ThinkDailyNoteExtraction = z.infer<typeof thinkDailyNoteExtractionSchema> & {
-  readonly model: string;
-  readonly provider: "cloudflare-think";
-};
-
 function dailyNoteAnalysisItemsFrom(
-  items: ThinkDailyNoteExtraction["items"],
+  items: DailyNoteExtraction["items"],
 ): ReadonlyArray<DailyNoteAnalysisExtractedItemInput> {
   return items.map((item) => ({
     body: item.body,
@@ -666,11 +671,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const localDate = String(body.localDate ?? "today");
     const previous = this.state ?? initialUserAgentSessionState;
     let recentAiRequestsAt = previous.recentAiRequestsAt ?? [];
-    let extraction: ThinkDailyNoteExtraction = {
-      items: [],
-      model: extractionModelName(this.env),
-      provider: "cloudflare-think",
-    };
+    const aiModels = aiModelsForEnv(this.env);
+    let extraction: DailyNoteExtraction = emptyDailyNoteExtraction({
+      model: aiModels.extractionModelName,
+      provider: aiModels.provider,
+    });
     if (changedText.length > 0) {
       const aiQuota = reserveAiAgentQuota({
         env: this.env,
@@ -698,8 +703,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
             attributes: {
               "nudge.ai.changed_text_chars": changedText.length,
               "nudge.ai.local_date": localDate,
+              "nudge.ai.model": aiModels.extractionModelName,
               "nudge.ai.revision_id": String(body.revisionId ?? ""),
-              "nudge.ai.system": "cloudflare-think",
+              "nudge.ai.system": aiModels.provider,
             },
             name: "journal.interpret.extract_daily_note",
             type: "task",
@@ -716,8 +722,8 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
             errorCode,
             errorType: safeError.name,
             logKind: "wide_event",
-            model: extractionModelName(this.env),
-            provider: "cloudflare-think",
+            model: aiModels.extractionModelName,
+            provider: aiModels.provider,
           }),
         );
         return Response.json(
@@ -792,14 +798,17 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
 export class LoopIntakeThinkAgent extends Think<Env> {
   workspaceBash = false;
 
-  getModel(): LanguageModel {
+  private getAiModels() {
     ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
-    return createWorkersAI({ binding: this.env.AI })(this.env.THINK_MODEL);
+    return aiModelsForEnv(this.env);
+  }
+
+  getModel(): LanguageModel {
+    return this.getAiModels().thinkModel;
   }
 
   getExtractionModel(): LanguageModel {
-    ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
-    return createWorkersAI({ binding: this.env.AI })(extractionModelName(this.env));
+    return this.getAiModels().extractionModel;
   }
 
   getSystemPrompt(): string {
@@ -813,17 +822,6 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   }
 
   async streamReplyText(input: LoopIntakeReplyStreamInput) {
-    const memoryContext = input.memoryResults.length
-      ? input.memoryResults.map((result, index) => `${index + 1}. ${result.text}`).join("\n")
-      : "No related memory found.";
-    const draftContext = input.draft
-      ? [
-          `Draft title: ${input.draft.title}`,
-          `Draft kind: ${input.draft.kind}`,
-          `Draft body: ${input.draft.body}`,
-          `Draft rationale: ${input.draft.rationale}`,
-        ].join("\n")
-      : "No review draft was created.";
     const ai = aiSdkForEnv(this.env);
     const result = ai.streamText({
       abortSignal: AbortSignal.timeout(30_000),
@@ -832,16 +830,7 @@ export class LoopIntakeThinkAgent extends Think<Env> {
         delayInMs: 20,
       }),
       model: this.getModel(),
-      prompt: [
-        "Write the assistant reply for this private operating-loop chat.",
-        "Keep it concise, concrete, and grounded in the draft and memory context.",
-        "Do not claim external side effects were completed.",
-        `User: ${input.user.displayName} (${input.user.id})`,
-        `Message: ${input.message}`,
-        `Related memory:\n${memoryContext}`,
-        `Review draft:\n${draftContext}`,
-        `Fallback reply if nothing else is useful: ${input.fallbackReply}`,
-      ].join("\n\n"),
+      prompt: loopReplyPrompt(input),
       system: this.getSystemPrompt(),
     });
 
@@ -856,21 +845,21 @@ export class LoopIntakeThinkAgent extends Think<Env> {
   async extractDailyNote(input: {
     readonly changedText: string;
     readonly localDate: string;
-  }): Promise<ThinkDailyNoteExtraction> {
+  }): Promise<DailyNoteExtraction> {
     const ai = aiSdkForEnv(this.env);
+    const aiModels = this.getAiModels();
     const { object } = await ai.generateObject({
       abortSignal: AbortSignal.timeout(10_000),
-      model: this.getExtractionModel(),
+      model: aiModels.extractionModel,
       prompt: dailyNoteExtractionPrompt(input),
-      schema: thinkDailyNoteExtractionSchema,
+      schema: dailyNoteExtractionObjectSchema,
     });
 
-    return {
-      ...(object.dailySummary ? { dailySummary: object.dailySummary } : {}),
-      items: object.items,
-      model: extractionModelName(this.env),
-      provider: "cloudflare-think",
-    };
+    return dailyNoteExtractionFromObject({
+      model: aiModels.extractionModelName,
+      object,
+      provider: aiModels.provider,
+    });
   }
 
   private async deterministicDraftFromMessage(input: LoopIntakeDraftInput) {
@@ -1088,9 +1077,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
             }
             throw new DailyNoteExtractionHttpError(response.status, responseError);
           }
-          return thinkDailyNoteExtractionSchema
-            .extend({ model: z.string(), provider: z.literal("cloudflare-think") })
-            .parse(await response.json());
+          return dailyNoteExtractionSchema.parse(await response.json());
         },
       );
 
@@ -1148,7 +1135,7 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
               itemCount: persisted.itemCount,
               logKind: "wide_event",
               model: extraction.model,
-              provider: "cloudflare-think",
+              provider: extraction.provider,
             }),
           );
           return { itemCount: persisted.itemCount, ok: true, userId: input.userId };
@@ -1195,8 +1182,8 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
               errorCode,
               errorType: safeError.name,
               logKind: "wide_event",
-              model: extractionModelName(this.env),
-              provider: "cloudflare-think",
+              model: aiModelConfigForEnv(this.env).extractionModelName,
+              provider: aiModelConfigForEnv(this.env).provider,
             }),
           );
           return { errorType: safeError.name, ok: false, userId: input.userId };
