@@ -8,7 +8,7 @@ modules still earn that split case by case.
 
 - `apps/web/src/app.ts` owns Hono app composition, middleware installation, runtime caching, and request context construction.
 - `apps/web/src/routes/` owns HTTP route registration by surface: static/PWA routes and authenticated API middleware.
-- `apps/web/src/api-router.ts` owns the oRPC/OpenAPI handler implementations. It is intentionally separate from Worker composition.
+- `apps/web/src/api-router.ts` owns oRPC/OpenAPI contract wiring and is the only API implementation adapter that runs Effect programs. `apps/web/src/api/actions/` owns named Effect-native handler implementations, and `apps/web/src/api/db/` owns the Effect-returning DB read/write groups those actions need.
 - `apps/web/src/Services/NudgeApp.ts` owns the `NudgeApp` service interface: Cloudflare bindings, model config, auth session resolution, OKF sandbox access, and the `Db` adapter exposed to routes.
 - `apps/web/src/Layers/NudgeAppLive.ts` owns the live Worker layer and runtime cache helpers. It resolves environment bindings, the dev user, durable namespaces, model config, optional Turbopuffer config, and the concrete D1-backed `Db` layer.
 - `packages/db` owns persistence and row decoding. Runtime code should call the `Db` Effect service, not D1 or Drizzle directly.
@@ -27,7 +27,7 @@ modules still earn that split case by case.
 
 ## What Not To Copy
 
-- Do not migrate to t3code's Node/Bun server runtime, WebSocket RPC, Effect HTTP stack, SQLite lifecycle, desktop provider registry, or DPoP/OAuth server stack.
+- Do not migrate to t3code's Node/Bun server runtime, WebSocket RPC, SQLite lifecycle, desktop provider registry, or DPoP/OAuth server stack. The API implementation layer is Effect-native, but the public HTTP adapter remains the current Worker/oRPC stack until a separate client-contract migration earns replacing it with `@effect/platform` `HttpApi`.
 - Do not split every module into `Services/` and `Layers/`. The Worker app runtime has earned the split; other modules still need two adapters, test pressure, or module size before the locality is real.
 - Do not introduce an event-sourced OrchestrationEngine until replay, fanout projections, or cross-agent command dedupe are actual production pressure.
 - Do not add t3code-style release/smoke/deploy jobs until `bun run check` and the existing deploy flow miss real regressions.
@@ -43,3 +43,13 @@ Split a Nudge module only when at least one is true:
 - App Surface behavior would otherwise be copied between web, desktop, Raycast, and iOS instead of living behind `packages/surface` or the Nudge Engine.
 
 Otherwise keep the module boring and local.
+
+## API Action And DB Query Files
+
+When an OpenAPI/oRPC handler grows beyond direct wiring, extract it by action name:
+
+- `apps/web/src/api/actions/{action-name}.ts` owns the service/use-case shape, for example `list-calendar-days.ts`. It translates `ApiContext` plus validated route input into an `Effect` whose success value matches the response contract.
+- `apps/web/src/api/db/{read-or-write-name}.ts` owns the DB read/write group needed by that action. These files call the `DbService` interface and return `Effect`; they must not import Convex, D1, Drizzle, or storage clients directly unless they are an explicit platform adapter such as trace-cache reads.
+- `apps/web/src/api-router.ts` stays thin: install the contract handler, delegate to the action function, and run the returned `Effect` through the request `ApiContext`.
+
+Prefer this split for named read models, multi-step writes, response shaping, or repeated query groups. Do not create a pass-through DB query file for a single `DbService` call unless the name captures a real product read model.

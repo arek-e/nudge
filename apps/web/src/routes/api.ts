@@ -1,9 +1,10 @@
 import type { Hono } from "hono";
+import type { ApiContext } from "../api/context";
 import type { DesktopSignInTokenFactory } from "../auth";
 import type { ResolveRequestApp } from "../request-context";
 import { aiRateLimitResponse, reserveAiRouteQuota } from "../ai-rate-limit";
 import { conversationMessageInputSchema } from "../api-contract";
-import { makeApiHandler, type ApiContext } from "../api-router";
+import { makeApiHandler } from "../api-router";
 import { conversationStreamPath, proxyConversationStream } from "../conversation-proxy";
 import { mediaIdSchema, mediaObjectKey, storeMediaUpload } from "../media-storage";
 import {
