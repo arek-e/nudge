@@ -33,7 +33,18 @@
 		1A0000192C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0001142C00000000000001 /* Assets.xcassets */; };
 		1A00001A2C00000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0F2C00000000000001 /* Sentry */; };
 		1A00001B2C00000000000001 /* NudgeSentry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001152C00000000000001 /* NudgeSentry.swift */; };
+		1A0010012C00000000000001 /* StatusMatrixPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0011012C00000000000001 /* StatusMatrixPolicyTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1A0016012C00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0006012C00000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0004012C00000000000001;
+			remoteInfo = Nudge;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		1A0001012C00000000000001 /* NudgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeApp.swift; sourceTree = "<group>"; };
@@ -56,6 +67,8 @@
 		1A0001132C00000000000001 /* NudgeCaptureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeCaptureFeature.swift; sourceTree = "<group>"; };
 		1A0001142C00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1A0001152C00000000000001 /* NudgeSentry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeSentry.swift; sourceTree = "<group>"; };
+		1A0011012C00000000000001 /* StatusMatrixPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusMatrixPolicyTests.swift; sourceTree = "<group>"; };
+		1A0011062C00000000000001 /* NudgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NudgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +87,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A0012012C00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0003022C00000000000001 /* Nudge */,
+				1A0013012C00000000000001 /* NudgeTests */,
 				1A0003032C00000000000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -115,8 +136,17 @@
 			isa = PBXGroup;
 			children = (
 				1A0001062C00000000000001 /* Nudge.app */,
+				1A0011062C00000000000001 /* NudgeTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0013012C00000000000001 /* NudgeTests */ = {
+			isa = PBXGroup;
+			children = (
+				1A0011012C00000000000001 /* StatusMatrixPolicyTests.swift */,
+			);
+			path = NudgeTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -149,6 +179,26 @@
 			productReference = 1A0001062C00000000000001 /* Nudge.app */;
 			productType = "com.apple.product-type.application";
 		};
+		1A0014012C00000000000001 /* NudgeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0017012C00000000000001 /* Build configuration list for PBXNativeTarget "NudgeTests" */;
+			buildPhases = (
+				1A0015012C00000000000001 /* Sources */,
+				1A0012012C00000000000001 /* Frameworks */,
+				1A0015022C00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1A0016022C00000000000001 /* PBXTargetDependency */,
+			);
+			name = NudgeTests;
+			packageProductDependencies = (
+			);
+			productName = NudgeTests;
+			productReference = 1A0011062C00000000000001 /* NudgeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -161,6 +211,10 @@
 				TargetAttributes = {
 					1A0004012C00000000000001 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					1A0014012C00000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 1A0004012C00000000000001;
 					};
 				};
 			};
@@ -187,6 +241,7 @@
 			projectRoot = "";
 			targets = (
 				1A0004012C00000000000001 /* Nudge */,
+				1A0014012C00000000000001 /* NudgeTests */,
 			);
 		};
 /* End PBXProject section */
@@ -197,6 +252,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000192C00000000000001 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0015022C00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -227,7 +289,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A0015012C00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0010012C00000000000001 /* StatusMatrixPolicyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A0016022C00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A0004012C00000000000001 /* Nudge */;
+			targetProxy = 1A0016012C00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1A0009012C00000000000001 /* Debug */ = {
@@ -341,6 +419,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
+				CLERK_PROXY_URL = "";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
@@ -428,10 +507,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconStaging;
 				CODE_SIGN_STYLE = Automatic;
 				CLERK_PUBLISHABLE_KEY = "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";
+				CLERK_PROXY_URL = "https://nudge-web-staging.teampitch.workers.dev/__clerk";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_TESTABILITY = YES;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Nudge/Info.plist;
@@ -463,6 +544,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CLERK_PUBLISHABLE_KEY = "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk";
+				CLERK_PROXY_URL = "https://nudge-web.teampitch.workers.dev/__clerk";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
@@ -492,6 +574,87 @@
 			};
 			name = Release;
 		};
+		1A0018012C00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Nudge";
+				TEST_TARGET_NAME = Nudge;
+			};
+			name = Debug;
+		};
+		1A0018022C00000000000001 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios.staging.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Nudge";
+				TEST_TARGET_NAME = Nudge;
+			};
+			name = Staging;
+		};
+		1A0018032C00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z6N7K8C5FZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.nudge.ios.release.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Nudge";
+				TEST_TARGET_NAME = Nudge;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -511,6 +674,16 @@
 				1A0009032C00000000000001 /* Debug */,
 				1A0009062C00000000000001 /* Staging */,
 				1A0009042C00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0017012C00000000000001 /* Build configuration list for PBXNativeTarget "NudgeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0018012C00000000000001 /* Debug */,
+				1A0018022C00000000000001 /* Staging */,
+				1A0018032C00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

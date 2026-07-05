@@ -10,10 +10,23 @@ enum NudgeClerkConfig {
             ?? normalized(ProcessInfo.processInfo.environment["CLERK_PUBLISHABLE_KEY"])
     }
 
+    static var proxyURL: String? {
+        normalizedURL(Bundle.main.object(forInfoDictionaryKey: "ClerkProxyURL") as? String)
+            ?? normalizedURL(ProcessInfo.processInfo.environment["CLERK_PROXY_URL"])
+    }
+
     private static func normalized(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.hasPrefix("pk_") ? trimmed : nil
+    }
+
+    private static func normalizedURL(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return nil }
+        guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else { return nil }
+        return trimmed
     }
 }
 

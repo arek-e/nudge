@@ -141,6 +141,7 @@ export interface SurfaceJournalRevision {
 
 export interface SurfaceJournalSaveInput {
   readonly bodyText: string;
+  readonly idempotencyKey?: string;
   readonly localDate: string;
   readonly title: string;
   readonly bodyDocument?: unknown;
@@ -791,6 +792,9 @@ export function createSurfaceEngineClient(
               ? { bodyDocument: journalInput.bodyDocument }
               : {}),
             bodyText: journalInput.bodyText,
+            ...(journalInput.idempotencyKey !== undefined
+              ? { idempotencyKey: journalInput.idempotencyKey }
+              : {}),
             localDate: journalInput.localDate,
             title: journalInput.title,
           },

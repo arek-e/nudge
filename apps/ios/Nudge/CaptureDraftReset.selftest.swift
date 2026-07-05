@@ -441,40 +441,27 @@ enum CaptureDraftResetSelftest {
         assert(hydratedDailyNoteSubmission.trailingNote == "")
 
         let failedContinuationTransition = CaptureSubmissionTransitionPolicy.evaluate(
-            analysisRunId: "run-failed",
             currentLeadingText: "Previous failed note",
             submittedNoteText: "New note",
-            pendingNoteText: "Previous failed note",
-            stage: .analysisTimedOut
+            pendingNoteText: "Previous failed note"
         )
         assert(failedContinuationTransition.leadingText == "New note")
         assert(failedContinuationTransition.trailingText == "")
-        assert(failedContinuationTransition.retainedRow?.noteText == "Previous failed note")
-        assert(failedContinuationTransition.retainedRow?.stage == .analysisTimedOut)
-        assert(failedContinuationTransition.retainedRow?.analysisRunId == "run-failed")
 
         let processingContinuationTransition = CaptureSubmissionTransitionPolicy.evaluate(
-            analysisRunId: "run-processing",
             currentLeadingText: "Previous processing note",
             submittedNoteText: "New note",
-            pendingNoteText: "Previous processing note",
-            stage: .processing
+            pendingNoteText: "Previous processing note"
         )
         assert(processingContinuationTransition.leadingText == "New note")
         assert(processingContinuationTransition.trailingText == "")
-        assert(processingContinuationTransition.retainedRow?.noteText == "Previous processing note")
-        assert(processingContinuationTransition.retainedRow?.stage == .processing)
-        assert(processingContinuationTransition.retainedRow?.analysisRunId == "run-processing")
 
         let savedContinuationTransition = CaptureSubmissionTransitionPolicy.evaluate(
-            analysisRunId: "run-saved",
             currentLeadingText: "Previous saved note",
             submittedNoteText: "New note",
-            pendingNoteText: "Previous saved note",
-            stage: .saved
+            pendingNoteText: "Previous saved note"
         )
         assert(savedContinuationTransition.leadingText == "New note")
-        assert(savedContinuationTransition.retainedRow == nil)
 
         let appendedJournalSave = JournalSaveCompositionPolicy.evaluate(
             existingJournalText: "Previous failed note",

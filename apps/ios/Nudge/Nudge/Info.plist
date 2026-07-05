@@ -8,6 +8,8 @@
 	<string>Nudge</string>
 	<key>ClerkPublishableKey</key>
 	<string>$(CLERK_PUBLISHABLE_KEY)</string>
+	<key>ClerkProxyURL</key>
+	<string>$(CLERK_PROXY_URL)</string>
 	<key>NudgeEnvironmentName</key>
 	<string>$(NUDGE_ENVIRONMENT_NAME)</string>
 	<key>NudgeEngineURL</key>

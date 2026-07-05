@@ -49,6 +49,7 @@ export interface ConvexDbStoreApi {
   readonly getAgentRun: PublicQuery;
   readonly listAgentRuns: PublicQuery;
   readonly markAgentRunRunning: PublicMutation;
+  readonly setDailyNoteAgentStatus: PublicMutation;
   readonly completeAgentRun: PublicMutation;
   readonly upsertJournalDocument: PublicMutation;
   readonly getJournalDocument: PublicQuery;
@@ -472,6 +473,16 @@ export function makeConvexDbService(convex: ConvexRuntimeService): DbService {
           runId: input.runId,
         }),
       ),
+    setDailyNoteAgentStatus: (input) =>
+      runConvex("setDailyNoteAgentStatus", async (trace) => {
+        await client.mutation(store.setDailyNoteAgentStatus, {
+          user: userFor(input.userId, trace),
+          localDate: input.localDate,
+          idempotencyKey: input.idempotencyKey,
+          status: input.status,
+          ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
+        });
+      }),
     completeAgentRun: (input) =>
       runConvex("completeAgentRun", (trace) =>
         client.mutation(store.completeAgentRun, {

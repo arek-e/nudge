@@ -522,6 +522,7 @@ const outcomeInputSchema = z.object({
 const journalInputSchema = z.object({
   bodyDocument: z.unknown().optional(),
   bodyText: z.string().max(100_000),
+  idempotencyKey: z.string().min(1).max(256).optional(),
   localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   title: z.string().min(1).max(200),
 });
