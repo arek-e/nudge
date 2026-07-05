@@ -16,6 +16,7 @@ describe("NoteAnalysisWorkflows", () => {
       NoteAnalysisWorkflows.saveJournalCapture({
         aiModel: "@cf/meta/llama",
         bodyText: "Follow up with Mara about launch tomorrow.",
+        idempotencyKey: "mutation-a",
         localDate: "2026-07-03",
         requestId: "request-1",
         scheduleAnalysis: (input) =>
@@ -43,6 +44,7 @@ describe("NoteAnalysisWorkflows", () => {
     expect(scheduledParams[0]).toEqual({
       changedText: "Follow up with Mara about launch tomorrow.",
       documentId: result.document.id,
+      idempotencyKey: "mutation-a",
       kind: "daily-note-analysis",
       localDate: "2026-07-03",
       noteId: result.dailyNote.note.id,

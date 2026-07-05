@@ -203,6 +203,7 @@ export const apiRouter = api.router({
           context,
           bodyText: input.bodyText,
           ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
           localDate: input.localDate,
           title: input.title,
         }),

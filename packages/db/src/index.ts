@@ -205,6 +205,7 @@ export type ItemEventType =
 export type SummaryPeriodType = "day" | "week" | "month" | "quarter" | "year" | "custom";
 export type SummaryStatus = "draft" | "ready" | "superseded";
 export type AgentRunStatus = "queued" | "running" | "completed" | "failed";
+export type DailyNoteAgentStatus = "queued" | "running" | "ready" | "failed";
 
 export interface UpsertDailyNoteInput {
   readonly userId: string;
@@ -314,6 +315,14 @@ export interface AgentRunOutputRecord {
   readonly outputType: "extracted_item" | "summary" | "memory_document";
   readonly outputId: string;
   readonly createdAt: string;
+}
+
+export interface SetDailyNoteAgentStatusInput {
+  readonly userId: string;
+  readonly localDate: string;
+  readonly idempotencyKey: string;
+  readonly status: DailyNoteAgentStatus;
+  readonly errorCode?: string;
 }
 
 export type MemorySourceType =
@@ -507,6 +516,7 @@ export interface DbService {
     readonly userId: string;
     readonly runId: string;
   }) => Effect.Effect<AgentRunRecord>;
+  readonly setDailyNoteAgentStatus: (input: SetDailyNoteAgentStatusInput) => Effect.Effect<void>;
   readonly startAgentRun: (input: StartAgentRunInput) => Effect.Effect<AgentRunRecord>;
   readonly completeAgentRun: (input: {
     readonly userId: string;
@@ -817,6 +827,7 @@ export class Db extends Context.Service<Db, DbService>()("nudge/db/Db") {
             agentRunStore.set(updated.id, updated);
             return updated;
           }),
+        setDailyNoteAgentStatus: () => Effect.void,
         startAgentRun: (input) =>
           Effect.sync(() => {
             const record = {

@@ -6,9 +6,11 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
+    "sourceMap": true,
     "tsBuildInfoFile": "../../.tsbuild/apps/desktop.tsbuildinfo",
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../../packages/observability" }]
 }

@@ -102,6 +102,7 @@ struct NoteSyncReceipt: Equatable, Sendable {
     var lastErrorDescription: String?
 
     var hasFailures: Bool { failedCount > 0 }
+    var pendingCount: Int { max(0, attemptedCount - acceptedCount) }
 }
 
 enum NoteSyncError: LocalizedError {
@@ -151,7 +152,8 @@ final class LocalNoteStore {
     }
 
     private func migrate() throws {
-        try dbQueue.write { db in
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1-create-local-note-sync-tables") { db in
             try db.execute(sql: """
                 create table if not exists local_note_documents (
                   local_date text primary key,
@@ -176,6 +178,19 @@ final class LocalNoteStore {
                 )
                 """)
         }
+        migrator.registerMigration("v2-normalize-canonical-sync-statuses") { db in
+            try db.execute(sql: """
+                update local_note_documents
+                set sync_status = 'pending_sync'
+                where sync_status not in ('pending_sync', 'synced')
+                """)
+            try db.execute(sql: """
+                update pending_note_mutations
+                set status = 'pending'
+                where status not in ('pending', 'accepted')
+                """)
+        }
+        try migrator.migrate(dbQueue)
     }
 
     func saveLocalDraft(localDate: String, title: String, bodyText: String) throws -> LocalDailyNote {

@@ -39,11 +39,19 @@ export function registerApiRoutes(
     if (hasUnsafeApiPath(rawPathFromRequest(c.req.raw)) || hasUnsafeApiPath(c.req.path)) {
       return c.json({ error: "Not found" }, 404);
     }
+    const clientSurface = c.req.header("x-nudge-client");
+    if (clientSurface !== undefined) {
+      addWideEventFields(c, { clientSurface });
+    }
     const auth = await runWithRequestSpan(
       c,
       { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
+    addWideEventFields(c, {
+      authMode: auth.authMode,
+      ...(auth.user ? { userId: auth.user.id, workspaceId: auth.user.id } : {}),
+    });
     if (!auth.user && !isPublicApiSessionPath(c.req.path)) {
       return c.json({ error: "Authentication required" }, 401);
     }
@@ -145,7 +153,6 @@ export function registerApiRoutes(
       return new Response(object.body, { headers });
     }
 
-    const clientSurface = c.req.header("x-nudge-client");
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },

@@ -32,10 +32,6 @@ struct JournalSaveResponse: Decodable {
     let document: JournalDocument
 }
 
-struct AgentRunResponse: Decodable {
-    let run: AgentRun?
-}
-
 struct MediaUploadResponse: Decodable {
     let byteLength: Int
     let id: String
@@ -438,19 +434,14 @@ enum NudgeAPI {
         return response.document
     }
 
-    static func getAgentRun(runId: String) async throws -> AgentRun? {
-        let escaped = runId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? runId
-        let response: AgentRunResponse = try await get("/api/agent-runs/\(escaped)")
-        return response.run
-    }
-
     static func saveDailyNote(
         _ note: String,
         attachments: [JournalMediaAttachment] = [],
         existingJournalText: String? = nil,
         trailingNote: String = "",
         localDate: String,
-        treatsNoteAsFullBody: Bool = false
+        treatsNoteAsFullBody: Bool = false,
+        idempotencyKey: String? = nil
     ) async throws -> SavedCapture {
         let storedAttachments = try await uploadMediaAttachments(attachments)
         let composition = JournalSaveCompositionPolicy.evaluate(
@@ -474,6 +465,7 @@ enum NudgeAPI {
             body: JournalSaveRequest(
                 bodyDocument: bodyDocument,
                 bodyText: composition.journalBodyText,
+                idempotencyKey: idempotencyKey,
                 localDate: localDate,
                 title: localDate
             )
@@ -666,6 +658,7 @@ private struct MediaUploadRequest: Encodable {
 private struct JournalSaveRequest: Encodable {
     let bodyDocument: [RichTextBlock]
     let bodyText: String
+    let idempotencyKey: String?
     let localDate: String
     let title: String
 }

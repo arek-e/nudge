@@ -63,6 +63,7 @@ describe("Nudge iOS branding", () => {
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
 
     expect(info.CFBundleDisplayName).toBe("$(NUDGE_DISPLAY_NAME)");
+    expect(info.ClerkProxyURL).toBe("$(CLERK_PROXY_URL)");
     expect(info.NudgeEnvironmentName).toBe("$(NUDGE_ENVIRONMENT_NAME)");
     expect(info.NudgeEngineURL).toBe("$(NUDGE_ENGINE_URL)");
     expect(info.NudgeConvexDeploymentURL).toBe("$(NUDGE_CONVEX_DEPLOYMENT_URL)");
@@ -90,6 +91,46 @@ describe("Nudge iOS branding", () => {
     );
     expect(project).toContain(
       'CLERK_PUBLISHABLE_KEY = "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios.local")).toContain(
+      'CLERK_PROXY_URL = "";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios.staging")).toContain(
+      'CLERK_PROXY_URL = "https://nudge-web-staging.teampitch.workers.dev/__clerk";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios")).toContain(
+      'CLERK_PROXY_URL = "https://nudge-web.teampitch.workers.dev/__clerk";',
+    );
+  });
+
+  test("iOS initializes Sentry with environment-specific build settings", async () => {
+    const info = await readInfoPlist();
+    const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
+    const sentry = await readFile(new URL("Nudge/NudgeSentry.swift", iosRoot), "utf8");
+    const app = await readFile(new URL("Nudge/NudgeApp.swift", iosRoot), "utf8");
+
+    expect(info.SentryDSN).toBe("$(SENTRY_DSN)");
+    expect(info.SentryTracesSampleRate).toBe("$(SENTRY_TRACES_SAMPLE_RATE)");
+    expect(project).toContain('repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";');
+    expect(project).toContain("productName = Sentry;");
+    expect(project).toContain("Sentry in Frameworks");
+    expect(project).toContain("NudgeSentry.swift in Sources");
+    expect(project).toContain(
+      'SENTRY_DSN = "https://7b82934f67f8c8cb821e57aac1bdc16c@o4510926758150144.ingest.de.sentry.io/4511679653937232";',
+    );
+    expect(project).toContain("SENTRY_TRACES_SAMPLE_RATE = 0.05;");
+    expect(app).toContain("NudgeSentry.configure()");
+    expect(sentry).toContain("import Sentry");
+    expect(sentry).toContain("SentrySDK.start");
+    expect(sentry).toContain("SentrySDK.configureScope");
+    expect(sentry).toContain('scope.setTag(value: "nudge", key: "app")');
+    expect(sentry).toContain('scope.setTag(value: "ios", key: "surface")');
+    expect(sentry).toContain('scope.setTag(value: "ios", key: "app_surface")');
+    expect(sentry).toContain('scope.setTag(value: "ios-native", key: "runtime_surface")');
+    expect(sentry).toContain('scope.setContext(value: ["appSurface": "ios"');
+    expect(sentry).toContain("options.sendDefaultPii = false");
+    expect(sentry).toContain(
+      'options.environment = bundle.nonEmptyInfoString("NudgeEnvironmentName")',
     );
   });
 
@@ -154,10 +195,13 @@ async function readInfoPlist() {
   return {
     CFBundleDisplayName: readPlistString(plist, "CFBundleDisplayName"),
     CFBundleSpokenName: readPlistString(plist, "CFBundleSpokenName"),
+    ClerkProxyURL: readPlistString(plist, "ClerkProxyURL"),
     INAlternativeAppNames: readPlistStringArray(plist, "INAlternativeAppNames"),
     NudgeConvexDeploymentURL: readPlistString(plist, "NudgeConvexDeploymentURL"),
     NudgeEngineURL: readPlistString(plist, "NudgeEngineURL"),
     NudgeEnvironmentName: readPlistString(plist, "NudgeEnvironmentName"),
+    SentryDSN: readPlistString(plist, "SentryDSN"),
+    SentryTracesSampleRate: readPlistString(plist, "SentryTracesSampleRate"),
   };
 }
 

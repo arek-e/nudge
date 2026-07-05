@@ -34,14 +34,4 @@ nudge_export_worktree_env() {
   nudge_export_if_unset CLERK_PUBLISHABLE_KEY \
     "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk"
   nudge_export_if_unset VITE_CLERK_PUBLISHABLE_KEY "$CLERK_PUBLISHABLE_KEY"
-
-  nudge_export_if_unset VESTA_WORKTREE_ROOT "$NUDGE_WORKTREE_ROOT"
-  nudge_export_if_unset VESTA_DEV_PORT "$NUDGE_DEV_PORT"
-  nudge_export_if_unset VESTA_DEV_URL "$NUDGE_DEV_URL"
-  nudge_export_if_unset VESTA_WRANGLER_INSPECTOR_PORT "$NUDGE_WRANGLER_INSPECTOR_PORT"
-  nudge_export_if_unset VESTA_WRANGLER_PERSIST_TO "$NUDGE_WRANGLER_PERSIST_TO"
-}
-
-vesta_export_worktree_env() {
-  nudge_export_worktree_env "$@"
 }

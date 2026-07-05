@@ -115,6 +115,12 @@ const agentRunStatus = v.union(
   v.literal("completed"),
   v.literal("failed"),
 );
+const dailyNoteAgentStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("ready"),
+  v.literal("failed"),
+);
 const agentRunOutputType = v.union(
   v.literal("extracted_item"),
   v.literal("summary"),
@@ -1558,6 +1564,66 @@ export const markAgentRunRunning = mutation({
     const updated = await ctx.db.get(runId);
     if (!updated) throw new Error("Agent run disappeared during update");
     return agentRunRecord(user, updated);
+  },
+});
+
+export const setDailyNoteAgentStatus = mutation({
+  args: {
+    user: userArg,
+    errorCode: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    localDate: v.string(),
+    status: dailyNoteAgentStatus,
+  },
+  handler: async (ctx, args) => {
+    const user = await ensureRuntimeUser(ctx, args.user);
+    const document = await ctx.db
+      .query("documents")
+      .withIndex("by_owner_local_date", (index) =>
+        index.eq("ownerId", user._id).eq("localDate", args.localDate),
+      )
+      .first();
+    if (!document) {
+      return { error: { code: "document_not_found" }, ok: false };
+    }
+
+    const mutationReceipt = await ctx.db
+      .query("documentMutations")
+      .withIndex("by_owner_idempotency_key", (index) =>
+        index.eq("ownerId", user._id).eq("idempotencyKey", args.idempotencyKey),
+      )
+      .first();
+    if (!mutationReceipt) {
+      return { error: { code: "mutation_not_found" }, ok: false };
+    }
+    if (mutationReceipt.documentId !== document._id) {
+      return { error: { code: "mutation_document_mismatch" }, ok: false };
+    }
+
+    const updatedAt = nowIso();
+    const existing = await ctx.db
+      .query("agentStatuses")
+      .withIndex("by_document_idempotency_key", (index) =>
+        index.eq("documentId", document._id).eq("idempotencyKey", args.idempotencyKey),
+      )
+      .first();
+    const values = {
+      idempotencyKey: args.idempotencyKey,
+      status: args.status,
+      updatedAt,
+      ...(args.errorCode !== undefined ? { errorCode: args.errorCode } : {}),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, values);
+    } else {
+      await ctx.db.insert("agentStatuses", {
+        documentId: document._id,
+        ...values,
+      });
+    }
+
+    return { ok: true };
   },
 });
 

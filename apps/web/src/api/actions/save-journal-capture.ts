@@ -14,6 +14,7 @@ export interface SaveJournalCaptureInput {
   readonly bodyDocument?: unknown;
   readonly bodyText: string;
   readonly context: ApiContext;
+  readonly idempotencyKey?: string;
   readonly localDate: string;
   readonly title: string;
 }
@@ -121,6 +122,7 @@ export function saveJournalCapture(
         aiModel: input.context.aiModel,
         bodyText: input.bodyText,
         ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+        ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
         ...(indexPendingMemory ? { indexPendingMemory } : {}),
         localDate: input.localDate,
         ...(input.context.traceHeaders?.["x-request-id"] !== undefined

@@ -32,12 +32,16 @@ struct ContentView: View {
                         .padding(.horizontal, 24)
                         .padding(.top, 14)
 
+                    SyncStatusMatrixView(snapshot: store.syncStatusMatrix)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 14)
+
                     CaptureCanvas(
                         store: store,
                         focused: $captureFocused
                     )
                         .padding(.horizontal, 26)
-                        .padding(.top, 48)
+                        .padding(.top, 28)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
@@ -79,6 +83,8 @@ struct ContentView: View {
             }
             .navigationDestination(for: NudgeDestination.self) { destination in
                 switch destination {
+                case .dailyReview:
+                    DailyReviewScreen(store: store)
                 case .settings:
                     SettingsScreen(store: store)
                 case .todayCalendar:
@@ -88,11 +94,6 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .task { await store.send(.refreshContext).finish() }
-        .task(id: store.shouldPollProcessing) {
-            if store.shouldPollProcessing {
-                await store.send(.pollProcessingStarted).finish()
-            }
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await store.send(.refreshContext).finish() }

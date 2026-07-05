@@ -95,7 +95,8 @@ describe("Desktop app", () => {
       main: "dist/main.js",
       scripts: {
         build: "tsc -b tsconfig.json --force",
-        "dist:mac": "bun run build && electron-builder --mac --publish never",
+        "dist:mac":
+          "bun run build && bun ../../scripts/sentry-artifacts.ts sourcemaps --project nudge-desktop --path dist && electron-builder --mac --publish never",
         dev: "bun run build && electron .",
       },
       devDependencies: {

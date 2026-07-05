@@ -17,6 +17,7 @@ import {
   resolveDesktopE2eReadyFile,
   resolveNudgeWebAppUrl,
 } from "./config.js";
+import { captureDesktopException, flushDesktopSentry, initializeDesktopSentry } from "./sentry.js";
 import {
   DesktopUpdates,
   makeDesktopUpdatesLayer,
@@ -42,6 +43,12 @@ let pendingDesktopAuthCallbackUrl: string | undefined;
 let desktopUpdatesRuntime: DesktopUpdatesRuntime | undefined;
 let desktopUpdateStartupTimer: NodeJS.Timeout | undefined;
 let desktopUpdatePollTimer: NodeJS.Timeout | undefined;
+
+initializeDesktopSentry({
+  env: process.env,
+  isPackaged: app.isPackaged,
+  version: app.getVersion(),
+});
 
 function createMainWindow() {
   const browserWindow = new BrowserWindow({
@@ -147,6 +154,7 @@ async function loadDesktopSettings() {
     desktopSettings = desktopSettingsFromUnknown(JSON.parse(await readFile(settingsPath, "utf8")));
   } catch (error) {
     if (!isNodeErrorWithCode(error, "ENOENT")) {
+      captureDesktopException(error, { operation: "desktop_settings.load" });
       console.warn("[desktop-settings] could not read settings", error);
     }
     desktopSettings = defaultDesktopSettings;
@@ -323,6 +331,7 @@ function setupDesktopUpdates() {
   )
     .then(scheduleDesktopUpdateChecks)
     .catch((error) => {
+      captureDesktopException(error, { operation: "desktop_updates.setup" });
       console.error("[desktop-updates] setup failed", error);
     });
 }
@@ -371,6 +380,7 @@ async function getDesktopUpdateState() {
       }),
     );
   } catch (error) {
+    captureDesktopException(error, { operation: "desktop_updates.state" });
     return disabledDesktopUpdateState(errorMessageFromUnknown(error));
   }
 }
@@ -389,6 +399,7 @@ async function runDesktopUpdatesAction(
       }),
     );
   } catch (error) {
+    captureDesktopException(error, { operation: "desktop_updates.action" });
     return disabledDesktopUpdateActionResult(errorMessageFromUnknown(error));
   }
 }
@@ -503,7 +514,10 @@ if (!singleInstanceLock) {
   });
 }
 
-app.on("before-quit", clearDesktopUpdateTimers);
+app.on("before-quit", () => {
+  clearDesktopUpdateTimers();
+  void flushDesktopSentry();
+});
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();

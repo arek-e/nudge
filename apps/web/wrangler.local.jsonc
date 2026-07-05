@@ -35,6 +35,8 @@
     "CLERK_AUTHORIZED_PARTIES": "http://localhost:8787,https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev",
     "CLERK_PUBLISHABLE_KEY": "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk",
     "LOG_HTTP_REQUESTS": "true",
+    "SENTRY_DSN": "https://43ad63f371cb7fc91d54982aff07222b@o4510926758150144.ingest.de.sentry.io/4511679628050512",
+    "SENTRY_TRACES_SAMPLE_RATE": "0.05",
     "CONVEX_URL": "https://grandiose-hamster-855.eu-west-1.convex.cloud",
     "EXTRACTION_MODEL": "@cf/zai-org/glm-4.7-flash",
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
