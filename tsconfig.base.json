@@ -17,6 +17,7 @@
       "@nudge/db": ["packages/db/src/index.ts"],
       "@nudge/evals": ["packages/evals/src/index.ts"],
       "@nudge/observability": ["packages/observability/src/index.ts"],
+      "@nudge/observability/sentry": ["packages/observability/src/sentry.ts"],
       "@nudge/ui": ["packages/ui/src/index.tsx"],
       "@nudge/ui/marketing": ["packages/ui/src/marketing.tsx"]
     }

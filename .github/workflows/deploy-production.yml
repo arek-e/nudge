@@ -66,4 +66,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_UPLOAD_ARTIFACTS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && 'true' || 'false' }}
         run: mise exec -- bun run deploy

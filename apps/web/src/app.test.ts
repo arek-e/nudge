@@ -624,6 +624,42 @@ describe("web app", () => {
     ]);
   });
 
+  test("authenticated API requests persist safe surface and user telemetry", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const traceDb = createTraceDb();
+
+    const response = await app.request(
+      "/api/session",
+      {
+        headers: {
+          ...authenticatedHeaders,
+          "cf-ray": "surface-ray",
+          "user-agent": "NudgeDesktop/1",
+          "x-nudge-client": "desktop",
+        },
+      },
+      { ...env, DB: traceDb.db },
+    );
+
+    expect(response.status).toBe(200);
+    expect(traceDb.rows).toHaveLength(1);
+
+    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
+    expect(payload).toMatchObject({
+      authMode: "clerk",
+      clientSurface: "desktop",
+      requestId: "surface-ray",
+      routeName: "api.session",
+      runtimeSurface: "cloudflare-worker",
+      userId: testUserId,
+      workspaceId: testUserId,
+      "nudge.client.surface": "desktop",
+      "nudge.runtime.surface": "cloudflare-worker",
+      "nudge.user_id": testUserId,
+      "nudge.workspace_id": testUserId,
+    });
+  });
+
   test("GET /health persists a root request trace span", async () => {
     const spanRows: Array<ReadonlyArray<unknown>> = [];
     const traceDb = {

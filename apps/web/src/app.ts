@@ -34,6 +34,7 @@ import { defaultOkfSandboxFactory } from "./okf-sandbox-live";
 import { resolveCurrentUser } from "./request-auth";
 import { registerApiRoutes } from "./routes/api";
 import { registerStaticRoutes } from "./routes/static";
+import { captureWebWorkerException, sentryRequestMiddleware } from "./sentry";
 
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
@@ -79,6 +80,7 @@ export function createApp(options: CreateAppOptions = {}) {
     return { appServices, runEffect };
   };
 
+  app.use(sentryRequestMiddleware(app));
   app.use("*", evlogWideEvents());
   app.use("*", requestObservability());
   app.use("*", serverTiming());
@@ -176,6 +178,11 @@ export function createApp(options: CreateAppOptions = {}) {
   registerApiRoutes(app, resolveRequestApp, desktopSignInTokenFactory);
 
   app.onError((error, c) => {
+    captureWebWorkerException(error, {
+      tags: {
+        path: new URL(c.req.url).pathname,
+      },
+    });
     const retryAfterSeconds = retryAfterSecondsFor(error);
     const status = retryAfterSeconds === null ? 500 : 503;
     addWideEventFields(c, {

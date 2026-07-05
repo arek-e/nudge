@@ -7,6 +7,7 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig({
   build: {
     outDir: "dist/client",
+    sourcemap: "hidden",
   },
   envDir: fileURLToPath(new URL("../..", import.meta.url)),
   envPrefix: ["VITE_", "CLERK_PUBLISHABLE_KEY"],

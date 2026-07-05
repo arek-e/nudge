@@ -1,7 +1,9 @@
 import { validateDeployVersion, wranglerDeployArgs } from "./deploy-web-config";
+import { uploadSentrySourcemaps } from "./sentry-artifacts";
 
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
+const webClientDist = new URL("../apps/web/dist/client", import.meta.url).pathname;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
@@ -67,11 +69,19 @@ const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = 
     VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
     VITE_CLERK_PROXY_URL: "/__clerk",
     VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
+    VITE_SENTRY_DSN:
+      "https://3fe4af305fc498b5a216f68af4e898ab@o4510926758150144.ingest.de.sentry.io/4510926760312912",
+    VITE_SENTRY_ENVIRONMENT: "production",
+    VITE_SENTRY_TRACES_SAMPLE_RATE: "0.05",
   },
   staging: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
     VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
     VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+    VITE_SENTRY_DSN:
+      "https://3fe4af305fc498b5a216f68af4e898ab@o4510926758150144.ingest.de.sentry.io/4510926760312912",
+    VITE_SENTRY_ENVIRONMENT: "staging",
+    VITE_SENTRY_TRACES_SAMPLE_RATE: "0.05",
   },
 };
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
@@ -87,8 +97,14 @@ run(["mise", "exec", "--", "bun", "run", "check"], {
 });
 run(["mise", "exec", "--", "bun", "run", "build"], {
   cwd: web,
-  env: clientEnvironment,
+  env: { ...clientEnvironment, VITE_APP_VERSION: version },
   processEnv: processEnvWithoutDeploySecrets(process.env),
+});
+await uploadSentrySourcemaps({
+  directory: webClientDist,
+  env: dryRun ? { ...process.env, SENTRY_UPLOAD_ARTIFACTS: "false" } : process.env,
+  project: "nudge-web-client",
+  release: `nudge-web-client@${version}`,
 });
 run(["mise", "exec", "--", "bunx", "wrangler", "deploy", ...deployArgs], { cwd: web });
 
@@ -101,6 +117,7 @@ function processEnvWithoutDeploySecrets(sourceEnv: NodeJS.ProcessEnv) {
   for (const [name, value] of Object.entries(sourceEnv)) {
     if (value === undefined) continue;
     if (name === "CLOUDFLARE_API_TOKEN" || name === "CLOUDFLARE_ACCOUNT_ID") continue;
+    if (name === "SENTRY_AUTH_TOKEN") continue;
     safeEnv[name] = value;
   }
   return safeEnv;

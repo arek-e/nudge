@@ -28,6 +28,7 @@ import {
   flushBraintrustTracing,
   runBraintrustSpan,
 } from "./braintrust-tracing";
+import { captureWebWorkerException, setWebWorkerSentryContext } from "./sentry";
 
 export type ObservabilityHonoEnv = { Bindings: Env } & EvlogVariables;
 
@@ -72,7 +73,9 @@ const isTraceCacheRoute = (path: string) => path.startsWith("/api/traces");
 
 export const addWideEventFields = (c: AppContext, fields: Record<string, unknown>) => {
   const current = c.get("wideEvent") ?? {};
-  c.set("wideEvent", { ...current, ...fields });
+  const merged = { ...current, ...fields };
+  c.set("wideEvent", merged);
+  setWebWorkerSentryContext(sentryContextFromWideEvent(merged));
   c.get("log").set(fields);
 };
 
@@ -140,6 +143,7 @@ export const requestObservability = (): AppMiddleware => {
       service: "nudge-web",
       environment: c.env.ENVIRONMENT ?? "unknown",
       version: c.env.APP_VERSION ?? "0.0.0",
+      runtimeSurface: "cloudflare-worker",
       requestId: id,
       spanId,
       traceId,
@@ -148,6 +152,7 @@ export const requestObservability = (): AppMiddleware => {
       path,
       userAgent: c.req.header("user-agent"),
     });
+    setWebWorkerSentryContext(sentryContextFromWideEvent(c.get("wideEvent") ?? {}));
     c.get("log").set(c.get("wideEvent") ?? {});
     ensureBraintrustTracing(c.env.BRAINTRUST_API_KEY);
 
@@ -168,6 +173,12 @@ export const requestObservability = (): AppMiddleware => {
         next,
       );
     } catch (cause) {
+      captureWebWorkerException(cause, {
+        tags: {
+          path,
+          phase: "request",
+        },
+      });
       addWideEventFields(c, {
         status: 500,
         outcome: "error",
@@ -339,6 +350,16 @@ const numberField = (event: Record<string, unknown>, key: string) => {
   const value = event[key];
   return typeof value === "number" ? value : null;
 };
+
+const sentryContextFromWideEvent = (event: Record<string, unknown>) => ({
+  appSurface: nullableStringField(event, "clientSurface"),
+  requestId: nullableStringField(event, "requestId"),
+  routeName: nullableStringField(event, "routeName"),
+  runtimeSurface: nullableStringField(event, "runtimeSurface"),
+  traceId: nullableStringField(event, "traceId"),
+  userId: nullableStringField(event, "userId"),
+  workspaceId: nullableStringField(event, "workspaceId"),
+});
 
 const requestRuntimeTraceContext = (c: AppContext): RuntimeTraceContext | null => {
   const traceContext = c.get("traceContext");

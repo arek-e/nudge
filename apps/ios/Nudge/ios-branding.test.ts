@@ -93,6 +93,37 @@ describe("Nudge iOS branding", () => {
     );
   });
 
+  test("iOS initializes Sentry with environment-specific build settings", async () => {
+    const info = await readInfoPlist();
+    const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
+    const sentry = await readFile(new URL("Nudge/NudgeSentry.swift", iosRoot), "utf8");
+    const app = await readFile(new URL("Nudge/NudgeApp.swift", iosRoot), "utf8");
+
+    expect(info.SentryDSN).toBe("$(SENTRY_DSN)");
+    expect(info.SentryTracesSampleRate).toBe("$(SENTRY_TRACES_SAMPLE_RATE)");
+    expect(project).toContain('repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";');
+    expect(project).toContain("productName = Sentry;");
+    expect(project).toContain("Sentry in Frameworks");
+    expect(project).toContain("NudgeSentry.swift in Sources");
+    expect(project).toContain(
+      'SENTRY_DSN = "https://7b82934f67f8c8cb821e57aac1bdc16c@o4510926758150144.ingest.de.sentry.io/4511679653937232";',
+    );
+    expect(project).toContain("SENTRY_TRACES_SAMPLE_RATE = 0.05;");
+    expect(app).toContain("NudgeSentry.configure()");
+    expect(sentry).toContain("import Sentry");
+    expect(sentry).toContain("SentrySDK.start");
+    expect(sentry).toContain("SentrySDK.configureScope");
+    expect(sentry).toContain('scope.setTag(value: "nudge", key: "app")');
+    expect(sentry).toContain('scope.setTag(value: "ios", key: "surface")');
+    expect(sentry).toContain('scope.setTag(value: "ios", key: "app_surface")');
+    expect(sentry).toContain('scope.setTag(value: "ios-native", key: "runtime_surface")');
+    expect(sentry).toContain('scope.setContext(value: ["appSurface": "ios"');
+    expect(sentry).toContain("options.sendDefaultPii = false");
+    expect(sentry).toContain(
+      'options.environment = bundle.nonEmptyInfoString("NudgeEnvironmentName")',
+    );
+  });
+
   test("iOS project folders and schemes use Nudge paths", async () => {
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
     const stagingScheme = await readFile(
@@ -158,6 +189,8 @@ async function readInfoPlist() {
     NudgeConvexDeploymentURL: readPlistString(plist, "NudgeConvexDeploymentURL"),
     NudgeEngineURL: readPlistString(plist, "NudgeEngineURL"),
     NudgeEnvironmentName: readPlistString(plist, "NudgeEnvironmentName"),
+    SentryDSN: readPlistString(plist, "SentryDSN"),
+    SentryTracesSampleRate: readPlistString(plist, "SentryTracesSampleRate"),
   };
 }
 

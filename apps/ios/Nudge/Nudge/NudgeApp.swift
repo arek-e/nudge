@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct NudgeApp: App {
     init() {
+        NudgeSentry.configure()
         if let publishableKey = NudgeClerkConfig.publishableKey {
             Clerk.configure(publishableKey: publishableKey)
         }

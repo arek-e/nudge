@@ -16,8 +16,10 @@
     "test:e2e": "bun test ./src/raycast-service-e2e.test.ts"
   },
   "dependencies": {
+    "@nudge/observability": "workspace:*",
     "@nudge/surface": "workspace:*",
     "@raycast/api": "1.104.21",
+    "@sentry/node": "^10.63.0",
     "react": "catalog:"
   },
   "devDependencies": {

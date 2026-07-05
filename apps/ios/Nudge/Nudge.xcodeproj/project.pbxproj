@@ -31,6 +31,8 @@
 		1A0000172C00000000000001 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0D2C00000000000001 /* ComposableArchitecture */; };
 		1A0000182C00000000000001 /* NudgeCaptureFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001132C00000000000001 /* NudgeCaptureFeature.swift */; };
 		1A0000192C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0001142C00000000000001 /* Assets.xcassets */; };
+		1A00001A2C00000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A0F2C00000000000001 /* Sentry */; };
+		1A00001B2C00000000000001 /* NudgeSentry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001152C00000000000001 /* NudgeSentry.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +55,7 @@
 		1A0001122C00000000000001 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
 		1A0001132C00000000000001 /* NudgeCaptureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeCaptureFeature.swift; sourceTree = "<group>"; };
 		1A0001142C00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0001152C00000000000001 /* NudgeSentry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeSentry.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,6 +70,7 @@
 				1A0000142C00000000000001 /* ClerkKit in Frameworks */,
 				1A0000152C00000000000001 /* ClerkKitUI in Frameworks */,
 				1A0000172C00000000000001 /* ComposableArchitecture in Frameworks */,
+				1A00001A2C00000000000001 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,6 +95,7 @@
 				1A0001102C00000000000001 /* ConvexNoteSync.swift */,
 				1A0001032C00000000000001 /* NudgeAPI.swift */,
 				1A0001112C00000000000001 /* NudgeAuth.swift */,
+				1A0001152C00000000000001 /* NudgeSentry.swift */,
 				1A0001042C00000000000001 /* LogVoiceIntent.swift */,
 				1A0001072C00000000000001 /* CalendarStats.swift */,
 				1A00010F2C00000000000001 /* NudgePresentation.swift */,
@@ -138,6 +143,7 @@
 				1A000A0A2C00000000000001 /* ClerkKit */,
 				1A000A0B2C00000000000001 /* ClerkKitUI */,
 				1A000A0D2C00000000000001 /* ComposableArchitecture */,
+				1A000A0F2C00000000000001 /* Sentry */,
 			);
 			productName = Nudge;
 			productReference = 1A0001062C00000000000001 /* Nudge.app */;
@@ -174,6 +180,7 @@
 				1A000A072C00000000000001 /* XCRemoteSwiftPackageReference "clerk-convex-swift" */,
 				1A000A092C00000000000001 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				1A000A0C2C00000000000001 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
+				1A000A0E2C00000000000001 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			productRefGroup = 1A0003032C00000000000001 /* Products */;
 			projectDirPath = "";
@@ -216,6 +223,7 @@
 				1A00000D2C00000000000001 /* CalendarViews.swift in Sources */,
 				1A00000E2C00000000000001 /* NudgePresentation.swift in Sources */,
 				1A0000162C00000000000001 /* SettingsScreen.swift in Sources */,
+				1A00001B2C00000000000001 /* NudgeSentry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -356,6 +364,8 @@
 				NUDGE_DISPLAY_NAME = Nudge;
 				NUDGE_ENGINE_URL = "http://localhost:8787";
 				NUDGE_ENVIRONMENT_NAME = local;
+				SENTRY_DSN = "https://7b82934f67f8c8cb821e57aac1bdc16c@o4510926758150144.ingest.de.sentry.io/4511679653937232";
+				SENTRY_TRACES_SAMPLE_RATE = 0.05;
 			};
 			name = Debug;
 		};
@@ -442,6 +452,8 @@
 				NUDGE_DISPLAY_NAME = Nudge;
 				NUDGE_ENGINE_URL = "https://nudge-web-staging.teampitch.workers.dev";
 				NUDGE_ENVIRONMENT_NAME = staging;
+				SENTRY_DSN = "https://7b82934f67f8c8cb821e57aac1bdc16c@o4510926758150144.ingest.de.sentry.io/4511679653937232";
+				SENTRY_TRACES_SAMPLE_RATE = 0.05;
 			};
 			name = Staging;
 		};
@@ -475,6 +487,8 @@
 				NUDGE_DISPLAY_NAME = Nudge;
 				NUDGE_ENGINE_URL = "https://nudge-web.teampitch.workers.dev";
 				NUDGE_ENVIRONMENT_NAME = production;
+				SENTRY_DSN = "https://7b82934f67f8c8cb821e57aac1bdc16c@o4510926758150144.ingest.de.sentry.io/4511679653937232";
+				SENTRY_TRACES_SAMPLE_RATE = 0.05;
 			};
 			name = Release;
 		};
@@ -552,6 +566,14 @@
 				minimumVersion = 1.25.3;
 			};
 		};
+		1A000A0E2C00000000000001 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.19.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -589,6 +611,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1A000A0C2C00000000000001 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
 			productName = ComposableArchitecture;
+		};
+		1A000A0F2C00000000000001 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A000A0E2C00000000000001 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

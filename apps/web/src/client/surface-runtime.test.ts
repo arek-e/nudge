@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { webClientRuntimeSurface } from "./sentry";
 import {
   anonymousUiEnabled,
   resolveAppSurface,
@@ -11,6 +12,8 @@ describe("web App Surface runtime", () => {
     expect(resolveAppSurface({ envSurface: "raycast" })).toBe("raycast");
     expect(resolveAppSurface({ desktopSurface: "desktop", envSurface: "web" })).toBe("desktop");
     expect(resolveAppSurface({ desktopSurface: "unexpected", envSurface: "unknown" })).toBe("web");
+    expect(webClientRuntimeSurface("desktop")).toBe("desktop-renderer");
+    expect(webClientRuntimeSurface("web")).toBe("web-browser");
   });
 
   test("polls while AI review is still processing like the iOS app", () => {

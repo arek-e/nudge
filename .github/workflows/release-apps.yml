@@ -89,14 +89,25 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GH_TOKEN: ${{ github.token }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_UPLOAD_ARTIFACTS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && 'true' || 'false' }}
         run: bun run desktop:dist:mac
 
       - name: Build unsigned macOS desktop downloads
         if: ${{ steps.release.outputs.allow_unsigned == 'true' }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_UPLOAD_ARTIFACTS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && 'true' || 'false' }}
         run: bun run desktop:dist:mac:unsigned
 
       - name: Build Raycast extension
         run: bun run raycast:build
+
+      - name: Upload Raycast source maps to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_UPLOAD_ARTIFACTS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && 'true' || 'false' }}
+        run: bun scripts/sentry-artifacts.ts sourcemaps --project nudge-raycast --path apps/raycast/dist
 
       - name: Prepare Raycast release package
         run: bun scripts/prepare-raycast-release.ts
