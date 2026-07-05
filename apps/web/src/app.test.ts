@@ -374,6 +374,61 @@ describe("web app", () => {
     }
   });
 
+  test("GET /__clerk/v1/environment normalizes stale upstream Clerk branding", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const staleApplicationName = String.fromCharCode(
+      86,
+      101,
+      115,
+      116,
+      97,
+      32,
+      83,
+      116,
+      97,
+      103,
+      105,
+      110,
+      103,
+    );
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({
+        display_config: {
+          application_name: staleApplicationName,
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      }),
+    );
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/environment",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.staging.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({
+        display_config: {
+          application_name: "Nudge",
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      });
+      expect(JSON.stringify(body)).not.toContain(staleApplicationName);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("POST /__clerk forwards request bodies through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const proxiedBodies: Array<string> = [];

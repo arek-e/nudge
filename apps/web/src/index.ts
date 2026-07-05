@@ -1039,6 +1039,8 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
           this.env,
           traceContext,
           NoteAnalysisWorkflows.markAnalysisRunRunning({
+            ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+            localDate: input.localDate,
             runId: input.runId,
             userId: input.userId,
           }),
@@ -1110,6 +1112,9 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
                 provider: extraction.provider,
               },
               localDate: input.localDate,
+              ...(input.idempotencyKey !== undefined
+                ? { idempotencyKey: input.idempotencyKey }
+                : {}),
               noteId: input.noteId,
               revisionId: input.revisionId,
               runId: input.runId,
@@ -1161,6 +1166,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
             traceContext,
             NoteAnalysisWorkflows.markAnalysisRunFailed({
               errorCode,
+              ...(input.idempotencyKey !== undefined
+                ? { idempotencyKey: input.idempotencyKey }
+                : {}),
+              localDate: input.localDate,
               runId: input.runId,
               userId: input.userId,
             }),

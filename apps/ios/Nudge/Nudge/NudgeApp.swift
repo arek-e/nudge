@@ -7,7 +7,10 @@ struct NudgeApp: App {
     init() {
         NudgeSentry.configure()
         if let publishableKey = NudgeClerkConfig.publishableKey {
-            Clerk.configure(publishableKey: publishableKey)
+            Clerk.configure(
+                publishableKey: publishableKey,
+                options: Clerk.Options(proxyUrl: NudgeClerkConfig.proxyURL)
+            )
         }
         NudgeNotifications.requestAuthorization()
         NudgeShortcuts.updateAppShortcutParameters()

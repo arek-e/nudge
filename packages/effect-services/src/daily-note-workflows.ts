@@ -19,6 +19,7 @@ import { currentWorkflowVersion, type WorkflowVersion } from "./workflow-config"
 export interface DailyNoteAnalysisWorkflowParams {
   readonly changedText: string;
   readonly documentId: string;
+  readonly idempotencyKey?: string;
   readonly kind: "daily-note-analysis";
   readonly localDate: string;
   readonly noteId: string;
@@ -47,6 +48,7 @@ export interface SaveJournalCaptureInput {
   readonly analysisProvider?: string;
   readonly bodyDocument?: unknown;
   readonly bodyText: string;
+  readonly idempotencyKey?: string;
   readonly indexPendingMemory?: (input: DailyNoteMemoryIndexInput) => Effect.Effect<void, Error>;
   readonly localDate: string;
   readonly memoryIndexLimit?: number;
@@ -87,6 +89,7 @@ export interface DailyNoteAnalysisExtractionInput {
 export interface PersistDailyNoteAnalysisResultsInput {
   readonly changedText: string;
   readonly extraction: DailyNoteAnalysisExtractionInput;
+  readonly idempotencyKey?: string;
   readonly localDate: string;
   readonly noteId: string;
   readonly revisionId: string;
@@ -167,6 +170,7 @@ function dailyNoteAnalysisParams(input: {
   readonly changedText: string;
   readonly dailyNote: UpsertDailyNoteResult;
   readonly document: JournalDocumentRecord;
+  readonly idempotencyKey?: string;
   readonly localDate: string;
   readonly requestId?: string;
   readonly run: AgentRunRecord;
@@ -177,6 +181,7 @@ function dailyNoteAnalysisParams(input: {
   return {
     changedText: input.changedText,
     documentId: input.document.id,
+    ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
     kind: "daily-note-analysis",
     localDate: input.localDate,
     noteId: input.dailyNote.note.id,
@@ -260,26 +265,52 @@ function followThroughFor(
 export const NoteAnalysisWorkflows = {
   markAnalysisRunFailed: (input: {
     readonly errorCode: string;
+    readonly idempotencyKey?: string;
+    readonly localDate?: string;
     readonly runId: string;
     readonly userId: string;
   }) =>
     Effect.gen(function* () {
       const db = yield* Db;
-      return yield* db.completeAgentRun({
+      const run = yield* db.completeAgentRun({
         errorCode: input.errorCode,
         runId: input.runId,
         status: "failed",
         userId: input.userId,
       });
+      if (input.idempotencyKey !== undefined && input.localDate !== undefined) {
+        yield* db.setDailyNoteAgentStatus({
+          errorCode: input.errorCode,
+          idempotencyKey: input.idempotencyKey,
+          localDate: input.localDate,
+          status: "failed",
+          userId: input.userId,
+        });
+      }
+      return run;
     }),
 
-  markAnalysisRunRunning: (input: { readonly runId: string; readonly userId: string }) =>
+  markAnalysisRunRunning: (input: {
+    readonly idempotencyKey?: string;
+    readonly localDate?: string;
+    readonly runId: string;
+    readonly userId: string;
+  }) =>
     Effect.gen(function* () {
       const db = yield* Db;
-      return yield* db.markAgentRunRunning({
+      const run = yield* db.markAgentRunRunning({
         runId: input.runId,
         userId: input.userId,
       });
+      if (input.idempotencyKey !== undefined && input.localDate !== undefined) {
+        yield* db.setDailyNoteAgentStatus({
+          idempotencyKey: input.idempotencyKey,
+          localDate: input.localDate,
+          status: "running",
+          userId: input.userId,
+        });
+      }
+      return run;
     }),
 
   persistAnalysisResults: (input: PersistDailyNoteAnalysisResultsInput) =>
@@ -361,6 +392,14 @@ export const NoteAnalysisWorkflows = {
         status: "completed",
         userId: input.userId,
       });
+      if (input.idempotencyKey !== undefined) {
+        yield* db.setDailyNoteAgentStatus({
+          idempotencyKey: input.idempotencyKey,
+          localDate: input.localDate,
+          status: "ready",
+          userId: input.userId,
+        });
+      }
 
       return {
         dailySummary,
@@ -451,6 +490,7 @@ export const NoteAnalysisWorkflows = {
         document: journal.document,
         localDate: input.localDate,
         ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+        ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
         run: analysisRun,
         title: journal.document.title,
         ...(input.traceparent !== undefined ? { traceparent: input.traceparent } : {}),

@@ -63,6 +63,7 @@ describe("Nudge iOS branding", () => {
     const project = await readFile(new URL("Nudge.xcodeproj/project.pbxproj", iosRoot), "utf8");
 
     expect(info.CFBundleDisplayName).toBe("$(NUDGE_DISPLAY_NAME)");
+    expect(info.ClerkProxyURL).toBe("$(CLERK_PROXY_URL)");
     expect(info.NudgeEnvironmentName).toBe("$(NUDGE_ENVIRONMENT_NAME)");
     expect(info.NudgeEngineURL).toBe("$(NUDGE_ENGINE_URL)");
     expect(info.NudgeConvexDeploymentURL).toBe("$(NUDGE_CONVEX_DEPLOYMENT_URL)");
@@ -90,6 +91,15 @@ describe("Nudge iOS branding", () => {
     );
     expect(project).toContain(
       'CLERK_PUBLISHABLE_KEY = "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios.local")).toContain(
+      'CLERK_PROXY_URL = "";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios.staging")).toContain(
+      'CLERK_PROXY_URL = "https://nudge-web-staging.teampitch.workers.dev/__clerk";',
+    );
+    expect(buildSettingsForBundle(project, "app.nudge.ios")).toContain(
+      'CLERK_PROXY_URL = "https://nudge-web.teampitch.workers.dev/__clerk";',
     );
   });
 
@@ -185,6 +195,7 @@ async function readInfoPlist() {
   return {
     CFBundleDisplayName: readPlistString(plist, "CFBundleDisplayName"),
     CFBundleSpokenName: readPlistString(plist, "CFBundleSpokenName"),
+    ClerkProxyURL: readPlistString(plist, "ClerkProxyURL"),
     INAlternativeAppNames: readPlistStringArray(plist, "INAlternativeAppNames"),
     NudgeConvexDeploymentURL: readPlistString(plist, "NudgeConvexDeploymentURL"),
     NudgeEngineURL: readPlistString(plist, "NudgeEngineURL"),

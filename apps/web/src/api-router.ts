@@ -633,6 +633,7 @@ export const apiRouter = api.router({
             aiModel: context.aiModel,
             bodyText: input.bodyText,
             ...(input.bodyDocument !== undefined ? { bodyDocument: input.bodyDocument } : {}),
+            ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
             ...(indexPendingMemory ? { indexPendingMemory } : {}),
             localDate: input.localDate,
             ...(context.traceHeaders?.["x-request-id"] !== undefined

@@ -90,4 +90,37 @@ describe("Convex DB adapter observability", () => {
       },
     });
   });
+
+  test("updates daily note agent projection status by mutation key", async () => {
+    const client = new FakeConvexClient();
+    const db = makeConvexDbService({
+      client,
+      runtimeSecret: "runtime-secret",
+      store,
+      url: "https://grandiose-hamster-855.eu-west-1.convex.cloud",
+    });
+
+    await Effect.runPromise(
+      db.setDailyNoteAgentStatus({
+        idempotencyKey: "mutation-a",
+        localDate: "2026-07-05",
+        status: "ready",
+        userId: "user-1",
+      }),
+    );
+
+    expect(client.mutations[0]?.reference).toEqual(
+      mutationReference("store:setDailyNoteAgentStatus"),
+    );
+    expect(client.mutations[0]?.args).toEqual({
+      idempotencyKey: "mutation-a",
+      localDate: "2026-07-05",
+      status: "ready",
+      user: {
+        displayName: "user-1",
+        id: "user-1",
+        runtimeSecret: "runtime-secret",
+      },
+    });
+  });
 });
