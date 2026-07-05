@@ -5,6 +5,7 @@ import {
   CaptureResultSurface,
   DailyOperatingLoopSurface,
   DailyJournalSurface,
+  NoteFirstWorkspaceSurface,
   NoteComposerSurface,
   ReviewActionSurface,
   SettingsSurface,
@@ -13,7 +14,50 @@ import {
 } from "./index";
 
 describe("note surface UI", () => {
-  test("renders an iOS-like Daily Operating Loop shell for React surfaces", () => {
+  test("renders notes as the primary Nudge workspace", () => {
+    const html = renderToStaticMarkup(
+      <NoteFirstWorkspaceSurface
+        composerSlot={
+          <NoteComposerSurface
+            bodyText="Ask Sam about launch follow-through"
+            color="yellow"
+            disabled={false}
+            statusMessage="Saved on this device"
+            onBodyTextChange={() => {}}
+            onChange={() => {}}
+            onSubmit={() => {}}
+          />
+        }
+        notes={[
+          {
+            bodyText: "Send Mara the new onboarding sketch before Friday.",
+            id: "note-1",
+            metaText: "Today",
+            title: "Mara onboarding",
+          },
+        ]}
+        reviewSlot={<p>AI review queue</p>}
+        signedInAs="Alex"
+        statusMessage="Connected"
+        utilitySlot={<p>Account menu</p>}
+      />,
+    );
+
+    expect(html).toContain("Notes");
+    expect(html).toContain("New note");
+    expect(html).toContain("Nudge reviews the notes");
+    expect(html).toContain("Mara onboarding");
+    expect(html).toContain("Send Mara the new onboarding sketch before Friday.");
+    expect(html).toContain("AI review");
+    expect(html).toContain("AI review queue");
+    expect(html).toContain("Account menu");
+    expect(html).toContain("bg-[#0f1110]");
+    expect(html).not.toContain("Daily Operating Loop");
+    expect(html).not.toContain("Daily activity");
+    expect(html).not.toContain("Signals");
+  });
+
+  test("renders a console Daily Operating Loop shell with sidebar navigation", () => {
     const html = renderToStaticMarkup(
       <DailyOperatingLoopSurface
         actionCount={3}
@@ -29,6 +73,10 @@ describe("note surface UI", () => {
     );
 
     expect(html).toContain("Daily Operating Loop");
+    expect(html).toContain("Workspace");
+    expect(html).toContain("Overview");
+    expect(html).toContain("Ask Nudge");
+    expect(html).toContain("bg-[#0f1110]");
     expect(html).toContain("Today");
     expect(html).toContain("2026-07-03");
     expect(html).toContain("Connected");
@@ -56,6 +104,8 @@ describe("note surface UI", () => {
     );
 
     expect(html).toContain("Activity");
+    expect(html).toContain("Daily activity");
+    expect(html).toContain("Activity mix");
     expect(html).toContain("3 days");
     expect(html).toContain("2 active");
     expect(html).toContain("3 notes");
@@ -273,7 +323,7 @@ describe("note surface UI", () => {
     expect(html).toContain("Dismiss");
   });
 
-  test("renders an iOS-like dark settings surface", () => {
+  test("renders a console settings surface", () => {
     const html = renderToStaticMarkup(
       <SettingsSurface
         accountName="Alex"
@@ -300,7 +350,7 @@ describe("note surface UI", () => {
     expect(html).toContain("https://nudge.example");
     expect(html).toContain("Export");
     expect(html).toContain("Delete local data");
-    expect(html).toContain("bg-[#090a0b]");
+    expect(html).toContain("bg-[#0f1110]");
     expect(html).not.toContain("bg-[#eef1f5]");
   });
 

@@ -6,7 +6,6 @@ import {
   SignIn,
   UserButton,
   useAuth,
-  useClerk,
 } from "@clerk/react";
 import { useSignIn } from "@clerk/react/legacy";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
@@ -27,14 +26,16 @@ import {
   type SurfaceActionItem,
   type SurfaceAgentRun,
   type SurfaceRefreshContext,
+  noteTextFromPayload,
+  stickyNoteTitleFromText,
   todayLocalDate,
 } from "@nudge/surface";
 import {
-  CalendarActivitySurface,
-  CaptureResultSurface,
-  DailyOperatingLoopSurface,
   NoteComposerSurface,
-  ReviewActionSurface,
+  NoteFirstWorkspaceSurface,
+  type NoteWorkspaceItem,
+  NudgeSidebarNavigationSurface,
+  type NudgeSidebarNavigationItem,
   SettingsSurface,
   type StickyColor,
 } from "@nudge/ui";
@@ -51,7 +52,6 @@ import {
   webMediaAttachmentDraft,
 } from "./browser-media";
 import { DesktopSettingsSurface } from "./DesktopSettingsSurface";
-import { JournalStack } from "./journal-stack";
 import { QuickCaptureSurface } from "./QuickCaptureSurface";
 import { initializeWebClientSentry } from "./sentry";
 import {
@@ -59,13 +59,7 @@ import {
   currentAppSurface,
   surfaceContextRefetchInterval,
 } from "./surface-runtime";
-import {
-  captureResultFromSavedWebCapture,
-  saveWebCapture,
-  type WebMediaAttachmentDraft,
-  type WebMediaMimeType,
-  type WebCaptureResult,
-} from "./web-capture";
+import { saveWebCapture, type WebMediaAttachmentDraft, type WebMediaMimeType } from "./web-capture";
 import {
   clearWebLocalDraft,
   loadWebLocalDraft,
@@ -87,21 +81,89 @@ const clerkProxyUrl = optionalEnvString(
 );
 const logoLongSrc =
   import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
+const productionAppHostname = "app.explorenudge.com";
 const desktopAuthRequestParam = "desktop_auth";
 const desktopAuthRequestValue = "browser";
 const desktopAuthCallbackParam = "desktop_callback";
 const desktopTicketParam = "desktop_ticket";
 const defaultDesktopAuthCallbackUrl = "nudge://auth/callback";
+const raycastOAuthAuthorizePath = "/raycast/oauth/authorize";
 const defaultDesktopQuickCaptureShortcut = "CommandOrControl+Shift+N";
+const authCallbackRecoveryStorageKey = "nudge.authCallbackRecoveryUrl";
 
 function requiredClerkPublishableKey() {
-  const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? import.meta.env.CLERK_PUBLISHABLE_KEY;
-  if (typeof value === "string" && value.startsWith("pk_")) return value;
+  const value = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+  if (typeof value === "string" && value.startsWith("pk_")) {
+    if (window.location.hostname === productionAppHostname && value.startsWith("pk_test_")) {
+      throw new Error("Production Nudge cannot use a test Clerk publishable key");
+    }
+    return value;
+  }
   throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
 }
 
 function optionalEnvString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function isAuthCallbackInfrastructurePath(pathname = window.location.pathname) {
+  return pathname.startsWith("/__clerk/") || pathname === "/v1/oauth_callback";
+}
+
+function recoverStaleAuthCallbackNavigation() {
+  if (!isAuthCallbackInfrastructurePath()) {
+    clearAuthCallbackRecoveryUrl();
+    return false;
+  }
+
+  const currentUrl = window.location.href;
+  if (readAuthCallbackRecoveryUrl() === currentUrl) return false;
+  writeAuthCallbackRecoveryUrl(currentUrl);
+
+  document.body.innerHTML =
+    '<main class="min-h-dvh bg-[#0f1110]" aria-label="Finishing sign-in"></main>';
+
+  const serviceWorkerCleanup =
+    "serviceWorker" in navigator
+      ? navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) =>
+            Promise.all(registrations.map((registration) => registration.unregister())),
+          )
+      : Promise.resolve([]);
+  const cacheCleanup =
+    "caches" in window
+      ? caches.keys().then((names) => Promise.all(names.map((name) => caches.delete(name))))
+      : Promise.resolve([]);
+
+  void Promise.allSettled([serviceWorkerCleanup, cacheCleanup]).finally(() =>
+    window.location.reload(),
+  );
+  return true;
+}
+
+function readAuthCallbackRecoveryUrl() {
+  try {
+    return window.sessionStorage.getItem(authCallbackRecoveryStorageKey);
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthCallbackRecoveryUrl(value: string) {
+  try {
+    window.sessionStorage.setItem(authCallbackRecoveryStorageKey, value);
+  } catch {
+    // Ignore storage failures; the reload still gives the network a chance to handle the callback.
+  }
+}
+
+function clearAuthCallbackRecoveryUrl() {
+  try {
+    window.sessionStorage.removeItem(authCallbackRecoveryStorageKey);
+  } catch {
+    // Some embedded browsers can restrict storage on callback URLs.
+  }
 }
 
 const rootRoute = createRootRoute({ component: AppShell });
@@ -156,12 +218,17 @@ function ClerkAppShell() {
   const auth = useAuth();
 
   if (!auth.isLoaded) {
-    return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
+    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
   }
 
   const desktopTicket = desktopTicketFromLocation();
   if (desktopTicket && !auth.isSignedIn)
     return <DesktopTicketSignInScreen ticket={desktopTicket} />;
+
+  if (isRaycastOAuthRequest()) {
+    if (!auth.isSignedIn) return <ClerkSignInScreen forceRedirectUrl={window.location.href} />;
+    return <RaycastOAuthBridge />;
+  }
 
   if (isDesktopBrowserAuthRequest()) {
     if (!auth.isSignedIn) return <ClerkSignInScreen forceRedirectUrl={window.location.href} />;
@@ -173,30 +240,40 @@ function ClerkAppShell() {
 }
 
 function ClerkSignInScreen(props: { readonly forceRedirectUrl?: string }) {
+  const redirectUrl = props.forceRedirectUrl ?? currentBrowserReturnUrl();
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
       {props.forceRedirectUrl ? (
-        <SignIn routing="hash" forceRedirectUrl={props.forceRedirectUrl} />
+        <SignIn
+          routing="hash"
+          fallbackRedirectUrl={redirectUrl}
+          forceRedirectUrl={redirectUrl}
+          signUpFallbackRedirectUrl={redirectUrl}
+        />
       ) : (
-        <SignIn routing="hash" />
+        <SignIn routing="hash" fallbackRedirectUrl={redirectUrl} signUpFallbackRedirectUrl="/" />
       )}
     </main>
   );
 }
 
+function currentBrowserReturnUrl() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}` || "/";
+}
+
 function ClerkUnavailableScreen() {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-4 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+      <section className="grid w-full max-w-md gap-4 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign-in unavailable</h1>
-        <p className="m-0 text-sm leading-6 text-white/70">
+        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
           Nudge could not reach the authentication service. Check the Clerk production DNS setup and
           try again.
         </p>
         <button
-          className="min-h-12 rounded-md bg-white px-4 text-sm font-semibold text-[#111] shadow-sm"
+          className="min-h-12 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
           type="button"
           onClick={() => window.location.reload()}
         >
@@ -236,17 +313,17 @@ function DesktopSignInScreen() {
   }, []);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-5 rounded-lg border border-white/10 bg-[#1f2026] p-6 shadow-2xl">
+      <section className="grid w-full max-w-md gap-5 rounded-lg bg-[#141615] p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
         <div className="grid gap-2 text-center">
           <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign in to Nudge</h1>
-          <p className="m-0 text-sm leading-6 text-white/70">
+          <p className="m-0 text-sm leading-6 text-[#a8aea9]">
             We will open your default browser so you can use your existing Apple or Google login.
           </p>
         </div>
         <button
-          className="min-h-12 rounded-md bg-white px-4 text-sm font-semibold text-[#111] shadow-sm disabled:opacity-60"
+          className="min-h-12 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
           disabled={status === "opening"}
           type="button"
           onClick={openBrowserSignIn}
@@ -254,12 +331,12 @@ function DesktopSignInScreen() {
           {status === "opening" ? "Opening browser..." : "Open browser"}
         </button>
         {status === "opened" ? (
-          <p className="m-0 text-center text-sm leading-6 text-white/70">
+          <p className="m-0 text-center text-sm leading-6 text-[#a8aea9]">
             Finish sign-in in your browser. Nudge will reopen automatically.
           </p>
         ) : null}
         {status === "error" ? (
-          <p className="m-0 text-center text-sm leading-6 text-[#ffb39e]">
+          <p className="m-0 text-center text-sm leading-6 text-[#b74417]">
             Browser sign-in could not be opened.
           </p>
         ) : null}
@@ -308,12 +385,74 @@ function DesktopBrowserAuthBridge() {
   }, []);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-3 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Opening Nudge</h1>
-        <p className="m-0 text-sm leading-6 text-white/70">
+        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
           {errorMessage ?? "Returning your signed-in session to the desktop app."}
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function RaycastOAuthBridge() {
+  const auth = useAuth();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const connectRaycast = async () => {
+      const request = raycastOAuthRequestFromLocation();
+      if (!request) {
+        if (!cancelled) setErrorMessage("The Raycast authorization request is invalid.");
+        return;
+      }
+
+      try {
+        const token = await auth.getToken();
+        if (!token) throw new Error("Signed-in Nudge session was unavailable.");
+
+        const response = await fetch("/api/auth/raycast-code", {
+          body: JSON.stringify(request),
+          credentials: "same-origin",
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        });
+        if (!response.ok) throw new Error("Could not create a Raycast authorization code");
+
+        const payload = await response.json().catch(() => null);
+        const code = stringProperty(payload, "code");
+        if (!code) throw new Error("Raycast authorization response was invalid");
+
+        const redirectUrl = new URL(request.redirectUri);
+        redirectUrl.searchParams.set("code", code);
+        if (request.state) redirectUrl.searchParams.set("state", request.state);
+        window.location.href = redirectUrl.toString();
+      } catch (error) {
+        if (!cancelled) setErrorMessage(errorMessageFrom(error, "Raycast sign-in failed."));
+      }
+    };
+
+    void connectRaycast();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth]);
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+        <h1 className="m-0 text-2xl font-semibold tracking-normal">Opening Raycast</h1>
+        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+          {errorMessage ?? "Returning your signed-in session to Raycast."}
         </p>
       </section>
     </main>
@@ -351,11 +490,11 @@ function DesktopTicketSignInScreen(props: { readonly ticket: string }) {
   }, [isLoaded, props.ticket, setActive, signIn]);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#111] px-4 py-8 text-white">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-3 rounded-lg border border-white/10 bg-[#1f2026] p-6 text-center shadow-2xl">
+      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Signing in</h1>
-        <p className="m-0 text-sm leading-6 text-white/70">
+        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
           {errorMessage ?? "Completing your browser sign-in."}
         </p>
       </section>
@@ -372,6 +511,34 @@ function isDesktopBrowserAuthRequest() {
     new URL(window.location.href).searchParams.get(desktopAuthRequestParam) ===
     desktopAuthRequestValue
   );
+}
+
+function isRaycastOAuthRequest() {
+  return new URL(window.location.href).pathname === raycastOAuthAuthorizePath;
+}
+
+function raycastOAuthRequestFromLocation() {
+  const url = new URL(window.location.href);
+  if (url.pathname !== raycastOAuthAuthorizePath) return null;
+
+  const clientId = requiredSearchParam(url, "client_id");
+  const codeChallenge = requiredSearchParam(url, "code_challenge");
+  const redirectUri = requiredSearchParam(url, "redirect_uri");
+  const scope = requiredSearchParam(url, "scope");
+  if (!clientId || !codeChallenge || !redirectUri || !scope) return null;
+
+  return {
+    clientId,
+    codeChallenge,
+    redirectUri,
+    scope,
+    ...(url.searchParams.get("state") ? { state: url.searchParams.get("state") ?? "" } : {}),
+  };
+}
+
+function requiredSearchParam(url: URL, key: string) {
+  const value = url.searchParams.get(key)?.trim();
+  return value && value.length > 0 ? value : null;
 }
 
 function desktopBrowserAuthUrl() {
@@ -427,7 +594,7 @@ function errorMessageFrom(error: unknown, fallback: string) {
 function AuthenticatedAppShell() {
   const session = useSession();
   if (!session.data) {
-    return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
+    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
   }
 
   return (
@@ -460,14 +627,14 @@ function DesktopUpdateToast() {
 
   return (
     <aside
-      className="fixed right-4 bottom-4 z-50 grid w-[calc(100%-2rem)] max-w-sm gap-3 rounded-lg border border-[#cbd5df] bg-white p-4 text-[#111827] shadow-2xl"
+      className="fixed right-4 bottom-4 z-50 grid w-[calc(100%-2rem)] max-w-sm gap-3 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_52px_rgba(0,0,0,0.32)]"
       role={state.status === "error" ? "alert" : "status"}
       aria-live="polite"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="m-0 text-sm font-semibold">{desktopUpdateTitle(state)}</p>
-          <p className="m-0 mt-1 text-sm leading-5 text-[#5b6472]">{detail}</p>
+          <p className="m-0 mt-1 text-sm leading-5 text-[#a8aea9]">{detail}</p>
         </div>
         <span
           className={`mt-1 size-2.5 shrink-0 rounded-full ${desktopUpdateIndicatorClassName(
@@ -477,13 +644,13 @@ function DesktopUpdateToast() {
         />
       </div>
       {state.status === "downloading" ? (
-        <div className="h-1.5 overflow-hidden rounded-full bg-[#e5eaf0]">
-          <div className="h-full rounded-full bg-[#f14f23]" style={{ width: progressWidth }} />
+        <div className="h-1.5 overflow-hidden rounded-full bg-[#dce6e1]">
+          <div className="h-full rounded-full bg-[#f15a24]" style={{ width: progressWidth }} />
         </div>
       ) : null}
       {action ? (
         <button
-          className="min-h-10 rounded-md bg-[#111827] px-3 text-sm font-semibold text-white shadow-sm disabled:opacity-60"
+          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
           disabled={updates.pendingAction !== null}
           type="button"
           onClick={() => {
@@ -613,10 +780,10 @@ function desktopUpdateDetail(state: NudgeDesktopUpdateState, actionMessage: stri
 }
 
 function desktopUpdateIndicatorClassName(status: NudgeDesktopUpdateStatus) {
-  if (status === "downloaded") return "bg-[#138a46]";
+  if (status === "downloaded") return "bg-[#2a7251]";
   if (status === "error") return "bg-[#dc2626]";
-  if (status === "downloading") return "bg-[#f14f23]";
-  return "bg-[#2563eb]";
+  if (status === "downloading") return "bg-[#f15a24]";
+  return "bg-[#2f80c6]";
 }
 
 function parseDesktopUpdateActionResult(value: unknown): NudgeDesktopUpdateActionResult | null {
@@ -688,101 +855,178 @@ function NotesScreen() {
     : latestRun
       ? agentRunText(latestRun)
       : "Connected";
-  const signalCount = surfaceContext.data?.signals.length ?? 0;
+  const notes = notesFromSurfaceContext(surfaceContext.data);
 
   return (
-    <DailyOperatingLoopSurface
-      actionCount={pendingActions.length}
-      activitySlot={
-        <CalendarActivitySurface
-          currentDate={localDate}
-          days={surfaceContext.data?.calendarDays ?? []}
-        />
-      }
-      captureSlot={
+    <NoteFirstWorkspaceSurface
+      composerSlot={
         <NewNoteComposer
-          actionCount={pendingActions.length}
           existingJournalText={surfaceContext.data?.journal?.bodyText}
           localDate={localDate}
-          signalCount={signalCount}
-        />
-      }
-      currentDate={localDate}
-      journalSlot={
-        <JournalStack
-          journal={surfaceContext.data?.journal}
-          signedInAs={signedInAs}
-          signals={surfaceContext.data?.signals ?? []}
         />
       }
       navigationSlot={
-        <>
-          <button
-            className="flex min-h-10 items-center gap-3 rounded-md border border-white/7 bg-[#131518] px-3 text-left text-sm font-semibold text-[#edeae0] shadow-sm"
-            type="button"
-            onClick={() => navigate({ to: "/" })}
-          >
-            <img className="h-7 w-auto" src={logoLongSrc} alt="Nudge" />
-          </button>
-          <div className="flex items-center gap-2">
-            <button
-              className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0] shadow-sm"
-              type="button"
-              onClick={() => navigate({ to: "/settings" })}
-            >
-              Settings
-            </button>
-            {anonymousUiEnabled() ? <AnonymousSessionPill /> : <ClerkSignOutButton />}
-          </div>
-        </>
+        <MainSidebarNavigation
+          active="overview"
+          signedInAs={signedInAs}
+          statusMessage={statusMessage}
+          onNavigate={navigate}
+        />
       }
+      notes={notes}
       reviewSlot={
-        <ActionReviewPanel context={surfaceContext.data} loading={surfaceContext.isLoading} />
+        <NotesActionReviewPanel context={surfaceContext.data} loading={surfaceContext.isLoading} />
       }
-      signalCount={signalCount}
       signedInAs={signedInAs}
       statusMessage={statusMessage}
+      utilitySlot={
+        <MobileNoteWorkspaceUtilities
+          pendingActionCount={pendingActions.length}
+          onNavigate={navigate}
+        />
+      }
     />
   );
 }
 
+function MobileNoteWorkspaceUtilities(props: {
+  readonly pendingActionCount: number;
+  readonly onNavigate: ReturnType<typeof useNavigate>;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {props.pendingActionCount > 0 ? (
+        <button
+          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+          type="button"
+          onClick={() => props.onNavigate({ to: "/review" })}
+        >
+          {props.pendingActionCount} to review
+        </button>
+      ) : null}
+      <button
+        className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+        type="button"
+        onClick={() => props.onNavigate({ to: "/settings" })}
+      >
+        Settings
+      </button>
+      {anonymousUiEnabled() ? <AnonymousSessionPill /> : <UserButton />}
+    </div>
+  );
+}
+
+function MainSidebarNavigation(props: {
+  readonly active: NudgeSidebarNavigationItem["key"];
+  readonly signedInAs: string;
+  readonly statusMessage: string;
+  readonly onNavigate: ReturnType<typeof useNavigate>;
+}) {
+  const items: ReadonlyArray<NudgeSidebarNavigationItem> = [
+    {
+      active: props.active === "overview",
+      group: "Workspace",
+      key: "overview",
+      label: "Notes",
+      onSelect: () => props.onNavigate({ to: "/" }),
+    },
+    {
+      active: props.active === "actions" || props.active === "review",
+      group: "Workspace",
+      key: "actions",
+      label: "AI Review",
+      onSelect: () => props.onNavigate({ to: "/review" }),
+    },
+    {
+      active: props.active === "ask",
+      group: "Review",
+      key: "ask",
+      label: "Ask Nudge",
+      onSelect: () => props.onNavigate({ to: "/ask" }),
+    },
+    {
+      active: props.active === "settings",
+      group: "System",
+      key: "settings",
+      label: "Settings",
+      onSelect: () => props.onNavigate({ to: "/settings" }),
+    },
+  ];
+
+  return (
+    <NudgeSidebarNavigationSurface
+      footerSlot={anonymousUiEnabled() ? <AnonymousSessionPill /> : <UserButton />}
+      items={items}
+      signedInAs={props.signedInAs}
+      statusMessage={props.statusMessage}
+    />
+  );
+}
+
+function notesFromSurfaceContext(
+  context: SurfaceRefreshContext | undefined,
+): ReadonlyArray<NoteWorkspaceItem> {
+  const notes: NoteWorkspaceItem[] = [];
+  const signals = context?.signals ?? [];
+  for (const signal of signals) {
+    const bodyText = noteTextFromPayload(signal.payload).trim();
+    if (!bodyText) continue;
+    notes.push({
+      bodyText,
+      id: signal.id,
+      metaText: noteMetaText(signal.occurredAt, signal.source),
+      title: stickyNoteTitleFromText(bodyText),
+    });
+  }
+
+  const journalText = context?.journal?.bodyText.trim();
+  if (notes.length === 0 && journalText) {
+    notes.push({
+      bodyText: journalText,
+      id: context?.journal?.id ?? "journal-note",
+      metaText: context?.journal?.localDate ?? "Today",
+      title: stickyNoteTitleFromText(journalText),
+    });
+  }
+
+  return notes.slice(0, 12);
+}
+
+function noteMetaText(occurredAt: string, source: string) {
+  return `${formatShortDateTime(occurredAt)} · ${labelFromIdentifier(source)}`;
+}
+
+function formatShortDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return date.toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+  });
+}
+
+function labelFromIdentifier(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
 function AnonymousSessionPill() {
   return (
-    <div className="flex min-h-10 items-center rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0] shadow-sm">
+    <div className="flex min-h-10 items-center rounded-lg bg-[#12331f] px-3 text-sm font-semibold text-[#78e18c] shadow-[inset_0_0_0_1px_rgba(87,214,109,0.18)]">
       Local
     </div>
   );
 }
 
-function ClerkSignOutButton() {
-  const clerk = useClerk();
-  const signOut = useMutation({
-    mutationFn: async () => {
-      await clerk.signOut();
-    },
-    onSettled: () => {
-      setSessionTokenResolver(null);
-      queryClient.clear();
-    },
-  });
-
-  return (
-    <button
-      className="min-h-10 rounded-md bg-[#579ef5] px-3 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-60"
-      disabled={signOut.isPending}
-      type="button"
-      onClick={() => signOut.mutate()}
-    >
-      Sign out
-    </button>
-  );
-}
-
 function NewNoteComposer(props: {
-  readonly actionCount: number;
   readonly existingJournalText: string | undefined;
   readonly localDate: string;
-  readonly signalCount: number;
 }) {
   const initialDraftRef = useRef<WebInitialLocalDraft | null>(null);
   if (initialDraftRef.current === null) {
@@ -792,7 +1036,6 @@ function NewNoteComposer(props: {
   const [bodyText, setBodyText] = useState(initialDraft.bodyText);
   const [color, setColor] = useState<StickyColor>("yellow");
   const [continuationText, setContinuationText] = useState(initialDraft.continuationText);
-  const [captureResult, setCaptureResult] = useState<WebCaptureResult | null>(null);
   const [mediaAttachments, setMediaAttachments] = useState<ReadonlyArray<WebMediaAttachmentDraft>>(
     [],
   );
@@ -809,10 +1052,7 @@ function NewNoteComposer(props: {
       const trailingNote = continuationText.trim();
       const attachmentNote = mediaAttachments.map((attachment) => attachment.label).join("\n");
       const noteText = leadingNote || (trailingNote ? "" : attachmentNote);
-      const captureTitle =
-        [leadingNote, trailingNote].filter((text) => text.length > 0).join("\n\n") ||
-        attachmentNote;
-      const saved = await saveWebCapture({
+      return await saveWebCapture({
         attachments: { color },
         ...(props.existingJournalText !== undefined
           ? { existingJournalText: props.existingJournalText }
@@ -822,24 +1062,15 @@ function NewNoteComposer(props: {
         note: noteText,
         ...(trailingNote ? { trailingNote } : {}),
       });
-      return { noteText: captureTitle, saved };
     },
     onError: (error) =>
       setStatusMessage(error instanceof Error ? error.message : "Could not capture note."),
-    onSuccess: (data) => {
-      setCaptureResult(
-        captureResultFromSavedWebCapture({
-          actionCount: props.actionCount,
-          noteText: data.noteText,
-          saved: data.saved,
-          signalCount: props.signalCount,
-        }),
-      );
+    onSuccess: (saved) => {
       setBodyText("");
       setContinuationText("");
       setMediaAttachments([]);
       clearCurrentWebLocalDraft(props.localDate);
-      setStatusMessage("Captured");
+      setStatusMessage(saved.analysisRun ? "Added. AI review queued." : "Added");
       void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
     },
   });
@@ -986,17 +1217,6 @@ function NewNoteComposer(props: {
         onClose={() => setVoiceRecorderOpen(false)}
         onImportAudio={() => voiceInputRef.current?.click()}
       />
-      {captureResult ? (
-        <CaptureResultSurface
-          actionCount={captureResult.actionCount}
-          items={captureResult.items}
-          references={captureResult.references}
-          signalCount={captureResult.signalCount}
-          sourceCount={captureResult.sourceCount}
-          summary={captureResult.summary}
-          title={captureResult.title}
-        />
-      ) : null}
     </div>
   );
 }
@@ -1247,13 +1467,13 @@ function DrawingCaptureDialog(props: {
       <section
         aria-label="Drawing"
         aria-modal="true"
-        className="grid w-full max-w-3xl gap-4 rounded-lg border border-white/7 bg-[#131518] p-4 text-[#edeae0] shadow-[0_24px_90px_rgba(0,0,0,0.45)]"
+        className="grid w-full max-w-3xl gap-4 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_90px_rgba(0,0,0,0.42)]"
         role="dialog"
       >
         <header className="flex items-center justify-between gap-3">
           <h2 className="m-0 text-lg font-semibold">Drawing</h2>
           <button
-            className="min-h-9 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0]"
+            className="min-h-9 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
             type="button"
             onClick={props.onClose}
           >
@@ -1262,7 +1482,7 @@ function DrawingCaptureDialog(props: {
         </header>
         <canvas
           aria-label="Drawing canvas"
-          className="h-72 w-full touch-none rounded-md border border-white/10 bg-[#f5eecf]"
+          className="h-72 w-full touch-none rounded-lg bg-[#f5eecf] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]"
           height={540}
           ref={canvasRef}
           width={960}
@@ -1273,14 +1493,14 @@ function DrawingCaptureDialog(props: {
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
-            className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-4 text-sm font-semibold text-[#edeae0]"
+            className="min-h-10 rounded-lg bg-[#191c1a] px-4 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
             type="button"
             onClick={clearDrawing}
           >
             Clear
           </button>
           <button
-            className="min-h-10 rounded-md bg-[#579ef5] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+            className="min-h-10 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
             disabled={!hasDrawing}
             type="button"
             onClick={attachDrawing}
@@ -1411,31 +1631,31 @@ function VoiceCaptureDialog(props: {
       <section
         aria-label="Voice"
         aria-modal="true"
-        className="grid w-full max-w-md gap-4 rounded-lg border border-white/7 bg-[#131518] p-4 text-[#edeae0] shadow-[0_24px_90px_rgba(0,0,0,0.45)]"
+        className="grid w-full max-w-md gap-4 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_90px_rgba(0,0,0,0.42)]"
         role="dialog"
       >
         <header className="flex items-center justify-between gap-3">
           <h2 className="m-0 text-lg font-semibold">Voice</h2>
           <button
-            className="min-h-9 rounded-md border border-white/7 bg-[#1f2125] px-3 text-sm font-semibold text-[#edeae0]"
+            className="min-h-9 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
             type="button"
             onClick={close}
           >
             Close
           </button>
         </header>
-        <div className="grid min-h-28 place-items-center rounded-lg border border-white/7 bg-[#090a0b]/55 p-4">
+        <div className="grid min-h-28 place-items-center rounded-lg bg-[#0f1110] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
           <p className="m-0 text-4xl font-semibold tabular-nums">
             {formatElapsedSeconds(elapsedSeconds)}
           </p>
           {statusMessage ? (
-            <p className="m-0 mt-2 text-sm font-medium text-[#a1a6ad]">{statusMessage}</p>
+            <p className="m-0 mt-2 text-sm font-medium text-[#8d938f]">{statusMessage}</p>
           ) : null}
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {recordingState === "recording" ? (
             <button
-              className="min-h-10 rounded-md bg-[#d65f84] px-4 text-sm font-semibold text-white shadow-sm"
+              className="min-h-10 rounded-lg bg-[#f15a24] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(241,90,36,0.24)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
               type="button"
               onClick={stopRecording}
             >
@@ -1443,7 +1663,7 @@ function VoiceCaptureDialog(props: {
             </button>
           ) : (
             <button
-              className="min-h-10 rounded-md bg-[#579ef5] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+              className="min-h-10 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
               disabled={recordingState === "ready"}
               type="button"
               onClick={() => void startRecording()}
@@ -1452,7 +1672,7 @@ function VoiceCaptureDialog(props: {
             </button>
           )}
           <button
-            className="min-h-10 rounded-md border border-white/7 bg-[#1f2125] px-4 text-sm font-semibold text-[#edeae0]"
+            className="min-h-10 rounded-lg bg-[#191c1a] px-4 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
             type="button"
             onClick={props.onImportAudio}
           >
@@ -1460,7 +1680,7 @@ function VoiceCaptureDialog(props: {
           </button>
         </div>
         <button
-          className="min-h-10 rounded-md bg-[#40c792] px-4 text-sm font-semibold text-[#07111d] shadow-sm disabled:opacity-50"
+          className="min-h-10 rounded-lg bg-[#2a7251] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(42,114,81,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={!recordedBlob}
           type="button"
           onClick={attachRecording}
@@ -1516,7 +1736,7 @@ function formatElapsedSeconds(value: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function ActionReviewPanel(props: {
+function NotesActionReviewPanel(props: {
   readonly context: SurfaceRefreshContext | undefined;
   readonly loading: boolean;
 }) {
@@ -1536,34 +1756,91 @@ function ActionReviewPanel(props: {
   });
 
   return (
-    <>
-      <p className="m-0 text-sm leading-6 text-[#a1a6ad]">
-        {latestRun ? agentRunText(latestRun) : props.loading ? "Loading review queue." : "Idle"}
+    <section className="grid gap-3">
+      <p className="m-0 text-sm leading-6 text-pretty text-[#8d938f]">
+        {latestRun
+          ? agentRunText(latestRun)
+          : props.loading
+            ? "Loading review queue."
+            : "Nudge is watching for useful follow-through."}
       </p>
-      <section className="grid gap-3">
-        {pendingActions.length > 0 ? (
-          pendingActions.map((action) => (
-            <ReviewActionSurface
-              body={action.body}
-              confidencePercent={Math.round(action.confidence * 100)}
-              disabled={updateStatus.isPending}
-              followThroughText={followThroughText(action)}
-              key={action.id}
-              kind={action.kind}
-              status={action.status}
-              title={action.title}
-              onAccept={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
-              onComplete={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
-              onDismiss={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
-            />
-          ))
-        ) : (
-          <section className="rounded-lg border border-dashed border-white/12 bg-[#131518]/70 p-4">
-            <p className="m-0 text-sm font-medium text-[#a1a6ad]">No suggestions waiting.</p>
-          </section>
-        )}
-      </section>
-    </>
+      {pendingActions.length > 0 ? (
+        pendingActions.map((action) => (
+          <NoteReviewActionCard
+            action={action}
+            disabled={updateStatus.isPending}
+            key={action.id}
+            onAccept={() => updateStatus.mutate({ itemId: action.id, status: "accepted" })}
+            onComplete={() => updateStatus.mutate({ itemId: action.id, status: "completed" })}
+            onDismiss={() => updateStatus.mutate({ itemId: action.id, status: "dismissed" })}
+          />
+        ))
+      ) : (
+        <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+          <p className="m-0 text-sm font-semibold text-[#f4f5f1]">No suggestions waiting.</p>
+          <p className="m-0 mt-2 text-sm leading-6 text-pretty text-[#8d938f]">
+            Add notes with commitments, reminders, or follow-ups. Suggested actions will appear here
+            for approval.
+          </p>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function NoteReviewActionCard(props: {
+  readonly action: SurfaceActionItem;
+  readonly disabled: boolean;
+  readonly onAccept: () => void;
+  readonly onComplete: () => void;
+  readonly onDismiss: () => void;
+}) {
+  return (
+    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+            {labelFromIdentifier(props.action.kind)} · {props.action.status}
+          </p>
+          <h3 className="m-0 mt-1 text-base font-semibold text-balance text-[#f4f5f1]">
+            {props.action.title}
+          </h3>
+        </div>
+        <p className="m-0 rounded-lg bg-[#12331f] px-2.5 py-1 text-xs font-semibold text-[#78e18c] tabular-nums">
+          {Math.round(props.action.confidence * 100)}%
+        </p>
+      </div>
+      <p className="m-0 mt-3 text-sm leading-6 text-pretty text-[#d7dbd6]">{props.action.body}</p>
+      <p className="m-0 mt-3 rounded-lg bg-[#0f1110] px-3 py-2 text-xs font-semibold text-[#a8aea9] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
+        {followThroughText(props.action)}
+      </p>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <button
+          className="min-h-10 rounded-lg bg-[#14211e] px-2 text-xs font-semibold text-[#f7fbf6] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          disabled={props.disabled}
+          type="button"
+          onClick={props.onAccept}
+        >
+          Accept
+        </button>
+        <button
+          className="min-h-10 rounded-lg bg-[#1d201e] px-2 text-xs font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          disabled={props.disabled}
+          type="button"
+          onClick={props.onComplete}
+        >
+          Done
+        </button>
+        <button
+          className="min-h-10 rounded-lg bg-[#1d201e] px-2 text-xs font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          disabled={props.disabled}
+          type="button"
+          onClick={props.onDismiss}
+        >
+          Dismiss
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -1600,18 +1877,18 @@ function AskScreen() {
   };
 
   return (
-    <main className="min-h-dvh bg-[#eef1f5] text-[#111827]">
+    <main className="min-h-dvh bg-[#0f1110] text-[#e7e9e4]">
       <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-4 sm:px-6">
-        <header className="flex min-h-14 items-center justify-between gap-3 border-b border-[#cbd5df] pb-4">
+        <header className="flex min-h-14 items-center justify-between gap-3">
           <button
-            className="flex items-center gap-3 text-left"
+            className="flex min-h-10 items-center gap-3 rounded-lg bg-[#141615] px-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
             type="button"
             onClick={() => navigate({ to: "/" })}
           >
             <img className="h-8 w-auto" src={logoLongSrc} alt="Nudge" />
           </button>
           <button
-            className="min-h-10 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm font-semibold text-[#1f2937] shadow-sm"
+            className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
             type="button"
             onClick={() => navigate({ to: "/review" })}
           >
@@ -1620,29 +1897,29 @@ function AskScreen() {
         </header>
 
         <form
-          className="grid gap-4 rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm"
+          className="grid gap-4 rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]"
           onSubmit={(event) => {
             event.preventDefault();
             void submitMessage();
           }}
         >
           <div>
-            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
               Ask Nudge
             </p>
-            <h1 className="m-0 mt-1 text-xl font-semibold text-[#111827]">Agent</h1>
+            <h1 className="m-0 mt-1 text-xl font-semibold text-balance text-[#f4f5f1]">Agent</h1>
           </div>
           <textarea
-            className="min-h-36 resize-y rounded-md border border-[#c3ccd7] bg-[#fbfcfd] px-3 py-3 text-base leading-6 outline-none focus:border-[#111827]"
+            className="min-h-36 resize-y rounded-lg bg-[#0f1110] px-3 py-3 text-base leading-6 text-[#f4f5f1] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] outline-none placeholder:text-[#75877f] focus:shadow-[inset_0_0_0_1px_rgba(241,90,36,0.82),0_0_0_3px_rgba(241,90,36,0.14)]"
             disabled={sending}
             placeholder="Ask about your notes, commitments, or next move."
             value={message}
             onChange={(event) => setMessage(event.currentTarget.value)}
           />
           <div className="flex items-center justify-between gap-3">
-            <p className="m-0 text-sm text-[#667085]">{statusMessage}</p>
+            <p className="m-0 text-sm text-[#8d938f]">{statusMessage}</p>
             <button
-              className="min-h-11 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
               disabled={sending || !message.trim()}
               type="submit"
             >
@@ -1650,8 +1927,10 @@ function AskScreen() {
             </button>
           </div>
           {reply ? (
-            <section className="rounded-md border border-[#d2d9e2] bg-[#f8fafc] p-4">
-              <p className="m-0 text-sm leading-6 whitespace-pre-wrap text-[#1f2937]">{reply}</p>
+            <section className="rounded-lg bg-[#0f1110] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
+              <p className="m-0 text-sm leading-6 text-pretty whitespace-pre-wrap text-[#d7dbd6]">
+                {reply}
+              </p>
             </section>
           ) : null}
         </form>
@@ -1676,18 +1955,18 @@ function ReviewScreen() {
   const receipts = inbox.data?.receipts ?? [];
 
   return (
-    <main className="min-h-dvh bg-[#eef1f5] text-[#111827]">
+    <main className="min-h-dvh bg-[#0f1110] text-[#e7e9e4]">
       <div className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-4 sm:px-6">
-        <header className="flex min-h-14 items-center justify-between gap-3 border-b border-[#cbd5df] pb-4">
+        <header className="flex min-h-14 items-center justify-between gap-3">
           <button
-            className="flex items-center gap-3 text-left"
+            className="flex min-h-10 items-center gap-3 rounded-lg bg-[#141615] px-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
             type="button"
             onClick={() => navigate({ to: "/" })}
           >
             <img className="h-8 w-auto" src={logoLongSrc} alt="Nudge" />
           </button>
           <button
-            className="min-h-10 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm font-semibold text-[#1f2937] shadow-sm"
+            className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
             type="button"
             onClick={() => navigate({ to: "/ask" })}
           >
@@ -1698,14 +1977,16 @@ function ReviewScreen() {
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="grid content-start gap-3">
             <div>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
                 Review Inbox
               </p>
-              <h1 className="m-0 mt-1 text-xl font-semibold text-[#111827]">Proposals</h1>
+              <h1 className="m-0 mt-1 text-xl font-semibold text-balance text-[#f4f5f1]">
+                Proposals
+              </h1>
             </div>
             {inbox.isLoading ? (
-              <section className="rounded-lg border border-dashed border-[#b7c1cd] bg-white/70 p-4">
-                <p className="m-0 text-sm font-medium text-[#596475]">Loading.</p>
+              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+                <p className="m-0 text-sm font-medium text-[#8d938f]">Loading.</p>
               </section>
             ) : items.length > 0 ? (
               items.map((item) => (
@@ -1717,21 +1998,21 @@ function ReviewScreen() {
                 />
               ))
             ) : (
-              <section className="rounded-lg border border-dashed border-[#b7c1cd] bg-white/70 p-4">
-                <p className="m-0 text-sm font-medium text-[#596475]">No proposals waiting.</p>
+              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+                <p className="m-0 text-sm font-medium text-[#8d938f]">No proposals waiting.</p>
               </section>
             )}
           </div>
 
           <aside className="grid content-start gap-3">
-            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
               Receipts
             </p>
             {receipts.length > 0 ? (
               receipts.map((item) => <ReviewReceiptCard key={item.id} receipt={item} />)
             ) : (
-              <section className="rounded-lg border border-dashed border-[#b7c1cd] bg-white/70 p-4">
-                <p className="m-0 text-sm font-medium text-[#596475]">No receipts yet.</p>
+              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+                <p className="m-0 text-sm font-medium text-[#8d938f]">No receipts yet.</p>
               </section>
             )}
           </aside>
@@ -1752,19 +2033,21 @@ function ReviewInboxItemCard(props: {
   const proposal = props.item.proposal;
   const explanation = proposal.explanation;
   return (
-    <article className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
+    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
             {proposal.kind.replace("_", " ")}
           </p>
-          <h2 className="m-0 mt-1 text-lg font-semibold text-[#111827]">{proposal.title}</h2>
+          <h2 className="m-0 mt-1 text-lg font-semibold text-balance text-[#f4f5f1]">
+            {proposal.title}
+          </h2>
         </div>
-        <p className="m-0 rounded-md bg-[#ecfdf3] px-2 py-1 text-xs font-semibold text-[#027a48]">
+        <p className="m-0 rounded-lg bg-[#12331f] px-2 py-1 text-xs font-semibold text-[#78e18c]">
           {Math.round(explanation.confidence * 100)}%
         </p>
       </div>
-      <p className="m-0 mt-3 text-sm leading-6 text-[#374151]">{proposal.body}</p>
+      <p className="m-0 mt-3 text-sm leading-6 text-pretty text-[#d7dbd6]">{proposal.body}</p>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">
         <ReviewFact label="Source" value={explanation.source.label} />
         <ReviewFact label="Reason" value={explanation.reason} />
@@ -1773,7 +2056,7 @@ function ReviewInboxItemCard(props: {
       </dl>
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <button
-          className="min-h-10 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm font-semibold text-[#1f2937] disabled:opacity-50"
+          className="min-h-10 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={() => props.onReview({ decision: "rejected", proposalId: proposal.id })}
@@ -1781,7 +2064,7 @@ function ReviewInboxItemCard(props: {
           Reject
         </button>
         <button
-          className="min-h-10 rounded-md bg-[#111827] px-3 text-sm font-semibold text-white disabled:opacity-50"
+          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={() => props.onReview({ decision: "accepted", proposalId: proposal.id })}
@@ -1795,21 +2078,21 @@ function ReviewInboxItemCard(props: {
 
 function ReviewFact(props: { readonly label: string; readonly value: string }) {
   return (
-    <div className="rounded-md bg-[#f8fafc] p-3">
-      <dt className="text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+    <div className="rounded-lg bg-[#0f1110] p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
+      <dt className="text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
         {props.label}
       </dt>
-      <dd className="m-0 mt-1 text-sm leading-5 text-[#1f2937]">{props.value}</dd>
+      <dd className="m-0 mt-1 text-sm leading-5 text-pretty text-[#d7dbd6]">{props.value}</dd>
     </div>
   );
 }
 
 function ReviewReceiptCard(props: { readonly receipt: AgentReceipt }) {
   return (
-    <article className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
-      <p className="m-0 text-sm font-semibold text-[#111827]">{props.receipt.action}</p>
-      <p className="m-0 mt-2 text-sm leading-6 text-[#4b5563]">{props.receipt.why}</p>
-      <p className="m-0 mt-2 text-xs text-[#667085]">{formatDateTime(props.receipt.createdAt)}</p>
+    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <p className="m-0 text-sm font-semibold text-[#f4f5f1]">{props.receipt.action}</p>
+      <p className="m-0 mt-2 text-sm leading-6 text-pretty text-[#d7dbd6]">{props.receipt.why}</p>
+      <p className="m-0 mt-2 text-xs text-[#8d938f]">{formatDateTime(props.receipt.createdAt)}</p>
     </article>
   );
 }
@@ -2086,9 +2369,6 @@ function surfaceDisplayName(surface: AppSurface) {
   }
 }
 
-const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Missing #root element");
-
 function NudgeConvexProvider(props: { readonly children: ReactNode }) {
   if (anonymousUiEnabled()) return <>{props.children}</>;
   if (!clerkPublishableKey) throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
@@ -2097,10 +2377,12 @@ function NudgeConvexProvider(props: { readonly children: ReactNode }) {
     <ClerkProvider
       publishableKey={clerkPublishableKey}
       afterSignOutUrl="/"
+      signInFallbackRedirectUrl={currentBrowserReturnUrl()}
+      signUpFallbackRedirectUrl="/"
       {...(clerkProxyUrl ? { proxyUrl: clerkProxyUrl } : {})}
     >
       <ClerkLoading>
-        <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />
+        <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />
       </ClerkLoading>
       <ClerkFailed>
         <ClerkUnavailableScreen />
@@ -2144,7 +2426,7 @@ function ClerkTokenBridge(props: { readonly children: ReactNode }) {
   }, [auth.getToken, auth.isLoaded, auth.isSignedIn]);
 
   if (!auth.isLoaded || readyState !== expectedState) {
-    return <main className="min-h-dvh bg-[#eef1f5]" aria-label="Loading Nudge" />;
+    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
   }
 
   return <>{props.children}</>;
@@ -2163,12 +2445,17 @@ function ConvexUserMaterializer(props: { readonly children: ReactNode }) {
   return <>{props.children}</>;
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <NudgeConvexProvider>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </NudgeConvexProvider>
-  </StrictMode>,
-);
+if (!recoverStaleAuthCallbackNavigation()) {
+  const rootElement = document.getElementById("root");
+  if (!rootElement) throw new Error("Missing #root element");
+
+  createRoot(rootElement).render(
+    <StrictMode>
+      <NudgeConvexProvider>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </NudgeConvexProvider>
+    </StrictMode>,
+  );
+}
