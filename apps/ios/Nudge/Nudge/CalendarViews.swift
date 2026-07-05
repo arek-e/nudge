@@ -84,6 +84,377 @@ struct TodayCalendarScreen: View {
     }
 }
 
+struct DailyReviewScreen: View {
+    let store: StoreOf<NudgeCaptureFeature>
+
+    var body: some View {
+        let snapshot = store.dailyReviewSnapshot
+
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                DailyReviewHeader(snapshot: snapshot)
+                    .padding(.top, 18)
+
+                SyncStatusMatrixView(snapshot: snapshot.syncStatus)
+                    .frame(maxWidth: .infinity)
+
+                DailyReviewMetricGrid(rows: snapshot.metricRows)
+
+                if snapshot.hasContent {
+                    if !snapshot.noteRows.isEmpty {
+                        DailyReviewSection(title: "Notes", count: snapshot.noteRows.count) {
+                            ForEach(snapshot.noteRows) { row in
+                                DailyReviewNoteCard(row: row)
+                            }
+                        }
+                    }
+
+                    if !snapshot.openActionRows.isEmpty {
+                        DailyReviewSection(title: "Open actions", count: snapshot.openActionRows.count) {
+                            ForEach(snapshot.openActionRows) { row in
+                                DailyReviewActionCard(row: row)
+                            }
+                        }
+                    }
+
+                    if !snapshot.signalRows.isEmpty {
+                        DailyReviewSection(title: "Signals", count: snapshot.signalRows.count) {
+                            ForEach(snapshot.signalRows) { row in
+                                DailyReviewSignalCard(row: row)
+                            }
+                        }
+                    }
+                } else {
+                    DailyReviewEmptyCard(localDate: snapshot.localDate)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 34)
+        }
+        .task { await store.send(.refreshContext).finish() }
+        .background(Color.appBackground.ignoresSafeArea())
+        .navigationTitle("Daily Review")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.appBackground, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct DailyReviewHeader: View {
+    let snapshot: DailyReviewSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(CalendarFormatting.title(for: snapshot.localDate))
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.accentInsight)
+                Text(snapshot.title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DailyReviewMetricGrid: View {
+    let rows: [DailyReviewMetricRow]
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(rows) { row in
+                DailyReviewMetricCard(row: row)
+            }
+        }
+    }
+}
+
+private struct DailyReviewMetricCard: View {
+    let row: DailyReviewMetricRow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: row.systemImageName)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(row.tone.color)
+                .frame(width: 32, height: 32)
+                .background(row.tone.color.opacity(0.13), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.value)
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text(row.label)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .textCase(.uppercase)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 74)
+        .background(Color.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.borderSubtle, lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.label): \(row.value)")
+    }
+}
+
+private struct DailyReviewSection<Content: View>: View {
+    let title: String
+    let count: Int
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .textCase(.uppercase)
+
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .monospacedDigit()
+                    .padding(.horizontal, 7)
+                    .frame(height: 22)
+                    .background(Color.surfaceRaised, in: Capsule())
+            }
+
+            VStack(spacing: 10) {
+                content
+            }
+        }
+    }
+}
+
+private struct DailyReviewNoteCard: View {
+    let row: DailyReviewNoteRow
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "note.text")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.accentNote)
+                .frame(width: 32, height: 32)
+                .background(Color.accentNote.opacity(0.13), in: Circle())
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(row.text)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                DailyReviewStagePill(stage: row.stage)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.borderSubtle, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DailyReviewActionCard: View {
+    let row: DailyReviewActionRow
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checklist")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.accentSuccess)
+                .frame(width: 32, height: 32)
+                .background(Color.accentSuccess.opacity(0.13), in: Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.title)
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.textPrimary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+
+                    Spacer(minLength: 6)
+
+                    Text(row.status)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.accentSuccess)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                }
+
+                if !row.body.isEmpty {
+                    Text(row.body)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.borderSubtle, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DailyReviewSignalCard: View {
+    let row: DailyReviewSignalRow
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "waveform.path.ecg")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.accentSignal)
+                .frame(width: 32, height: 32)
+                .background(Color.accentSignal.opacity(0.13), in: Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(row.title)
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(row.detail)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.borderSubtle, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DailyReviewStagePill: View {
+    let stage: CaptureStage
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: stage.dailyReviewIcon)
+                .font(.system(size: 10, weight: .bold))
+            Text(stage.label ?? "Draft")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(stage.dailyReviewTint)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(stage.dailyReviewTint.opacity(0.12), in: Capsule())
+    }
+}
+
+private struct DailyReviewEmptyCard: View {
+    let localDate: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar.badge.plus")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.accentStreak)
+                .frame(width: 34, height: 34)
+                .background(Color.accentStreak.opacity(0.13), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("No notes captured today")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                Text(localDate)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .monospacedDigit()
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.borderSubtle, lineWidth: 1))
+    }
+}
+
+private extension DailyReviewMetricTone {
+    var color: Color {
+        switch self {
+        case .action:
+            Color.accentSuccess
+        case .insight:
+            Color.accentInsight
+        case .note:
+            Color.accentNote
+        case .signal:
+            Color.accentSignal
+        }
+    }
+}
+
+private extension CaptureStage {
+    var dailyReviewIcon: String {
+        switch self {
+        case .analysisFailed:
+            "exclamationmark.triangle.fill"
+        case .analysisTimedOut:
+            "clock.badge.exclamationmark"
+        case .idle:
+            "circle"
+        case .saving:
+            "square.and.arrow.down"
+        case .refreshing:
+            "arrow.triangle.2.circlepath"
+        case .queued:
+            "tray.and.arrow.up.fill"
+        case .processing:
+            "wand.and.stars"
+        case .saved:
+            "checkmark"
+        }
+    }
+
+    var dailyReviewTint: Color {
+        switch self {
+        case .analysisFailed, .analysisTimedOut:
+            Color.feedbackCritical
+        case .idle, .refreshing, .saving:
+            Color.textSecondary
+        case .queued, .processing:
+            Color.accentInsight
+        case .saved:
+            Color.accentSuccess
+        }
+    }
+}
+
 struct StreakCalendarSheet: View {
     let store: StoreOf<NudgeCaptureFeature>
     @Environment(\.dismiss) private var dismiss

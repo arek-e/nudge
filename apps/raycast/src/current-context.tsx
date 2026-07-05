@@ -5,6 +5,9 @@ import { reviewRaycastAction } from "./action-service";
 import { refreshRaycastCurrentContext } from "./context-service";
 import { buildRaycastContextSections, type RaycastContextItem } from "./context-summary";
 import { raycastEngineClient } from "./engine-client";
+import { captureRaycastException, initializeRaycastSentry } from "./sentry";
+
+initializeRaycastSentry("current-context");
 
 interface CurrentContextState {
   readonly context?: SurfaceRefreshContext;
@@ -27,6 +30,10 @@ export default function Command(): ReactElement {
         );
         if (!cancelled) setState({ context, isLoading: false });
       } catch (error) {
+        await captureRaycastException(error, {
+          command: "current-context",
+          operation: "refresh",
+        });
         const errorMessage =
           error instanceof Error ? error.message : "Could not load Nudge context";
         if (!cancelled) setState({ errorMessage, isLoading: false });
@@ -58,6 +65,10 @@ export default function Command(): ReactElement {
       });
       refresh();
     } catch (error) {
+      await captureRaycastException(error, {
+        command: "current-context",
+        operation: "review-action",
+      });
       await showToast({
         message: error instanceof Error ? error.message : "Could not update action",
         style: Toast.Style.Failure,

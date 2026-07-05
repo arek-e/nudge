@@ -8,6 +8,7 @@ struct SettingsScreen: View {
 
     var body: some View {
         let account = accountSnapshot
+        let syncStatus = store.syncStatusMatrix
 
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
@@ -96,17 +97,24 @@ struct SettingsScreen: View {
                     )
                     SettingsDivider()
                     SettingsRow(
-                        icon: store.isOnline ? "wifi" : "wifi.slash",
-                        title: "Connection",
-                        value: store.isOnline ? "Online" : "Offline",
-                        tint: store.isOnline ? .accentSuccess : .accentPrimary
+                        icon: syncStatus.global.systemImageName,
+                        title: "Global sync",
+                        value: syncStatus.global.title,
+                        tint: syncStatus.global.settingsTint
                     )
                     SettingsDivider()
                     SettingsRow(
-                        icon: "arrow.triangle.2.circlepath",
-                        title: "Note sync",
-                        value: store.statusMessage.isEmpty ? "Ready" : store.statusMessage,
-                        tint: .accentPrimary
+                        icon: syncStatus.note.systemImageName,
+                        title: "Note",
+                        value: syncStatus.note.title,
+                        tint: syncStatus.note.settingsTint
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        icon: syncStatus.ai.systemImageName,
+                        title: "AI review",
+                        value: syncStatus.ai.title,
+                        tint: syncStatus.ai.settingsTint
                     )
                     SettingsDivider()
                     SettingsRow(
@@ -287,6 +295,21 @@ private struct SettingsLogoutButton: View {
         .buttonStyle(.plain)
         .disabled(isLoading)
         .accessibilityLabel("Log out")
+    }
+}
+
+private extension SyncStatusItem {
+    var settingsTint: Color {
+        switch tone {
+        case .critical:
+            Color.feedbackCritical
+        case .neutral:
+            Color.textSecondary
+        case .positive:
+            Color.accentSuccess
+        case .working:
+            Color.accentInsight
+        }
     }
 }
 

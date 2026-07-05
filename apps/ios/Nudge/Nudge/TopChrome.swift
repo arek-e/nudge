@@ -11,6 +11,7 @@ struct TopChrome: View {
                 if let signal {
                     signalButton(signal)
                 }
+                reviewButton
 
                 Spacer(minLength: 12)
 
@@ -40,6 +41,21 @@ struct TopChrome: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open today's calendar")
+    }
+
+    private var reviewButton: some View {
+        Button {
+            perform(.dailyReview)
+        } label: {
+            Image(systemName: "checklist.checked")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.accentSuccess)
+                .frame(width: 38, height: 38)
+                .background(chromeButtonBackground)
+                .shadow(color: .shadowAmbient, radius: 12, y: 8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open daily review")
     }
 
     private var streakButton: some View {
@@ -96,6 +112,73 @@ struct TopChrome: View {
             Color.feedbackCritical
         case .degraded:
             Color.accentPrimary
+        }
+    }
+}
+
+struct SyncStatusMatrixView: View {
+    let snapshot: SyncStatusMatrixSnapshot
+
+    var body: some View {
+        VStack(spacing: 8) {
+            SyncStatusRow(label: "Sync", item: snapshot.global)
+            HStack(spacing: 8) {
+                SyncStatusRow(label: "Note", item: snapshot.note)
+                SyncStatusRow(label: "AI", item: snapshot.ai)
+            }
+        }
+        .frame(maxWidth: 430)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct SyncStatusRow: View {
+    let label: String
+    let item: SyncStatusItem
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: item.systemImageName)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+                    .textCase(.uppercase)
+                Text(item.title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 46)
+        .background(Color.surfacePrimary.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.borderSubtle.opacity(0.78), lineWidth: 1)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(item.title). \(item.detail)")
+    }
+
+    private var tint: Color {
+        switch item.tone {
+        case .critical:
+            Color.feedbackCritical
+        case .neutral:
+            Color.textSecondary
+        case .positive:
+            Color.accentSuccess
+        case .working:
+            Color.accentInsight
         }
     }
 }

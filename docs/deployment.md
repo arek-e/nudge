@@ -48,6 +48,8 @@ Before the first staging deploy, provision the staging Cloudflare resources name
 
 The iOS app has matching shared Xcode schemes: `Nudge Local`, `Nudge Staging`, and `Nudge Production`. The local scheme installs as `app.nudge.ios.local` and points at the local Worker plus the dev Convex deployment. The staging scheme installs as `app.nudge.ios.staging`, uses the `AppIconStaging` beta icon, and points at the staging Worker, staging Clerk app, and staging Convex deployment. The production scheme installs as `app.nudge.ios`, uses the normal `AppIcon`, and points at the production Worker and production Convex deployment.
 
+iOS staging and production auth route Clerk Frontend API calls through the matching Worker `/__clerk` proxy. The proxy keeps native auth on the same Clerk instance as the Worker secrets and normalizes public Clerk environment branding before ClerkKitUI renders it.
+
 Production Clerk still uses the existing Clerk development instance. Run `clerk deploy` from an interactive terminal to create the production Clerk instance; it requires a production domain, DNS access, and Apple/Google OAuth credentials.
 
 ## Version Stamping

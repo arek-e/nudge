@@ -24,6 +24,7 @@ import {
   type ObservabilityHonoEnv,
   requestObservability,
   retryAfterSecondsFor,
+  safeErrorFields,
   runWithRequestSpan,
   serverTiming,
   withRequestTraceContext,
@@ -33,6 +34,7 @@ import { defaultOkfSandboxFactory } from "./okf-sandbox-live";
 import { resolveCurrentUser } from "./request-auth";
 import { registerApiRoutes } from "./routes/api";
 import { registerStaticRoutes } from "./routes/static";
+import { captureWebWorkerException, sentryRequestMiddleware } from "./sentry";
 
 interface CreateAppOptions {
   readonly authSessionResolver?: AuthSessionResolver;
@@ -78,6 +80,7 @@ export function createApp(options: CreateAppOptions = {}) {
     return { appServices, runEffect };
   };
 
+  app.use(sentryRequestMiddleware(app));
   app.use("*", evlogWideEvents());
   app.use("*", requestObservability());
   app.use("*", serverTiming());
@@ -115,11 +118,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const proxyRequest = new Request(targetUrl.toString(), proxyInit);
     const response = await fetch(proxyRequest);
 
-    return new Response(response.body, {
-      headers: new Headers(response.headers),
-      status: response.status,
-      statusText: response.statusText,
-    });
+    return clerkProxyResponse(response, clerkPath);
   });
 
   app.post(
@@ -175,14 +174,17 @@ export function createApp(options: CreateAppOptions = {}) {
   registerApiRoutes(app, resolveRequestApp, desktopSignInTokenFactory);
 
   app.onError((error, c) => {
+    captureWebWorkerException(error, {
+      tags: {
+        path: new URL(c.req.url).pathname,
+      },
+    });
     const retryAfterSeconds = retryAfterSecondsFor(error);
     const status = retryAfterSeconds === null ? 500 : 503;
     addWideEventFields(c, {
       status,
       outcome: "error",
-      errorType: error.name,
-      errorMessage: error.message,
-      ...(error.stack ? { errorStack: error.stack } : {}),
+      ...safeErrorFields(error),
       ...(retryAfterSeconds !== null
         ? { retryAfterSeconds, resilienceKind: "transient_backpressure" }
         : {}),
@@ -218,6 +220,54 @@ function clerkProxyUrl(requestUrl: string, env: Env) {
 
 function clerkProxyBody(request: Request) {
   return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
+}
+
+async function clerkProxyResponse(response: Response, clerkPath: string) {
+  if (clerkPath === "/v1/environment" && isJsonResponse(response)) {
+    const normalized = normalizeClerkEnvironmentBranding(await response.json());
+    const headers = clerkProxyResponseHeaders(response.headers);
+    headers.set("content-type", "application/json");
+    return new Response(JSON.stringify(normalized), {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  }
+
+  return new Response(response.body, {
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function isJsonResponse(response: Response) {
+  return response.headers.get("content-type")?.toLowerCase().includes("application/json") === true;
+}
+
+function clerkProxyResponseHeaders(headers: Headers) {
+  const nextHeaders = new Headers(headers);
+  nextHeaders.delete("content-length");
+  return nextHeaders;
+}
+
+function normalizeClerkEnvironmentBranding(value: unknown) {
+  if (!isRecord(value)) return value;
+
+  const displayConfig = value.display_config;
+  if (!isRecord(displayConfig)) return value;
+
+  return {
+    ...value,
+    display_config: {
+      ...displayConfig,
+      application_name: "Nudge",
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function decodeClerkProxyPath(path: string) {

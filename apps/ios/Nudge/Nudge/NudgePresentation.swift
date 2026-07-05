@@ -1,6 +1,7 @@
 import Foundation
 
 enum NudgeDestination: Hashable {
+    case dailyReview
     case settings
     case todayCalendar
 }
@@ -196,6 +197,232 @@ enum ChromeSignalPolicy {
     }
 }
 
+enum SyncStatusTone: Equatable {
+    case critical
+    case neutral
+    case positive
+    case working
+}
+
+struct SyncStatusItem: Equatable {
+    let title: String
+    let detail: String
+    let systemImageName: String
+    let tone: SyncStatusTone
+}
+
+struct SyncStatusMatrixSnapshot: Equatable {
+    let global: SyncStatusItem
+    let note: SyncStatusItem
+    let ai: SyncStatusItem
+}
+
+enum SyncStatusMatrixPolicy {
+    static func evaluate(
+        isOnline: Bool,
+        pendingSyncCount: Int,
+        hasSyncFailure: Bool,
+        localNoteSyncStatus: String?,
+        hasJournal: Bool,
+        stage: CaptureStage,
+        retainedRows: [RetainedCaptureRow],
+        statusMessage: String? = nil
+    ) -> SyncStatusMatrixSnapshot {
+        SyncStatusMatrixSnapshot(
+            global: globalStatus(
+                isOnline: isOnline,
+                pendingSyncCount: pendingSyncCount,
+                hasSyncFailure: hasSyncFailure,
+                statusMessage: statusMessage
+            ),
+            note: noteStatus(
+                localNoteSyncStatus: localNoteSyncStatus,
+                pendingSyncCount: pendingSyncCount,
+                hasSyncFailure: hasSyncFailure,
+                hasJournal: hasJournal
+            ),
+            ai: aiStatus(stage: stage, retainedRows: retainedRows)
+        )
+    }
+
+    private static func globalStatus(
+        isOnline: Bool,
+        pendingSyncCount: Int,
+        hasSyncFailure: Bool,
+        statusMessage: String?
+    ) -> SyncStatusItem {
+        if !isOnline {
+            return SyncStatusItem(
+                title: "Offline",
+                detail: "Changes stay on this device.",
+                systemImageName: "wifi.slash",
+                tone: .critical
+            )
+        }
+
+        if statusMessage == "Server sign-in required" {
+            return SyncStatusItem(
+                title: "Server sign-in required",
+                detail: "Sign in again so Nudge can sync.",
+                systemImageName: "person.crop.circle.badge.exclamationmark",
+                tone: .critical
+            )
+        }
+
+        if statusMessage == "Engine unavailable" {
+            return SyncStatusItem(
+                title: "Sync failed",
+                detail: "Nudge Engine is not reachable.",
+                systemImageName: "exclamationmark.arrow.triangle.2.circlepath",
+                tone: .critical
+            )
+        }
+
+        if hasSyncFailure {
+            return SyncStatusItem(
+                title: "Sync failed",
+                detail: "Your local copy is still safe.",
+                systemImageName: "exclamationmark.arrow.triangle.2.circlepath",
+                tone: .critical
+            )
+        }
+
+        if pendingSyncCount > 0 {
+            return SyncStatusItem(
+                title: "Syncing \(pendingSyncCount) \(pendingSyncCount == 1 ? "change" : "changes")",
+                detail: "Sending local edits to Nudge.",
+                systemImageName: "arrow.triangle.2.circlepath",
+                tone: .working
+            )
+        }
+
+        return SyncStatusItem(
+            title: "Up to date",
+            detail: "Latest local changes reached Nudge.",
+            systemImageName: "checkmark.icloud.fill",
+            tone: .positive
+        )
+    }
+
+    private static func noteStatus(
+        localNoteSyncStatus: String?,
+        pendingSyncCount: Int,
+        hasSyncFailure: Bool,
+        hasJournal: Bool
+    ) -> SyncStatusItem {
+        if hasSyncFailure {
+            return SyncStatusItem(
+                title: "Needs retry",
+                detail: "Nudge could not accept the latest note yet.",
+                systemImageName: "arrow.counterclockwise",
+                tone: .critical
+            )
+        }
+
+        if localNoteSyncStatus == "pending_sync" || pendingSyncCount > 0 {
+            return SyncStatusItem(
+                title: "Pending sync",
+                detail: "Saved locally and queued for Nudge.",
+                systemImageName: "tray.and.arrow.up.fill",
+                tone: .working
+            )
+        }
+
+        if hasJournal {
+            return SyncStatusItem(
+                title: "Synced to Nudge",
+                detail: "This note is backed by the shared journal.",
+                systemImageName: "checkmark.seal.fill",
+                tone: .positive
+            )
+        }
+
+        return SyncStatusItem(
+            title: "Saved on this device",
+            detail: "Write locally first, then sync when ready.",
+            systemImageName: "iphone",
+            tone: .neutral
+        )
+    }
+
+    private static func aiStatus(
+        stage: CaptureStage,
+        retainedRows: [RetainedCaptureRow]
+    ) -> SyncStatusItem {
+        let activeStage = prioritizedAIStage(stage: stage, retainedRows: retainedRows)
+
+        switch activeStage {
+        case .analysisFailed:
+            return SyncStatusItem(
+                title: "Analysis failed",
+                detail: "The saved note remains available.",
+                systemImageName: "exclamationmark.triangle.fill",
+                tone: .critical
+            )
+        case .analysisTimedOut:
+            return SyncStatusItem(
+                title: "Analysis timed out",
+                detail: "Nudge kept the local note.",
+                systemImageName: "clock.badge.exclamationmark",
+                tone: .critical
+            )
+        case .queued:
+            return SyncStatusItem(
+                title: "Nudge will review this",
+                detail: "AI review starts after sync.",
+                systemImageName: "sparkles",
+                tone: .working
+            )
+        case .processing:
+            return SyncStatusItem(
+                title: "Nudge is reviewing this",
+                detail: "Follow-ups and open loops are being checked.",
+                systemImageName: "wand.and.stars",
+                tone: .working
+            )
+        case .saved:
+            return SyncStatusItem(
+                title: "Review ready",
+                detail: "Latest review state is available.",
+                systemImageName: "checklist.checked",
+                tone: .positive
+            )
+        case .idle, .refreshing, .saving:
+            return SyncStatusItem(
+                title: "Not reviewed yet",
+                detail: "Save a note to ask Nudge for review.",
+                systemImageName: "text.magnifyingglass",
+                tone: .neutral
+            )
+        }
+    }
+
+    private static func prioritizedAIStage(
+        stage: CaptureStage,
+        retainedRows: [RetainedCaptureRow]
+    ) -> CaptureStage {
+        if retainedRows.contains(where: { $0.stage == .analysisFailed }) {
+            return .analysisFailed
+        }
+        if retainedRows.contains(where: { $0.stage == .analysisTimedOut }) {
+            return .analysisTimedOut
+        }
+        if stage == .analysisFailed || stage == .analysisTimedOut {
+            return stage
+        }
+        if retainedRows.contains(where: { $0.stage == .processing }) || stage == .processing {
+            return .processing
+        }
+        if retainedRows.contains(where: { $0.stage == .queued }) || stage == .queued {
+            return .queued
+        }
+        if retainedRows.contains(where: { $0.stage == .saved }) || stage == .saved {
+            return .saved
+        }
+        return stage
+    }
+}
+
 struct CaptureDraftResetOutcome: Equatable {
     let clearsLatestResult: Bool
     let clearsPendingResult: Bool
@@ -351,6 +578,169 @@ enum DailyNoteParagraphRowsPolicy {
 
     private static func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum DailyReviewMetricTone: Equatable {
+    case action
+    case insight
+    case note
+    case signal
+}
+
+struct DailyReviewMetricRow: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let value: String
+    let systemImageName: String
+    let tone: DailyReviewMetricTone
+}
+
+struct DailyReviewNoteRow: Identifiable, Equatable {
+    let id: String
+    let text: String
+    let stage: CaptureStage
+}
+
+struct DailyReviewActionRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let body: String
+    let status: String
+}
+
+struct DailyReviewSignalRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let detail: String
+}
+
+struct DailyReviewSnapshot: Equatable {
+    let localDate: String
+    let title: String
+    let updatedAt: String?
+    let noteRows: [DailyReviewNoteRow]
+    let openActionRows: [DailyReviewActionRow]
+    let signalRows: [DailyReviewSignalRow]
+    let metricRows: [DailyReviewMetricRow]
+    let syncStatus: SyncStatusMatrixSnapshot
+
+    var hasContent: Bool {
+        !noteRows.isEmpty || !openActionRows.isEmpty || !signalRows.isEmpty
+    }
+}
+
+enum DailyReviewSnapshotPolicy {
+    static func evaluate(
+        localDate: String,
+        journal: JournalDocument?,
+        retainedRows: [RetainedCaptureRow],
+        actions: [ActionItem],
+        signals: [EventRecord],
+        syncStatus: SyncStatusMatrixSnapshot
+    ) -> DailyReviewSnapshot {
+        let noteRows = DailyNoteParagraphRowsPolicy.merge(
+            bodyText: journal?.bodyText,
+            retainedRows: retainedRows
+        )
+        .enumerated()
+        .compactMap { index, row -> DailyReviewNoteRow? in
+            let text = trimmed(row.noteText)
+            guard !text.isEmpty else { return nil }
+            return DailyReviewNoteRow(
+                id: "\(row.id.uuidString)-\(index)",
+                text: text,
+                stage: row.stage
+            )
+        }
+
+        let openActionRows = actions
+            .filter { action in
+                action.status == "proposed" || action.status == "accepted"
+            }
+            .prefix(6)
+            .map { action in
+                DailyReviewActionRow(
+                    id: action.id,
+                    title: trimmed(action.title).isEmpty ? action.kind.displayLabel : trimmed(action.title),
+                    body: trimmed(action.body),
+                    status: action.status.displayLabel
+                )
+            }
+
+        let signalRows = signals
+            .prefix(6)
+            .map { signal in
+                let title = trimmed(signal.noteText)
+                let detail = [signal.source.displayLabel, signal.type.displayLabel]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " / ")
+                return DailyReviewSignalRow(
+                    id: signal.id,
+                    title: title.isEmpty ? signal.type.displayLabel : title,
+                    detail: detail
+                )
+            }
+
+        let metrics = [
+            DailyReviewMetricRow(
+                id: "notes",
+                label: "Notes",
+                value: "\(noteRows.count)",
+                systemImageName: "note.text",
+                tone: .note
+            ),
+            DailyReviewMetricRow(
+                id: "actions",
+                label: "Open",
+                value: "\(openActionRows.count)",
+                systemImageName: "checklist",
+                tone: .action
+            ),
+            DailyReviewMetricRow(
+                id: "signals",
+                label: "Signals",
+                value: "\(signalRows.count)",
+                systemImageName: "waveform.path.ecg",
+                tone: .signal
+            ),
+            DailyReviewMetricRow(
+                id: "ai",
+                label: "AI",
+                value: aiMetricValue(syncStatus.ai),
+                systemImageName: syncStatus.ai.systemImageName,
+                tone: .insight
+            )
+        ]
+
+        let title = trimmed(journal?.title).isEmpty ? "Daily Review" : trimmed(journal?.title)
+        return DailyReviewSnapshot(
+            localDate: localDate,
+            title: title,
+            updatedAt: journal?.updatedAt,
+            noteRows: noteRows,
+            openActionRows: openActionRows,
+            signalRows: signalRows,
+            metricRows: metrics,
+            syncStatus: syncStatus
+        )
+    }
+
+    private static func aiMetricValue(_ item: SyncStatusItem) -> String {
+        switch item.tone {
+        case .critical:
+            "Issue"
+        case .neutral:
+            "Idle"
+        case .positive:
+            "Ready"
+        case .working:
+            "Pending"
+        }
+    }
+
+    private static func trimmed(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
@@ -547,7 +937,7 @@ enum ConvexAgentStatusProjectionPolicy {
         statuses: [ConvexAgentStatusSnapshot],
         to rows: [RetainedCaptureRow]
     ) -> [RetainedCaptureRow] {
-        var nextRows = rows
+        var nextRows = RetainedCaptureRowsMigrationPolicy.canonicalize(rows)
         for status in statuses {
             guard let stage = ConvexAgentStatusStagePolicy.evaluate(
                 status: status.status,
@@ -563,13 +953,23 @@ enum ConvexAgentStatusProjectionPolicy {
             let row = nextRows[index]
             nextRows[index] = RetainedCaptureRow(
                 id: row.id,
-                analysisRunId: row.analysisRunId,
                 mutationId: row.mutationId,
                 noteText: row.noteText,
                 stage: stage
             )
         }
         return nextRows
+    }
+}
+
+enum RetainedCaptureRowsMigrationPolicy {
+    static func canonicalize(_ rows: [RetainedCaptureRow]) -> [RetainedCaptureRow] {
+        rows.compactMap { row in
+            guard row.mutationId != nil || !row.stage.keepsSubmittedCaptureActive else {
+                return nil
+            }
+            return row
+        }
     }
 }
 
@@ -665,20 +1065,17 @@ enum CaptureSubmissionDraftPolicy {
 
 struct RetainedCaptureRow: Identifiable, Equatable {
     let id: UUID
-    let analysisRunId: String?
     let mutationId: String?
     let noteText: String
     let stage: CaptureStage
 
     init(
         id: UUID = UUID(),
-        analysisRunId: String? = nil,
         mutationId: String? = nil,
         noteText: String,
         stage: CaptureStage
     ) {
         self.id = id
-        self.analysisRunId = analysisRunId
         self.mutationId = mutationId
         self.noteText = noteText
         self.stage = stage
@@ -688,60 +1085,31 @@ struct RetainedCaptureRow: Identifiable, Equatable {
 struct CaptureSubmissionTransition: Equatable {
     let leadingText: String
     let trailingText: String
-    let retainedRow: RetainedCaptureRow?
 }
 
 enum CaptureSubmissionTransitionPolicy {
     static func evaluate(
-        analysisRunId: String?,
         currentLeadingText: String,
         submittedNoteText: String,
-        pendingNoteText: String?,
-        stage: CaptureStage
+        pendingNoteText: String?
     ) -> CaptureSubmissionTransition {
-        let retainedRow = retainedRow(
-            analysisRunId: analysisRunId,
-            currentLeadingText: currentLeadingText,
-            pendingNoteText: pendingNoteText,
-            stage: stage
-        )
-
         return CaptureSubmissionTransition(
             leadingText: pendingNoteText == nil ? currentLeadingText : submittedNoteText,
-            trailingText: "",
-            retainedRow: retainedRow
+            trailingText: ""
         )
-    }
-
-    private static func retainedRow(
-        analysisRunId: String?,
-        currentLeadingText: String,
-        pendingNoteText: String?,
-        stage: CaptureStage
-    ) -> RetainedCaptureRow? {
-        guard let pendingNoteText else { return nil }
-        let noteText = pendingNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !noteText.isEmpty else { return nil }
-        guard currentLeadingText.trimmingCharacters(in: .whitespacesAndNewlines) == noteText else {
-            return nil
-        }
-
-        switch stage {
-        case .analysisFailed, .analysisTimedOut, .queued, .processing:
-            return RetainedCaptureRow(analysisRunId: analysisRunId, noteText: noteText, stage: stage)
-        case .idle, .refreshing, .saved, .saving:
-            return nil
-        }
     }
 }
 
 enum NudgeChromeAction {
+    case dailyReview
     case settings
     case statusSignal
     case todayCalendar
 
     var destination: NudgeDestination? {
         switch self {
+        case .dailyReview:
+            .dailyReview
         case .settings:
             .settings
         case .statusSignal:
@@ -753,6 +1121,8 @@ enum NudgeChromeAction {
 
     var sheet: NudgeSheet? {
         switch self {
+        case .dailyReview:
+            nil
         case .settings:
             nil
         case .statusSignal:

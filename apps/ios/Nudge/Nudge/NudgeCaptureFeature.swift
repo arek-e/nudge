@@ -30,6 +30,9 @@ struct NudgeClientFailure: LocalizedError {
     var errorDescription: String? { message }
 
     private static func isAuthenticationRequired(_ error: Error) -> Bool {
+        if case NudgeAPIError.authenticationRequired = error {
+            return true
+        }
         if case NudgeAPIError.httpStatus(401) = error {
             return true
         }
@@ -38,7 +41,6 @@ struct NudgeClientFailure: LocalizedError {
 }
 
 struct NudgeAPIClient {
-    var getAgentRun: @Sendable (_ runId: String) async throws -> AgentRun?
     var getJournal: @Sendable (_ localDate: String) async throws -> JournalDocument?
     var listActions: @Sendable (_ limit: Int) async throws -> ActionsResponse
     var listCalendarDays: @Sendable () async throws -> [CalendarDayStats]
@@ -49,15 +51,13 @@ struct NudgeAPIClient {
         _ existingJournalText: String?,
         _ trailingNote: String,
         _ localDate: String,
-        _ treatsNoteAsFullBody: Bool
+        _ treatsNoteAsFullBody: Bool,
+        _ idempotencyKey: String?
     ) async throws -> SavedCapture
 }
 
 extension NudgeAPIClient: DependencyKey {
     static let liveValue = NudgeAPIClient(
-        getAgentRun: { runId in
-            try await NudgeAPI.getAgentRun(runId: runId)
-        },
         getJournal: { localDate in
             try await NudgeAPI.getJournal(localDate: localDate)
         },
@@ -70,14 +70,15 @@ extension NudgeAPIClient: DependencyKey {
         listSignals: { limit in
             try await NudgeAPI.listSignals(limit: limit)
         },
-        saveDailyNote: { note, attachments, existingJournalText, trailingNote, localDate, treatsNoteAsFullBody in
+        saveDailyNote: { note, attachments, existingJournalText, trailingNote, localDate, treatsNoteAsFullBody, idempotencyKey in
             try await NudgeAPI.saveDailyNote(
                 note,
                 attachments: attachments,
                 existingJournalText: existingJournalText,
                 trailingNote: trailingNote,
                 localDate: localDate,
-                treatsNoteAsFullBody: treatsNoteAsFullBody
+                treatsNoteAsFullBody: treatsNoteAsFullBody,
+                idempotencyKey: idempotencyKey
             )
         }
     )
@@ -270,7 +271,6 @@ struct NudgeSubmissionRequest {
     let localDate: String
     let mediaAttachments: [JournalMediaAttachment]
     let pendingNoteText: String?
-    let previousPendingStage: CaptureStage
     let submission: CaptureSubmissionDraft
     let treatsNoteAsFullBody: Bool
 }
@@ -323,13 +323,16 @@ struct NudgeCaptureFeature {
         var journal: JournalDocument?
         var latestResult: CaptureResult?
         var latestRun: AgentRun?
+        var localNoteSyncStatus: String?
         var navigationPath: [NudgeDestination] = []
+        var pendingSyncCount = 0
         var presentedResult: CaptureResult?
         var previewedAttachment: CaptureAttachment?
         var retainedRows: [RetainedCaptureRow] = []
         var saving = false
         var settingsSignOutError: String?
         var settingsSigningOut = false
+        var hasSyncFailure = false
         var signals: [EventRecord] = []
         var stage: CaptureStage = .idle
         var statusMessage = "Connecting"
@@ -378,9 +381,28 @@ struct NudgeCaptureFeature {
             pendingResultContext != nil && (stage == .queued || stage == .processing)
         }
 
-        var shouldPollProcessing: Bool {
-            (pendingResultContext != nil && (stage == .queued || stage == .processing))
-                || retainedRows.contains { $0.stage == .queued || $0.stage == .processing }
+        var syncStatusMatrix: SyncStatusMatrixSnapshot {
+            SyncStatusMatrixPolicy.evaluate(
+                isOnline: isOnline,
+                pendingSyncCount: pendingSyncCount,
+                hasSyncFailure: hasSyncFailure,
+                localNoteSyncStatus: localNoteSyncStatus,
+                hasJournal: journal != nil,
+                stage: stage,
+                retainedRows: retainedRows,
+                statusMessage: statusMessage
+            )
+        }
+
+        var dailyReviewSnapshot: DailyReviewSnapshot {
+            DailyReviewSnapshotPolicy.evaluate(
+                localDate: todayLocalDate,
+                journal: journal,
+                retainedRows: retainedRows,
+                actions: actions,
+                signals: signals,
+                syncStatus: syncStatusMatrix
+            )
         }
 
         var todayLocalDate: String {
@@ -409,6 +431,7 @@ struct NudgeCaptureFeature {
         mutating func applyDailyNoteBody(_ bodyText: String?) {
             draftAutosaveBaseBodyText = bodyText
             lastAutosavedBodyText = bodyText
+            retainedRows = RetainedCaptureRowsMigrationPolicy.canonicalize(retainedRows)
             let hasActiveDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if !hasActiveDraft {
@@ -438,6 +461,9 @@ struct NudgeCaptureFeature {
         }
 
         mutating func applyNoteSyncReceipt(_ receipt: NoteSyncReceipt) {
+            pendingSyncCount = receipt.pendingCount
+            hasSyncFailure = receipt.hasFailures
+
             if receipt.hasFailures {
                 statusMessage = "Saved on this device"
                 if let lastErrorDescription = receipt.lastErrorDescription {
@@ -448,12 +474,18 @@ struct NudgeCaptureFeature {
 
             if receipt.acceptedCount > 0, stage != .processing {
                 statusMessage = "Connected"
+                localNoteSyncStatus = "synced"
             }
         }
 
         mutating func applyProjectedDailyNote(_ projection: LocalDailyNoteProjection) {
             let localNote = projection.note
             journal = Self.journalDocument(from: localNote)
+            localNoteSyncStatus = localNote.syncStatus
+            if localNote.syncStatus == "synced" {
+                pendingSyncCount = 0
+                hasSyncFailure = false
+            }
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 applyDailyNoteBody(localNote.bodyText)
@@ -465,12 +497,13 @@ struct NudgeCaptureFeature {
         }
 
         mutating func appendRetainedRow(_ row: RetainedCaptureRow) {
+            retainedRows = RetainedCaptureRowsMigrationPolicy.canonicalize(retainedRows)
+            guard row.mutationId != nil || !row.stage.keepsSubmittedCaptureActive else {
+                return
+            }
             guard !retainedRows.contains(where: { retainedRow in
                 if let mutationId = row.mutationId {
                     return retainedRow.mutationId == mutationId
-                }
-                if let analysisRunId = row.analysisRunId {
-                    return retainedRow.analysisRunId == analysisRunId
                 }
                 return retainedRow.noteText == row.noteText && retainedRow.stage == row.stage
             }) else {
@@ -552,18 +585,6 @@ struct NudgeCaptureFeature {
             return true
         }
 
-        mutating func updateRetainedRow(id: UUID, analysisRunId: String?, stage: CaptureStage) {
-            guard let index = retainedRows.firstIndex(where: { $0.id == id }) else { return }
-            let current = retainedRows[index]
-            retainedRows[index] = RetainedCaptureRow(
-                id: current.id,
-                analysisRunId: analysisRunId,
-                mutationId: current.mutationId,
-                noteText: current.noteText,
-                stage: stage
-            )
-        }
-
         static func journalDocument(from localNote: LocalDailyNote) -> JournalDocument {
             JournalDocument(
                 id: "local-\(localNote.localDate)",
@@ -623,7 +644,6 @@ struct NudgeCaptureFeature {
         case networkStatusChanged(Bool)
         case openAttachment(CaptureAttachment)
         case optimisticLocalSubmissionCompleted(NudgeOptimisticSubmission)
-        case pollProcessingStarted
         case photoLibraryButtonTapped
         case presentedResultChanged(CaptureResult?)
         case previewedAttachmentChanged(CaptureAttachment?)
@@ -654,7 +674,6 @@ struct NudgeCaptureFeature {
     private enum CancelID {
         case autosave
         case network
-        case poll
         case projection
     }
 
@@ -742,6 +761,9 @@ struct NudgeCaptureFeature {
             case .autosaveDraftResponse(.success(let localNote)):
                 state.lastAutosavedBodyText = localNote.bodyText
                 state.journal = State.journalDocument(from: localNote)
+                state.localNoteSyncStatus = localNote.syncStatus
+                state.pendingSyncCount = max(state.pendingSyncCount, 1)
+                state.hasSyncFailure = false
                 let streakChanged = state.updateDailyStreak(for: localNote.localDate)
                 if state.stage == .idle {
                     state.statusMessage = "Saved on this device"
@@ -857,6 +879,8 @@ struct NudgeCaptureFeature {
                 state.lastStreakDate = context.streak.lastStreakDate
                 if let localNote = context.localNote {
                     state.journal = State.journalDocument(from: localNote)
+                    state.localNoteSyncStatus = localNote.syncStatus
+                    state.pendingSyncCount = localNote.syncStatus == "pending_sync" ? max(state.pendingSyncCount, 1) : state.pendingSyncCount
                     state.applyDailyNoteBody(localNote.bodyText)
                     if localNote.syncStatus == "pending_sync" {
                         state.statusMessage = "Saved on this device"
@@ -869,6 +893,9 @@ struct NudgeCaptureFeature {
                 state.journal = State.journalDocument(from: response.localNote)
                 state.draftAutosaveBaseBodyText = response.localNote.bodyText
                 state.lastAutosavedBodyText = response.localNote.bodyText
+                state.localNoteSyncStatus = response.localNote.syncStatus
+                state.pendingSyncCount = max(state.pendingSyncCount, 1)
+                state.hasSyncFailure = false
                 let streakChanged = state.updateDailyStreak(for: response.localNote.localDate)
                 return persistStreakIfNeeded(streakChanged, state: state)
 
@@ -893,20 +920,14 @@ struct NudgeCaptureFeature {
 
             case .optimisticLocalSubmissionCompleted(let submission):
                 let transition = CaptureSubmissionTransitionPolicy.evaluate(
-                    analysisRunId: state.pendingResultContext?.saved.analysisRun?.id,
                     currentLeadingText: state.draft.trimmingCharacters(in: .whitespacesAndNewlines),
                     submittedNoteText: submission.request.submission.noteText,
-                    pendingNoteText: submission.request.pendingNoteText,
-                    stage: submission.request.previousPendingStage
+                    pendingNoteText: submission.request.pendingNoteText
                 )
-                if let retainedRow = transition.retainedRow {
-                    state.appendRetainedRow(retainedRow)
-                }
 
                 state.appendRetainedRow(
                     RetainedCaptureRow(
                         id: submission.optimisticRowId,
-                        analysisRunId: nil,
                         mutationId: submission.localNote.pendingMutationId,
                         noteText: submission.request.submission.noteText,
                         stage: CaptureOptimisticLocalRowPolicy.evaluate()
@@ -918,24 +939,14 @@ struct NudgeCaptureFeature {
                 state.trailingDraft = ""
                 state.latestResult = nil
                 state.pendingResultContext = nil
+                state.localNoteSyncStatus = submission.localNote.syncStatus
+                state.pendingSyncCount = max(state.pendingSyncCount, 1)
+                state.hasSyncFailure = false
                 state.errorMessage = ""
                 state.stage = .saved
                 state.statusMessage = "Saved on this device"
                 state.saving = false
                 return .none
-
-            case .pollProcessingStarted:
-                guard state.shouldPollProcessing else {
-                    return .cancel(id: CancelID.poll)
-                }
-                return .run { send in
-                    while !Task.isCancelled {
-                        try await Task.sleep(nanoseconds: 2_000_000_000)
-                        if Task.isCancelled { return }
-                        await send(.refreshContext)
-                    }
-                }
-                .cancellable(id: CancelID.poll, cancelInFlight: true)
 
             case .photoLibraryButtonTapped:
                 state.imagePickerSource = .photoLibrary
@@ -967,13 +978,12 @@ struct NudgeCaptureFeature {
                         let signals = try await loadedSignals
                         let calendarDays = try await loadedCalendarDays
                         let journal = try await loadedJournal
-                        let rows = await refreshRetainedRows(retainedRows)
                         await send(.refreshContextResponse(.success(
                             NudgeRefreshContext(
                                 actions: actionsResponse,
                                 calendarDays: calendarDays,
                                 journal: journal,
-                                retainedRows: rows,
+                                retainedRows: RetainedCaptureRowsMigrationPolicy.canonicalize(retainedRows),
                                 signals: signals
                             )
                         )))
@@ -993,6 +1003,10 @@ struct NudgeCaptureFeature {
                 state.calendarDays = context.calendarDays
                 state.actions = context.actions.actions
                 state.journal = context.journal
+                if context.journal != nil, state.pendingSyncCount == 0 {
+                    state.localNoteSyncStatus = "synced"
+                    state.hasSyncFailure = false
+                }
                 if state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    state.trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     state.applyDailyNoteBody(context.journal?.bodyText)
@@ -1040,17 +1054,13 @@ struct NudgeCaptureFeature {
             case .remoteSubmissionResponse(.success(let response)):
                 state.latestRun = response.saved.analysisRun ?? state.latestRun
                 state.journal = response.saved.journal
+                state.localNoteSyncStatus = "synced"
+                state.pendingSyncCount = 0
+                state.hasSyncFailure = false
                 state.draftAutosaveBaseBodyText = response.saved.journal.bodyText
                 state.lastAutosavedBodyText = response.saved.journal.bodyText
                 let streakChanged = state.updateDailyStreak(for: response.saved.journal.localDate)
                 state.latestResult = state.makeResult(for: response.request.submission.noteText, saved: response.saved)
-                if let optimisticRowId = response.optimisticRowId {
-                    state.updateRetainedRow(
-                        id: optimisticRowId,
-                        analysisRunId: response.saved.analysisRun?.id,
-                        stage: response.saved.analysisRun.map(Self.stage(for:)) ?? .saved
-                    )
-                }
                 state.statusMessage = "Saved to Nudge"
                 return persistStreakIfNeeded(streakChanged, state: state)
 
@@ -1110,19 +1120,17 @@ struct NudgeCaptureFeature {
                 let request = response.request
                 state.latestRun = response.saved.analysisRun ?? state.latestRun
                 state.journal = response.saved.journal
+                state.localNoteSyncStatus = "synced"
+                state.pendingSyncCount = 0
+                state.hasSyncFailure = false
                 let streakChanged = state.updateDailyStreak(for: response.saved.journal.localDate)
 
                 if request.pendingNoteText != nil {
                     let transition = CaptureSubmissionTransitionPolicy.evaluate(
-                        analysisRunId: state.pendingResultContext?.saved.analysisRun?.id,
                         currentLeadingText: request.leadingText,
                         submittedNoteText: request.submission.noteText,
-                        pendingNoteText: request.pendingNoteText,
-                        stage: request.previousPendingStage
+                        pendingNoteText: request.pendingNoteText
                     )
-                    if let retainedRow = transition.retainedRow {
-                        state.appendRetainedRow(retainedRow)
-                    }
                     state.draft = transition.leadingText
                     state.trailingDraft = transition.trailingText
                 }
@@ -1233,30 +1241,6 @@ struct NudgeCaptureFeature {
         }
     }
 
-    private func refreshRetainedRows(_ retainedRows: [RetainedCaptureRow]) async -> [RetainedCaptureRow] {
-        var updatedRows: [RetainedCaptureRow] = []
-        for row in retainedRows {
-            guard (row.stage == .queued || row.stage == .processing), let analysisRunId = row.analysisRunId else {
-                updatedRows.append(row)
-                continue
-            }
-            guard let run = try? await api.getAgentRun(analysisRunId) else {
-                updatedRows.append(row)
-                continue
-            }
-            updatedRows.append(
-                RetainedCaptureRow(
-                    id: row.id,
-                    analysisRunId: row.analysisRunId,
-                    mutationId: row.mutationId,
-                    noteText: row.noteText,
-                    stage: Self.stage(for: run)
-                )
-            )
-        }
-        return updatedRows
-    }
-
     private func scheduleDraftAutosave(state: inout State) -> Effect<Action> {
         let baseBodyText = state.draftCompositionBaseBodyText()
         if state.draftAutosaveBaseBodyText == nil {
@@ -1292,7 +1276,6 @@ struct NudgeCaptureFeature {
         let leadingText = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let trailingText = state.trailingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let pendingNoteText = state.pendingResultContext?.noteText
-        let previousPendingStage = state.stage
         let existingJournalText = state.draftCompositionBaseBodyText()
         let localDate = Self.localDate()
         let submission = CaptureSubmissionDraftPolicy.evaluate(
@@ -1324,7 +1307,6 @@ struct NudgeCaptureFeature {
             localDate: localDate,
             mediaAttachments: mediaAttachments,
             pendingNoteText: pendingNoteText,
-            previousPendingStage: previousPendingStage,
             submission: submission,
             treatsNoteAsFullBody: state.isDraftHydratedFromDailyNote
         )
@@ -1377,7 +1359,8 @@ struct NudgeCaptureFeature {
                             request.existingJournalText,
                             request.submission.trailingNote,
                             request.localDate,
-                            request.treatsNoteAsFullBody
+                            request.treatsNoteAsFullBody,
+                            localNote.pendingMutationId
                         )
                         await send(.remoteSubmissionResponse(.success(
                             NudgeRemoteSubmissionResponse(
@@ -1404,7 +1387,8 @@ struct NudgeCaptureFeature {
                         request.existingJournalText,
                         request.submission.trailingNote,
                         request.localDate,
-                        request.treatsNoteAsFullBody
+                        request.treatsNoteAsFullBody,
+                        nil
                     )
                     await send(.submitResponse(.success(
                         NudgeRemoteSubmissionResponse(

@@ -1,10 +1,16 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import {
   findAvailablePort,
   preferredDevPort,
   preferredInspectorPort,
   wranglerPersistTo,
 } from "./dev-ports";
+import {
+  envFileContent,
+  wranglerClerkEnvEntries,
+  wranglerClerkEnvFileArgs,
+  wranglerLocalConfigArgs,
+} from "./dev-web-config";
 
 const repoRoot = new URL("..", import.meta.url).pathname;
 const logDir = `${repoRoot}tmp/logs/${new Date()
@@ -16,15 +22,20 @@ const inspectorPort = await findAvailablePort({ preferredPort: preferredInspecto
 const ip = "0.0.0.0";
 const url = `http://${ip}:${port}`;
 const persistTo = wranglerPersistTo(repoRoot);
-const clerkVarArgs = wranglerClerkVarArgs();
 const wranglerArgs = process.argv.slice(2);
 const configArgs = wranglerLocalConfigArgs(wranglerArgs);
+const clerkEnvEntries = wranglerClerkEnvEntries(process.env);
+const clerkEnvFile = clerkEnvEntries.length ? `${logDir}/clerk.env` : null;
+const clerkEnvArgs = wranglerClerkEnvFileArgs(clerkEnvFile);
 const braintrustEnvFile = `${repoRoot}.env.braintrust`;
 const braintrustEnvArgs = (await Bun.file(braintrustEnvFile).exists())
   ? ["--env-file", braintrustEnvFile]
   : [];
 
 await mkdir(logDir, { recursive: true });
+if (clerkEnvFile) {
+  await writeFile(clerkEnvFile, envFileContent(clerkEnvEntries), { mode: 0o600 });
+}
 
 console.log(`Nudge dev server: ${url}`);
 console.log(
@@ -51,8 +62,7 @@ await run(
     String(inspectorPort),
     "--persist-to",
     persistTo,
-    ...clerkVarArgs,
-    ...convexVarArgs(),
+    ...clerkEnvArgs,
     ...braintrustEnvArgs,
     ...wranglerArgs,
   ],
@@ -76,39 +86,6 @@ async function run(command: readonly string[], logName: string) {
   ]);
   log.end();
   if (exitCode !== 0) process.exit(exitCode);
-}
-
-function convexVarArgs() {
-  const entries = [
-    ["CONVEX_RUNTIME_SECRET", process.env.CONVEX_RUNTIME_SECRET],
-    ["CONVEX_URL", process.env.CONVEX_URL],
-  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-
-  return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
-}
-
-function wranglerClerkVarArgs() {
-  const entries = [
-    ["CLERK_AUTHORIZED_PARTIES", process.env.CLERK_AUTHORIZED_PARTIES],
-    ["CLERK_PUBLISHABLE_KEY", process.env.CLERK_PUBLISHABLE_KEY],
-    ["CLERK_SECRET_KEY", process.env.CLERK_SECRET_KEY],
-  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-
-  return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
-}
-
-function wranglerLocalConfigArgs(args: readonly string[]) {
-  const hasExplicitConfig = args.some(
-    (arg, index) =>
-      arg === "--config" ||
-      arg === "-c" ||
-      arg.startsWith("--config=") ||
-      args[index - 1] === "--config" ||
-      args[index - 1] === "-c",
-  );
-  const usesRemoteDev = args.includes("--remote");
-
-  return hasExplicitConfig || usesRemoteDev ? [] : ["--config", "wrangler.local.jsonc"];
 }
 
 async function tee(

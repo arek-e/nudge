@@ -3,24 +3,114 @@ import { Db } from "@nudge/db";
 import { readHttpTelemetrySnapshot } from "@nudge/observability";
 import type { Env } from "./env";
 import type { OkfSandbox } from "./okf-sandbox";
-import { createApp } from "./app";
+import { createApp as createNudgeApp } from "./app";
 
 const testAi = (() => ({ provider: "test" })) as Ai;
 const testWorkflow = {
   create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "test-workflow-id" }),
 } as Workflow;
-const anonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
-const anonymousUser = { id: anonymousUserId, displayName: "Anonymous User" };
-const anonymousHeaders = { "x-nudge-anonymous-user-id": anonymousUserId };
-const anonymousJsonHeaders = { ...anonymousHeaders, "content-type": "application/json" };
-const anonymousMcpHeaders = {
-  ...anonymousJsonHeaders,
+const testUserId = "auth-user-1";
+const testUser = { id: testUserId, displayName: "Lana" };
+const legacyAnonymousUserId = "anon_550e8400-e29b-41d4-a716-446655440000";
+const legacyAnonymousHeaders = { "x-nudge-anonymous-user-id": legacyAnonymousUserId };
+const authenticatedHeaders = {};
+const authenticatedJsonHeaders = { ...authenticatedHeaders, "content-type": "application/json" };
+const authenticatedMcpHeaders = {
+  ...authenticatedJsonHeaders,
   accept: "application/json, text/event-stream",
 };
+const clerkAuthSessionResolver = async () => ({
+  user: {
+    email: "lana@example.com",
+    id: testUser.id,
+    name: testUser.displayName,
+  },
+});
+const authSessionResolverFor =
+  (user: { readonly displayName: string; readonly id: string }) => async () => ({
+    user: {
+      email: `${user.id}@example.com`,
+      id: user.id,
+      name: user.displayName,
+    },
+  });
+const quotaDecision = (input: {
+  readonly allowed: boolean;
+  readonly limit: number;
+  readonly remaining: number;
+  readonly reservedTimestamps: ReadonlyArray<string>;
+  readonly retryAfterSeconds: number;
+}) => ({
+  allowed: input.allowed,
+  limit: input.limit,
+  remaining: input.remaining,
+  reservedTimestamps: [...input.reservedTimestamps],
+  resetAt: new Date(Date.now() + Math.max(input.retryAfterSeconds, 60) * 1_000).toISOString(),
+  retryAfterSeconds: input.retryAfterSeconds,
+});
+const createQuotaAwareAgentNamespace = (
+  options: {
+    readonly onAgentFetch?: (request: Request, name: string) => Promise<Response>;
+    readonly onIdFromName?: (name: string) => void;
+  } = {},
+) => {
+  const quotaBuckets = new Map<string, ReadonlyArray<number>>();
+  return {
+    idFromName: (name: string) => {
+      options.onIdFromName?.(name);
+      return { name };
+    },
+    get: (id: { readonly name?: string }) => ({
+      fetch: async (request: Request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/quota/ai") {
+          const body = await request.json();
+          const route = String(Reflect.get(Object(body), "route") ?? "unknown");
+          const limit = Number(Reflect.get(Object(body), "max") ?? 60);
+          const windowSeconds = Number(Reflect.get(Object(body), "windowSeconds") ?? 60);
+          const key = `${id.name ?? "unknown"}:${route}`;
+          const now = Date.now();
+          const recent = (quotaBuckets.get(key) ?? []).filter(
+            (timestamp) => timestamp >= now - windowSeconds * 1_000,
+          );
+          if (recent.length >= limit) {
+            return Response.json(
+              quotaDecision({
+                allowed: false,
+                limit,
+                remaining: 0,
+                reservedTimestamps: recent.map((timestamp) => new Date(timestamp).toISOString()),
+                retryAfterSeconds: 60,
+              }),
+            );
+          }
+          const reserved = [now, ...recent].slice(0, limit);
+          quotaBuckets.set(key, reserved);
+          return Response.json(
+            quotaDecision({
+              allowed: true,
+              limit,
+              remaining: Math.max(limit - reserved.length, 0),
+              reservedTimestamps: reserved.map((timestamp) => new Date(timestamp).toISOString()),
+              retryAfterSeconds: 0,
+            }),
+          );
+        }
+        return options.onAgentFetch?.(request, id.name ?? "") ?? Response.json({ ok: true });
+      },
+    }),
+  } as DurableObjectNamespace;
+};
+type CreateAppOptions = NonNullable<Parameters<typeof createNudgeApp>[0]>;
+const unauthenticatedSessionResolver = async () => null;
+const createApp = (options: CreateAppOptions = {}) =>
+  createNudgeApp({ authSessionResolver: clerkAuthSessionResolver, ...options });
+const createUnauthenticatedApp = (options: CreateAppOptions = {}) =>
+  createNudgeApp({ authSessionResolver: unauthenticatedSessionResolver, ...options });
 
 const env = {
   DAILY_DIGEST_WORKFLOW: testWorkflow,
-  USER_AGENT_SESSION: {} as DurableObjectNamespace,
+  USER_AGENT_SESSION: createQuotaAwareAgentNamespace(),
   ENVIRONMENT: "test",
   APP_VERSION: "test-version",
   LOG_HTTP_REQUESTS: "false",
@@ -46,6 +136,22 @@ const createStatementDb = () => {
   } as D1Database;
 
   return { db, statements };
+};
+
+const createTraceDb = () => {
+  const rows: Array<ReadonlyArray<unknown>> = [];
+  const db = {
+    prepare: (sql: string) => ({
+      bind: (...values: ReadonlyArray<unknown>) => ({
+        run: async () => {
+          if (sql.includes("INSERT INTO trace_events")) rows.push(values);
+          return { success: true };
+        },
+      }),
+    }),
+  } as D1Database;
+
+  return { db, rows };
 };
 
 describe("web app", () => {
@@ -159,7 +265,7 @@ describe("web app", () => {
   });
 
   test("legacy app auth routes are no longer registered", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
     const response = await app.request("/api/auth/session", {}, env);
 
     expect(response.status).toBe(401);
@@ -268,6 +374,61 @@ describe("web app", () => {
     }
   });
 
+  test("GET /__clerk/v1/environment normalizes stale upstream Clerk branding", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const staleApplicationName = String.fromCharCode(
+      86,
+      101,
+      115,
+      116,
+      97,
+      32,
+      83,
+      116,
+      97,
+      103,
+      105,
+      110,
+      103,
+    );
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({
+        display_config: {
+          application_name: staleApplicationName,
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      }),
+    );
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/environment",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.staging.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({
+        display_config: {
+          application_name: "Nudge",
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      });
+      expect(JSON.stringify(body)).not.toContain(staleApplicationName);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("POST /__clerk forwards request bodies through the Worker", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const proxiedBodies: Array<string> = [];
@@ -328,7 +489,7 @@ describe("web app", () => {
       "/__internal/auth/test-account",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           email: "alek@teampitch.app",
           name: "Alek",
@@ -484,6 +645,224 @@ describe("web app", () => {
     }
   });
 
+  test("GET /health persists a safe trace event", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const traceDb = createTraceDb();
+
+    const response = await app.request(
+      "/health",
+      { headers: { "cf-ray": "persisted-ray", "user-agent": "persist-test" } },
+      { ...env, DB: traceDb.db },
+    );
+
+    expect(response.status).toBe(200);
+    expect(traceDb.rows).toHaveLength(1);
+    expect(traceDb.rows[0]).toEqual([
+      expect.any(String),
+      expect.any(String),
+      "http_request_completed",
+      "wide_event",
+      "nudge-web",
+      "test",
+      "test-version",
+      "persisted-ray",
+      "health",
+      "GET",
+      "/health",
+      200,
+      "success",
+      expect.any(Number),
+      "default",
+      null,
+      expect.stringContaining("persisted-ray"),
+      expect.any(String),
+    ]);
+  });
+
+  test("authenticated API requests persist safe surface and user telemetry", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const traceDb = createTraceDb();
+
+    const response = await app.request(
+      "/api/session",
+      {
+        headers: {
+          ...authenticatedHeaders,
+          "cf-ray": "surface-ray",
+          "user-agent": "NudgeDesktop/1",
+          "x-nudge-client": "desktop",
+        },
+      },
+      { ...env, DB: traceDb.db },
+    );
+
+    expect(response.status).toBe(200);
+    expect(traceDb.rows).toHaveLength(1);
+
+    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
+    expect(payload).toMatchObject({
+      authMode: "clerk",
+      clientSurface: "desktop",
+      requestId: "surface-ray",
+      routeName: "api.session",
+      runtimeSurface: "cloudflare-worker",
+      userId: testUserId,
+      workspaceId: testUserId,
+      "nudge.client.surface": "desktop",
+      "nudge.runtime.surface": "cloudflare-worker",
+      "nudge.user_id": testUserId,
+      "nudge.workspace_id": testUserId,
+    });
+  });
+
+  test("GET /health persists a root request trace span", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/health",
+      { headers: { "cf-ray": "span-ray", "user-agent": "span-test" } },
+      { ...env, DB: traceDb },
+    );
+
+    expect(response.status).toBe(200);
+    expect(spanRows).toHaveLength(1);
+    expect(spanRows[0]).toEqual([
+      expect.stringMatching(/^[a-f0-9]{32}$/),
+      expect.stringMatching(/^[a-f0-9]{16}$/),
+      null,
+      "GET /health",
+      "server",
+      "ok",
+      expect.any(String),
+      expect.any(String),
+      expect.any(Number),
+      "nudge-web",
+      "test",
+      "test-version",
+      "span-ray",
+      "health",
+      "GET",
+      "/health",
+      200,
+      "success",
+      expect.any(String),
+      expect.any(String),
+    ]);
+  });
+
+  test("POST /api/syntheses records framework and primitive child spans", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/syntheses",
+      {
+        method: "POST",
+        headers: { ...authenticatedJsonHeaders, "cf-ray": "synthesis-ray" },
+        body: JSON.stringify({ frameKey: "current_state" }),
+      },
+      { ...env, DB: traceDb },
+    );
+
+    const names = spanRows.map((row) => row[3]);
+    const traceIds = new Set(spanRows.map((row) => row[0]));
+    const rootSpan = spanRows.find((row) => row[2] === null);
+    const childSpans = spanRows.filter((row) => row[2] !== null);
+
+    expect(response.status).toBe(200);
+    expect(names).toContain("POST /api/syntheses");
+    expect(names).toContain("app.resolve");
+    expect(names).toContain("auth.current_user");
+    expect(names).toContain("orpc.handle");
+    expect(names).toContain("syntheses.create");
+    expect(traceIds.size).toBe(1);
+    expect(rootSpan?.[1]).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
+    expect(childSpans.every((row) => row[2] === rootSpan?.[1])).toBe(true);
+  });
+
+  test("GET /api/traces/recent does not persist trace cache spans for itself", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          all: async () => ({ results: [] }),
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({
+      authSessionResolver: clerkAuthSessionResolver,
+      dbLayer: Db.layerMemory,
+    });
+
+    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(spanRows).toHaveLength(0);
+  });
+
+  test("GET /api/traces/recent rejects anonymous sessions", async () => {
+    const traceDb = {
+      prepare: () => {
+        throw new Error("trace query should not run for anonymous sessions");
+      },
+    } as D1Database;
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/traces/recent",
+      { headers: legacyAnonymousHeaders },
+      { ...env, DB: traceDb },
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
+  });
+
+  test("GET /api/version bypasses db and auth spans", async () => {
+    const spanRows: Array<ReadonlyArray<unknown>> = [];
+    const traceDb = {
+      prepare: (sql: string) => ({
+        bind: (...values: ReadonlyArray<unknown>) => ({
+          run: async () => {
+            if (sql.includes("INSERT INTO trace_spans")) spanRows.push(values);
+            return { success: true };
+          },
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request("/api/version", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(spanRows.map((row) => row[3])).toEqual(["GET /api/version"]);
+  });
+
   test("request errors still emit one wide request completion log", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const consoleLog = spyOn(console, "log").mockImplementation(() => {});
@@ -508,7 +887,7 @@ describe("web app", () => {
         statusGroup: "5xx",
         outcome: "error",
         errorType: "Error",
-        errorMessage: "test failure",
+        errorMessage: "[redacted]",
         sampled: true,
         sampleReason: "error",
       });
@@ -579,7 +958,7 @@ describe("web app", () => {
       "/api/voice/log",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           idempotencyKey: "siri-log-1",
           spokenText: "Log that I need to follow up with Maya tomorrow",
@@ -588,7 +967,11 @@ describe("web app", () => {
       env,
     );
     const body = await response.json();
-    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
+    const signalsResponse = await app.request(
+      "/api/signals",
+      { headers: authenticatedHeaders },
+      env,
+    );
     const signalsBody = await signalsResponse.json();
 
     expect(response.status).toBe(200);
@@ -599,7 +982,7 @@ describe("web app", () => {
       payload: { route: "capture_only", text: "Log that I need to follow up with Maya tomorrow" },
       source: "ios_siri",
       type: "capture.voice_log",
-      userId: anonymousUserId,
+      userId: testUserId,
     });
     expect(signalsBody.signals).toHaveLength(1);
     expect(signalsBody.signals[0]).toMatchObject({
@@ -699,6 +1082,109 @@ describe("web app", () => {
     });
   });
 
+  test("GET /api/traces/recent lists safe trace span summaries", async () => {
+    const rows = [
+      {
+        id: "span-1",
+        trace_id: "trace-1",
+        parent_span_id: null,
+        name: "GET /health",
+        kind: "server",
+        status: "ok",
+        started_at: "2026-06-12T10:00:00.000Z",
+        ended_at: "2026-06-12T10:00:00.125Z",
+        duration_ms: 125,
+        route_name: "health",
+        method: "GET",
+        path: "/health",
+      },
+    ];
+    let capturedSelectSql = "";
+    const traceDb = {
+      prepare: (sql: string) => {
+        if (sql.includes("SELECT")) capturedSelectSql = sql;
+        return {
+          bind: () => ({
+            all: async () => ({ results: sql.includes("trace_spans") ? rows : [] }),
+            run: async () => ({ success: true }),
+          }),
+        };
+      },
+    } as D1Database;
+    const app = createApp({
+      authSessionResolver: clerkAuthSessionResolver,
+      dbLayer: Db.layerMemory,
+    });
+
+    const response = await app.request("/api/traces/recent", {}, { ...env, DB: traceDb });
+
+    expect(response.status).toBe(200);
+    expect(capturedSelectSql).toContain("span_id AS id");
+    expect(capturedSelectSql).toContain("route_name != 'api.traces'");
+    expect(await response.json()).toEqual({
+      spans: [
+        {
+          id: "span-1",
+          traceId: "trace-1",
+          parentSpanId: null,
+          name: "GET /health",
+          kind: "server",
+          status: "ok",
+          startedAt: "2026-06-12T10:00:00.000Z",
+          endedAt: "2026-06-12T10:00:00.125Z",
+          durationMs: 125,
+          routeName: "health",
+          method: "GET",
+          path: "/health",
+        },
+      ],
+    });
+  });
+
+  test("GET /api/traces/recent requires explicit production enablement and an allowed user", async () => {
+    const traceDb = {
+      prepare: () => ({
+        bind: () => ({
+          all: async () => ({ results: [] }),
+          run: async () => ({ success: true }),
+        }),
+      }),
+    } as D1Database;
+    const app = createApp({
+      authSessionResolver: clerkAuthSessionResolver,
+      dbLayer: Db.layerMemory,
+    });
+
+    const disabledResponse = await app.request(
+      "/api/traces/recent",
+      {},
+      { ...env, DB: traceDb, ENVIRONMENT: "production" },
+    );
+    const enabledWithoutAllowedUserResponse = await app.request(
+      "/api/traces/recent",
+      {},
+      { ...env, DB: traceDb, ENVIRONMENT: "production", TRACE_API_ENABLED: "true" },
+    );
+    const enabledResponse = await app.request(
+      "/api/traces/recent",
+      {},
+      {
+        ...env,
+        DB: traceDb,
+        ENVIRONMENT: "production",
+        TRACE_API_ENABLED: "true",
+        TRACE_API_USER_IDS: testUserId,
+      },
+    );
+
+    expect(disabledResponse.status).toBe(404);
+    expect(await disabledResponse.json()).toEqual({ error: "Not found" });
+    expect(enabledWithoutAllowedUserResponse.status).toBe(403);
+    expect(await enabledWithoutAllowedUserResponse.json()).toEqual({ error: "Forbidden" });
+    expect(enabledResponse.status).toBe(200);
+    expect(await enabledResponse.json()).toEqual({ spans: [] });
+  });
+
   test("GET /api/conversations/:conversationId/tools/list-recent-signals forwards to the agent session", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
@@ -716,7 +1202,7 @@ describe("web app", () => {
             signals: [
               {
                 id: "signal-1",
-                userId: anonymousUserId,
+                userId: testUserId,
                 type: "capture.note",
                 source: "test",
                 occurredAt: "2026-06-12T10:00:00.000Z",
@@ -737,7 +1223,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/list-recent-signals?limit=5",
-        { headers: anonymousHeaders },
+        { headers: authenticatedHeaders },
         { ...env, LOG_HTTP_REQUESTS: "true", USER_AGENT_SESSION: agentNamespace },
       );
       loggedEvent = JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0])).event;
@@ -747,7 +1233,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/list-recent-signals");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("5");
     expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
@@ -761,7 +1247,7 @@ describe("web app", () => {
       signals: [
         {
           id: "signal-1",
-          userId: anonymousUserId,
+          userId: testUserId,
           type: "capture.note",
           source: "test",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -808,7 +1294,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/conversations/focus/tools/retrieve-memory?query=michael%20launch&limit=3",
-        { headers: anonymousHeaders },
+        { headers: authenticatedHeaders },
         {
           ...env,
           AGENT_INTERNAL_SECRET: "test-agent-secret",
@@ -823,11 +1309,11 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/tools/retrieve-memory");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("query")).toBe("michael launch");
     expect(new URL(forwardedRequests[0]!.url).searchParams.get("limit")).toBe("3");
-    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(testUserId);
     expect(forwardedRequests[0]!.headers.get("x-nudge-internal-signature")).toMatch(
       /^[a-f0-9]{64}$/,
     );
@@ -863,7 +1349,7 @@ describe("web app", () => {
           forwardedRequests.push(request);
           return Response.json({
             conversationId: "focus",
-            userId: anonymousUserId,
+            userId: testUserId,
             createdAt: null,
             updatedAt: null,
             recentToolEvents: [],
@@ -880,18 +1366,18 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/conversations/focus",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:focus`]);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/metadata");
     expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
     expect(await response.json()).toEqual({
       conversationId: "focus",
-      userId: anonymousUserId,
+      userId: testUserId,
       createdAt: null,
       updatedAt: null,
       recentToolEvents: [],
@@ -913,70 +1399,65 @@ describe("web app", () => {
         traceArtifacts.push({ body, key });
       },
     } as R2Bucket;
-    const agentNamespace = {
-      idFromName: (name: string) => {
-        agentNames.push(name);
-        return { name };
-      },
-      get: () => ({
-        fetch: async (request: Request) => {
-          forwardedRequests.push(request);
-          expect(await request.json()).toEqual({ message: "What should I do next?" });
-          return Response.json({
-            conversationId: "focus",
-            draft: {
-              confidence: 0.82,
-              signal: {
-                id: "signal-1",
-                userId: anonymousUserId,
-                type: "manual_check_in_submitted",
-                source: "nudge_agent_intake",
-                occurredAt: "2026-06-12T10:00:00.000Z",
-                schemaVersion: 1,
-                payload: { note: "What should I do next?" },
-                createdAt: "2026-06-12T10:00:00.000Z",
-              },
-              proposal: {
-                id: "proposal-1",
-                userId: anonymousUserId,
-                synthesisId: "synthesis-1",
-                kind: "commit",
-                status: "pending",
-                title: "Clarify the next step",
-                body: "Choose one concrete next action.",
-                rationale: "Generated from the latest user message.",
-                createdAt: "2026-06-12T10:00:00.000Z",
-                updatedAt: "2026-06-12T10:00:00.000Z",
-              },
-              requiresReview: true,
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async (request) => {
+        forwardedRequests.push(request);
+        expect(await request.json()).toEqual({ message: "What should I do next?" });
+        return Response.json({
+          conversationId: "focus",
+          draft: {
+            confidence: 0.82,
+            signal: {
+              id: "signal-1",
+              userId: testUserId,
+              type: "manual_check_in_submitted",
+              source: "nudge_agent_intake",
+              occurredAt: "2026-06-12T10:00:00.000Z",
+              schemaVersion: 1,
+              payload: { note: "What should I do next?" },
+              createdAt: "2026-06-12T10:00:00.000Z",
             },
-            message: "What should I do next?",
-            memoryResults: [
-              {
-                chunkId: "chunk-1",
-                score: 4.2,
-                sourceId: "revision-1",
-                sourceType: "journal_revision",
-                text: "need to write to michael about the launch",
-              },
-            ],
-            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-            reply: "I found 1 related memory and drafted a reviewable next step from your message.",
-            skillsApplied: ["intake-loop"],
-            subAgentsUsed: ["loopIntakeThink"],
-            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
-            workflowHooks: ["dailyDigest"],
-          });
-        },
-      }),
-    } as DurableObjectNamespace;
+            proposal: {
+              id: "proposal-1",
+              userId: testUserId,
+              synthesisId: "synthesis-1",
+              kind: "commit",
+              status: "pending",
+              title: "Clarify the next step",
+              body: "Choose one concrete next action.",
+              rationale: "Generated from the latest user message.",
+              createdAt: "2026-06-12T10:00:00.000Z",
+              updatedAt: "2026-06-12T10:00:00.000Z",
+            },
+            requiresReview: true,
+          },
+          message: "What should I do next?",
+          memoryResults: [
+            {
+              chunkId: "chunk-1",
+              score: 4.2,
+              sourceId: "revision-1",
+              sourceType: "journal_revision",
+              text: "need to write to michael about the launch",
+            },
+          ],
+          reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+          reply: "I found 1 related memory and drafted a reviewable next step from your message.",
+          skillsApplied: ["intake-loop"],
+          subAgentsUsed: ["loopIntakeThink"],
+          usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+          workflowHooks: ["dailyDigest"],
+        });
+      },
+      onIdFromName: (name) => agentNames.push(name),
+    });
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ message: "What should I do next?" }),
       },
       {
@@ -988,19 +1469,21 @@ describe("web app", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:ai-quota`, `${testUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
     expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
-    expect(forwardedRequests[0]!.headers.get("x-nudge-user-display-name")).toBe("Anonymous User");
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(testUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-display-name")).toBe(
+      testUser.displayName,
+    );
     expect(await response.json()).toEqual({
       conversationId: "focus",
       draft: {
         confidence: 0.82,
         signal: {
           id: "signal-1",
-          userId: anonymousUserId,
+          userId: testUserId,
           type: "manual_check_in_submitted",
           source: "nudge_agent_intake",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -1010,7 +1493,7 @@ describe("web app", () => {
         },
         proposal: {
           id: "proposal-1",
-          userId: anonymousUserId,
+          userId: testUserId,
           synthesisId: "synthesis-1",
           kind: "commit",
           status: "pending",
@@ -1045,7 +1528,7 @@ describe("web app", () => {
     expect(agentRun?.values).toEqual([
       expect.any(String),
       null,
-      anonymousUserId,
+      testUserId,
       "conversation-agent",
       "completed",
       expect.any(String),
@@ -1066,110 +1549,148 @@ describe("web app", () => {
   test("POST /api/conversations/:conversationId/messages/stream proxies the agent text stream", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
-    const agentNamespace = {
-      idFromName: (name: string) => {
-        agentNames.push(name);
-        return { name };
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async (request) => {
+        forwardedRequests.push(request);
+        expect(await request.json()).toEqual({ message: "Stream this" });
+        return new Response("Hello streamed reply", {
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
       },
-      get: () => ({
-        fetch: async (request: Request) => {
-          forwardedRequests.push(request);
-          expect(await request.json()).toEqual({ message: "Stream this" });
-          return new Response("Hello streamed reply", {
-            headers: { "content-type": "text/plain; charset=utf-8" },
-          });
-        },
-      }),
-    } as DurableObjectNamespace;
+      onIdFromName: (name) => agentNames.push(name),
+    });
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages/stream",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ message: "Stream this" }),
       },
       { ...env, USER_AGENT_SESSION: agentNamespace },
     );
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:ai-quota`, `${testUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages/stream");
     expect(forwardedRequests[0]!.headers.get("x-nudge-conversation-id")).toBe("focus");
-    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(anonymousUserId);
+    expect(forwardedRequests[0]!.headers.get("x-nudge-user-id")).toBe(testUserId);
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(await response.text()).toBe("Hello streamed reply");
+  });
+
+  test("POST /api/conversations/:conversationId/messages/stream enforces per-user AI route quota before agent dispatch", async () => {
+    const rateLimitedUser = { displayName: "Rate Limited", id: "rate-user-conversation" };
+    const forwardedRequests: Array<Request> = [];
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async (request) => {
+        forwardedRequests.push(request);
+        return new Response("first reply", {
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+      },
+    });
+    const app = createApp({
+      authSessionResolver: authSessionResolverFor(rateLimitedUser),
+      dbLayer: Db.layerMemory,
+    });
+    const limitedEnv = {
+      ...env,
+      AI_ROUTE_RATE_LIMIT_MAX: "1",
+      AI_ROUTE_RATE_LIMIT_WINDOW_SECONDS: "60",
+      USER_AGENT_SESSION: agentNamespace,
+    };
+    const request = {
+      method: "POST",
+      headers: authenticatedJsonHeaders,
+      body: JSON.stringify({ message: "Stream this once" }),
+    };
+
+    const first = await app.request(
+      "/api/conversations/focus/messages/stream",
+      request,
+      limitedEnv,
+    );
+    const second = await app.request(
+      "/api/conversations/focus/messages/stream",
+      request,
+      limitedEnv,
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    expect(Number(second.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(await second.json()).toMatchObject({
+      error: "AI rate limit exceeded",
+      limit: 1,
+    });
+    expect(forwardedRequests).toHaveLength(1);
   });
 
   test("POST /api/conversations/:conversationId/messages/stream returns progress and receipt frames", async () => {
     const forwardedRequests: Array<Request> = [];
     const agentNames: Array<string> = [];
-    const agentNamespace = {
-      idFromName: (name: string) => {
-        agentNames.push(name);
-        return { name };
-      },
-      get: () => ({
-        fetch: async (request: Request) => {
-          forwardedRequests.push(request);
-          expect(await request.json()).toEqual({ message: "Stream events" });
-          return Response.json({
-            conversationId: "focus",
-            draft: {
-              confidence: 0.82,
-              signal: {
-                id: "signal-1",
-                userId: anonymousUserId,
-                type: "manual_check_in_submitted",
-                source: "nudge_agent_intake",
-                occurredAt: "2026-06-12T10:00:00.000Z",
-                schemaVersion: 1,
-                payload: { note: "Stream events" },
-                createdAt: "2026-06-12T10:00:00.000Z",
-              },
-              proposal: {
-                id: "proposal-1",
-                userId: anonymousUserId,
-                synthesisId: "synthesis-1",
-                kind: "commit",
-                status: "pending",
-                title: "Clarify the next step",
-                body: "Choose one concrete next action.",
-                rationale: "Generated from the latest user message.",
-                createdAt: "2026-06-12T10:00:00.000Z",
-                updatedAt: "2026-06-12T10:00:00.000Z",
-              },
-              requiresReview: true,
-            },
-            message: "Stream events",
-            memoryResults: [],
-            reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
-            receipt: {
-              id: "receipt-1",
-              action: "proposal.generated",
-              changed: { proposalId: "proposal-1", status: "pending" },
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async (request) => {
+        forwardedRequests.push(request);
+        expect(await request.json()).toEqual({ message: "Stream events" });
+        return Response.json({
+          conversationId: "focus",
+          draft: {
+            confidence: 0.82,
+            signal: {
+              id: "signal-1",
+              userId: testUserId,
+              type: "manual_check_in_submitted",
+              source: "nudge_agent_intake",
+              occurredAt: "2026-06-12T10:00:00.000Z",
+              schemaVersion: 1,
+              payload: { note: "Stream events" },
               createdAt: "2026-06-12T10:00:00.000Z",
-              signalIds: ["signal-1"],
-              why: "Generated from the latest user message.",
             },
-            reply: "I drafted a reviewable next step from your message.",
-            skillsApplied: ["intake-loop"],
-            subAgentsUsed: ["loopIntakeThink"],
-            usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
-            workflowHooks: ["dailyDigest"],
-          });
-        },
-      }),
-    } as DurableObjectNamespace;
+            proposal: {
+              id: "proposal-1",
+              userId: testUserId,
+              synthesisId: "synthesis-1",
+              kind: "commit",
+              status: "pending",
+              title: "Clarify the next step",
+              body: "Choose one concrete next action.",
+              rationale: "Generated from the latest user message.",
+              createdAt: "2026-06-12T10:00:00.000Z",
+              updatedAt: "2026-06-12T10:00:00.000Z",
+            },
+            requiresReview: true,
+          },
+          message: "Stream events",
+          memoryResults: [],
+          reasoningHarness: { name: "think", runtime: "cloudflare-agents" },
+          receipt: {
+            id: "receipt-1",
+            action: "proposal.generated",
+            changed: { proposalId: "proposal-1", status: "pending" },
+            createdAt: "2026-06-12T10:00:00.000Z",
+            signalIds: ["signal-1"],
+            why: "Generated from the latest user message.",
+          },
+          reply: "I drafted a reviewable next step from your message.",
+          skillsApplied: ["intake-loop"],
+          subAgentsUsed: ["loopIntakeThink"],
+          usedTools: ["retrieveMemory", "appendSignal", "createSynthesis", "generateProposals"],
+          workflowHooks: ["dailyDigest"],
+        });
+      },
+      onIdFromName: (name) => agentNames.push(name),
+    });
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/conversations/focus/messages/stream",
       {
         method: "POST",
-        headers: { ...anonymousJsonHeaders, accept: "text/event-stream" },
+        headers: { ...authenticatedJsonHeaders, accept: "text/event-stream" },
         body: JSON.stringify({ message: "Stream events" }),
       },
       { ...env, USER_AGENT_SESSION: agentNamespace },
@@ -1177,7 +1698,7 @@ describe("web app", () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(agentNames).toEqual([`${anonymousUserId}:focus`]);
+    expect(agentNames).toEqual([`${testUserId}:ai-quota`, `${testUserId}:focus`]);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/messages");
     expect(response.headers.get("content-type")).toContain("application/x-nudge-event-stream");
@@ -1195,7 +1716,7 @@ describe("web app", () => {
       "/api/events",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "manual_check_in_submitted",
           source: "api",
@@ -1207,14 +1728,14 @@ describe("web app", () => {
       env,
     );
 
-    const listResponse = await app.request("/api/events", { headers: anonymousHeaders }, env);
+    const listResponse = await app.request("/api/events", { headers: authenticatedHeaders }, env);
 
     expect(appendResponse.status).toBe(200);
     expect(listResponse.status).toBe(200);
     expect(await listResponse.json()).toEqual({
       events: [
         expect.objectContaining({
-          userId: anonymousUserId,
+          userId: testUserId,
           type: "manual_check_in_submitted",
           source: "api",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -1244,7 +1765,7 @@ describe("web app", () => {
       "/api/media",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           dataBase64: btoa("image bytes"),
           id: "550e8400-e29b-41d4-a716-446655440000",
@@ -1266,16 +1787,14 @@ describe("web app", () => {
       url: "/api/media/550e8400-e29b-41d4-a716-446655440000",
     });
     expect(writes).toHaveLength(1);
-    expect(writes[0]!.key).toBe(
-      `users/${anonymousUserId}/media/550e8400-e29b-41d4-a716-446655440000`,
-    );
+    expect(writes[0]!.key).toBe(`users/${testUserId}/media/550e8400-e29b-41d4-a716-446655440000`);
     expect(new TextDecoder().decode(writes[0]!.value)).toBe("image bytes");
     expect(writes[0]!.options).toEqual({
       customMetadata: {
         id: "550e8400-e29b-41d4-a716-446655440000",
         kind: "image",
         label: "Camera photo",
-        userId: anonymousUserId,
+        userId: testUserId,
       },
       httpMetadata: { contentType: "image/jpeg" },
     });
@@ -1300,7 +1819,7 @@ describe("web app", () => {
       "/api/media",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           dataBase64: btoa("voice bytes"),
           id: "550e8400-e29b-41d4-a716-446655440003",
@@ -1322,16 +1841,14 @@ describe("web app", () => {
       url: "/api/media/550e8400-e29b-41d4-a716-446655440003",
     });
     expect(writes).toHaveLength(1);
-    expect(writes[0]!.key).toBe(
-      `users/${anonymousUserId}/media/550e8400-e29b-41d4-a716-446655440003`,
-    );
+    expect(writes[0]!.key).toBe(`users/${testUserId}/media/550e8400-e29b-41d4-a716-446655440003`);
     expect(new TextDecoder().decode(writes[0]!.value)).toBe("voice bytes");
     expect(writes[0]!.options).toEqual({
       customMetadata: {
         id: "550e8400-e29b-41d4-a716-446655440003",
         kind: "voice",
         label: "Voice recording",
-        userId: anonymousUserId,
+        userId: testUserId,
       },
       httpMetadata: { contentType: "audio/webm" },
     });
@@ -1340,18 +1857,18 @@ describe("web app", () => {
   test("custom integrations can inspect the current session workspace", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
 
-    const response = await app.request("/api/session", { headers: anonymousHeaders }, env);
+    const response = await app.request("/api/session", { headers: authenticatedHeaders }, env);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMode: "anonymous",
-      user: anonymousUser,
-      workspace: { id: anonymousUserId, label: "Anonymous User's workspace" },
+      authMode: "clerk",
+      user: testUser,
+      workspace: { id: testUserId, label: "Lana's workspace" },
     });
   });
 
   test("custom integrations see an unauthenticated session without a Clerk token", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request("/api/session", {}, env);
 
@@ -1363,35 +1880,39 @@ describe("web app", () => {
     });
   });
 
-  test("custom integrations resolve an anonymous install session from a scoped client id", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
+  test("custom integrations cannot use session-prefixed paths to bypass API auth", async () => {
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
+
+    const prefixed = await app.request("/api/session/extra", {}, env);
+    const dotSegment = await app.request("/api/session/%2e%2e/traces/recent", {}, env);
+
+    expect(prefixed.status).toBe(401);
+    expect(await prefixed.json()).toEqual({ error: "Authentication required" });
+    expect(dotSegment.status).toBe(401);
+    expect(await dotSegment.json()).toEqual({ error: "Authentication required" });
+  });
+
+  test("custom integrations ignore a legacy anonymous install session id", async () => {
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/session",
       {
-        headers: {
-          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
-        },
+        headers: legacyAnonymousHeaders,
       },
       env,
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      authMode: "anonymous",
-      user: {
-        displayName: "Anonymous User",
-        id: "anon_550e8400-e29b-41d4-a716-446655440000",
-      },
-      workspace: {
-        id: "anon_550e8400-e29b-41d4-a716-446655440000",
-        label: "Anonymous User's workspace",
-      },
+      authMode: "unauthenticated",
+      user: null,
+      workspace: null,
     });
   });
 
   test("custom integrations cannot use user data routes without an authenticated production session", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request("/api/signals?limit=10", {}, env);
 
@@ -1399,21 +1920,19 @@ describe("web app", () => {
     expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
-  test("custom integrations can use user data routes with an anonymous install session", async () => {
-    const app = createApp({ dbLayer: Db.layerMemory });
+  test("custom integrations cannot use user data routes with an anonymous install session", async () => {
+    const app = createUnauthenticatedApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/signals?limit=10",
       {
-        headers: {
-          "x-nudge-anonymous-user-id": "anon_550e8400-e29b-41d4-a716-446655440000",
-        },
+        headers: legacyAnonymousHeaders,
       },
       env,
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ signals: [] });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
   test("custom integrations resolve workspace from a Clerk session", async () => {
@@ -1439,7 +1958,7 @@ describe("web app", () => {
   });
 
   test("desktop browser auth rejects anonymous sessions", async () => {
-    const app = createApp({
+    const app = createUnauthenticatedApp({
       dbLayer: Db.layerMemory,
       desktopSignInTokenFactory: async () => {
         throw new Error("unexpected desktop token mint");
@@ -1448,12 +1967,12 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/auth/desktop-ticket",
-      { headers: anonymousHeaders, method: "POST" },
+      { headers: legacyAnonymousHeaders, method: "POST" },
       env,
     );
 
     expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: "Clerk session required" });
+    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
   test("desktop browser auth mints a short-lived Clerk sign-in ticket", async () => {
@@ -1484,13 +2003,37 @@ describe("web app", () => {
   });
 
   test("custom integrations can export and delete the current user's data", async () => {
+    const mediaObjects = new Map<string, Uint8Array>();
+    const mediaBucket = {
+      delete: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) {
+          mediaObjects.delete(key);
+        }
+      },
+      get: async () => null,
+      list: async (options?: R2ListOptions) => {
+        const prefix = options?.prefix ?? "";
+        return {
+          delimitedPrefixes: [],
+          objects: [...mediaObjects.keys()]
+            .filter((key) => key.startsWith(prefix))
+            .map((key) => ({ key }) as R2Object),
+          truncated: false,
+        };
+      },
+      put: async (key: string, value: Uint8Array) => {
+        mediaObjects.set(key, value);
+        return { key } as R2Object;
+      },
+    } as R2Bucket;
     const app = createApp({ dbLayer: Db.layerMemory });
+    const deleteEnv = { ...env, MEDIA_FILES: mediaBucket };
 
     await app.request(
       "/api/captures",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -1499,31 +2042,53 @@ describe("web app", () => {
           payload: { note: "export this" },
         }),
       },
-      env,
+      deleteEnv,
+    );
+    await app.request(
+      "/api/media",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          dataBase64: btoa("delete me"),
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          kind: "image",
+          label: "Delete me",
+          mimeType: "image/jpeg",
+        }),
+      },
+      deleteEnv,
     );
 
-    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
+    const exportResponse = await app.request(
+      "/api/export",
+      { headers: authenticatedHeaders },
+      deleteEnv,
+    );
     const exported = await exportResponse.json();
     const deleteResponse = await app.request(
       "/api/account/delete",
-      { method: "POST", headers: anonymousHeaders },
-      env,
+      { method: "POST", headers: authenticatedHeaders },
+      deleteEnv,
     );
     const afterDeleteResponse = await app.request(
       "/api/export",
-      { headers: anonymousHeaders },
-      env,
+      { headers: authenticatedHeaders },
+      deleteEnv,
     );
 
     expect(exportResponse.status).toBe(200);
     expect(exported).toMatchObject({
-      user: { id: anonymousUserId, displayName: "Anonymous User" },
+      user: testUser,
       events: [expect.objectContaining({ payload: { note: "export this" } })],
     });
     expect(deleteResponse.status).toBe(200);
     expect(await deleteResponse.json()).toEqual({ deleted: true });
+    expect([...mediaObjects.keys()]).not.toContain(
+      `users/${testUserId}/media/550e8400-e29b-41d4-a716-446655440000`,
+    );
     expect(await afterDeleteResponse.json()).toMatchObject({
-      user: { id: anonymousUserId, displayName: "Anonymous User" },
+      user: testUser,
       events: [],
       commitments: [],
       outcomes: [],
@@ -1543,7 +2108,7 @@ describe("web app", () => {
     try {
       response = await app.request(
         "/api/account/delete",
-        { method: "POST", headers: anonymousHeaders },
+        { method: "POST", headers: authenticatedHeaders },
         {
           ...env,
           TURBOPUFFER_API_KEY: "test-key",
@@ -1561,7 +2126,7 @@ describe("web app", () => {
     expect(String(url)).toMatch(
       /^https:\/\/aws-eu-west-1\.turbopuffer\.com\/v2\/namespaces\/nudge-user-[a-f0-9]{48}$/,
     );
-    expect(String(url)).not.toContain(anonymousUserId);
+    expect(String(url)).not.toContain(testUserId);
     expect(init?.method).toBe("DELETE");
   });
 
@@ -1579,7 +2144,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "need to write to michael",
           localDate: "2026-06-18",
@@ -1601,13 +2166,13 @@ describe("web app", () => {
 
     const documentResponse = await app.request(
       "/api/journal/2026-06-18",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     expect(documentResponse.status).toBe(200);
     expect((await documentResponse.json()).document.bodyText).toBe("need to write to michael");
 
-    const exportResponse = await app.request("/api/export", { headers: anonymousHeaders }, env);
+    const exportResponse = await app.request("/api/export", { headers: authenticatedHeaders }, env);
     const exported = await exportResponse.json();
     expect(exported.journalDocuments).toHaveLength(1);
     expect(exported.journalRevisions).toHaveLength(1);
@@ -1644,16 +2209,77 @@ describe("web app", () => {
       ]),
     );
 
-    const actionsResponse = await app.request("/api/actions", { headers: anonymousHeaders }, env);
+    const actionsResponse = await app.request(
+      "/api/actions",
+      { headers: authenticatedHeaders },
+      env,
+    );
     const actions = await actionsResponse.json();
     expect(actions.actions).toEqual([]);
     expect(actions.latestRun).toEqual(expect.objectContaining({ status: "queued" }));
     const summariesResponse = await app.request(
       "/api/summaries",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     expect((await summariesResponse.json()).summaries).toEqual([]);
+  });
+
+  test("POST /api/journal enforces per-user AI route quota before workflow scheduling", async () => {
+    const rateLimitedUser = { displayName: "Journal Rate Limited", id: "rate-user-journal" };
+    const workflowCreates: Array<{ readonly id?: string; readonly params?: unknown }> = [];
+    const workflow = {
+      create: async (input?: { readonly id?: string; readonly params?: unknown }) => {
+        workflowCreates.push(input ?? {});
+        return { id: input?.id ?? "test-workflow-id" };
+      },
+    } as Workflow;
+    const app = createApp({
+      authSessionResolver: authSessionResolverFor(rateLimitedUser),
+      dbLayer: Db.layerMemory,
+    });
+    const limitedEnv = {
+      ...env,
+      AI_ROUTE_RATE_LIMIT_MAX: "1",
+      AI_ROUTE_RATE_LIMIT_WINDOW_SECONDS: "60",
+      DAILY_DIGEST_WORKFLOW: workflow,
+    };
+
+    const first = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          bodyText: "Queue one analysis",
+          localDate: "2026-06-19",
+          title: "June 19",
+        }),
+      },
+      limitedEnv,
+    );
+    const second = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          bodyText: "This should not schedule",
+          localDate: "2026-06-20",
+          title: "June 20",
+        }),
+      },
+      limitedEnv,
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    expect(Number(second.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(await second.json()).toMatchObject({
+      error: "AI rate limit exceeded",
+      limit: 1,
+    });
+    expect(workflowCreates).toHaveLength(1);
   });
 
   test("iOS clients can list calendar day activity", async () => {
@@ -1663,7 +2289,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "Met Kai and captured the follow-up.",
           localDate: "2026-06-18",
@@ -1676,7 +2302,7 @@ describe("web app", () => {
       "/api/events",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           occurredAt: "2026-06-18T10:00:00.000Z",
           payload: { note: "Follow up with Kai." },
@@ -1690,7 +2316,7 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/calendar/days?timeZone=UTC",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     const body = await response.json();
@@ -1705,13 +2331,70 @@ describe("web app", () => {
     ]);
   });
 
+  test("POST /api/journal persists AI context as a debug-wide event", async () => {
+    const traceDb = createTraceDb();
+    const workflow = {
+      create: async (input?: { readonly id?: string }) => ({ id: input?.id ?? "workflow-id" }),
+    } as Workflow;
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/journal",
+      {
+        method: "POST",
+        headers: {
+          ...authenticatedJsonHeaders,
+          "cf-ray": "journal-ray",
+          "content-type": "application/json",
+          "user-agent": "Nudge/1",
+        },
+        body: JSON.stringify({
+          bodyText: "I need to work on the guest list",
+          localDate: "2026-07-01",
+          title: "July 1",
+        }),
+      },
+      { ...env, DB: traceDb.db, DAILY_DIGEST_WORKFLOW: workflow },
+    );
+
+    expect(response.status).toBe(200);
+    const saved = await response.json();
+    expect(traceDb.rows).toHaveLength(1);
+
+    const payload = JSON.parse(String(traceDb.rows[0]?.[16]));
+    expect(payload).toMatchObject({
+      event: "http_request_completed",
+      routeName: "api.journal",
+      aiErrorCode: null,
+      aiModel: "@cf/zai-org/glm-4.7-flash",
+      aiRunId: saved.analysisRun.id,
+      aiSourceType: "note_revision",
+      aiSystem: "cloudflare-think",
+      noteLocalDate: "2026-07-01",
+      "otel.name": "api.journal",
+      "otel.status_code": "OK",
+      "http.request.method": "POST",
+      "http.route": "api.journal",
+      "http.response.status_code": 200,
+      "url.path": "/api/journal",
+      "user_agent.original": "Nudge/1",
+      "service.name": "nudge-web",
+      "deployment.environment.name": "test",
+      "nudge.debug_kind": "ai",
+      "nudge.ai.system": "cloudflare-think",
+      "nudge.ai.model": "@cf/zai-org/glm-4.7-flash",
+      "nudge.ai.run_id": saved.analysisRun.id,
+      "nudge.ai.error_code": null,
+    });
+  });
+
   test("custom integrations can fetch a queued agent run by id", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const save = await app.request(
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "need to work on the guest list",
           localDate: "2026-07-01",
@@ -1724,7 +2407,7 @@ describe("web app", () => {
 
     const response = await app.request(
       `/api/agent-runs/${saved.analysisRun.id}`,
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
 
@@ -1743,7 +2426,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "OKF should be mounted into the sandbox for grep and cat.",
           localDate: "2026-06-29",
@@ -1754,7 +2437,11 @@ describe("web app", () => {
     );
     expect(save.status).toBe(200);
 
-    const listed = await app.request("/api/okf?path=/daily", { headers: anonymousHeaders }, env);
+    const listed = await app.request(
+      "/api/okf?path=/daily",
+      { headers: authenticatedHeaders },
+      env,
+    );
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual({
       entries: ["2026-06-29.md", "index.md"],
@@ -1763,7 +2450,7 @@ describe("web app", () => {
 
     const read = await app.request(
       "/api/okf/file?path=/daily/2026-06-29.md",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     expect(read.status).toBe(200);
@@ -1774,7 +2461,7 @@ describe("web app", () => {
 
     const search = await app.request(
       "/api/okf/search?query=grep&limit=1",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     expect(search.status).toBe(200);
@@ -1794,7 +2481,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "MCP should expose the same OKF workspace boundary.",
           localDate: "2026-07-02",
@@ -1809,7 +2496,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 0,
           jsonrpc: "2.0",
@@ -1835,7 +2522,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -1858,7 +2545,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 2,
           jsonrpc: "2.0",
@@ -1886,7 +2573,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 4,
           jsonrpc: "2.0",
@@ -1914,7 +2601,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 6,
           jsonrpc: "2.0",
@@ -1938,7 +2625,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 5,
           jsonrpc: "2.0",
@@ -1967,7 +2654,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 3,
           jsonrpc: "2.0",
@@ -2014,7 +2701,7 @@ describe("web app", () => {
       "/mcp",
       {
         method: "POST",
-        headers: anonymousMcpHeaders,
+        headers: authenticatedMcpHeaders,
         body: JSON.stringify({
           id: 1,
           jsonrpc: "2.0",
@@ -2049,12 +2736,16 @@ describe("web app", () => {
       },
     });
 
-    const proposals = await app.request("/api/proposals", { headers: anonymousHeaders }, env);
+    const proposals = await app.request("/api/proposals", { headers: authenticatedHeaders }, env);
     expect((await proposals.json()).proposals).toEqual([
       expect.objectContaining({ status: "pending", title: "Follow up on launch" }),
     ]);
 
-    const commitments = await app.request("/api/commitments", { headers: anonymousHeaders }, env);
+    const commitments = await app.request(
+      "/api/commitments",
+      { headers: authenticatedHeaders },
+      env,
+    );
     expect((await commitments.json()).commitments).toEqual([]);
   });
 
@@ -2081,7 +2772,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox should expose OKF files to grep.",
           localDate: "2026-06-30",
@@ -2094,7 +2785,7 @@ describe("web app", () => {
 
     const smoke = await app.request(
       "/api/okf/sandbox/smoke",
-      { method: "POST", headers: anonymousHeaders },
+      { method: "POST", headers: authenticatedHeaders },
       env,
     );
 
@@ -2141,7 +2832,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "Sandbox startup can fail locally while OKF projection remains valid.",
           localDate: "2026-07-01",
@@ -2154,7 +2845,7 @@ describe("web app", () => {
 
     const smoke = await app.request(
       "/api/okf/sandbox/smoke",
-      { method: "POST", headers: anonymousHeaders },
+      { method: "POST", headers: authenticatedHeaders },
       env,
     );
 
@@ -2178,21 +2869,18 @@ describe("web app", () => {
         return { id: input?.id ?? "generated-workflow-id" };
       },
     } as Workflow;
-    const agentNamespace = {
-      idFromName: (name: string) => ({ name }),
-      get: () => ({
-        fetch: async () => {
-          throw new Error("journal save should not call the agent synchronously");
-        },
-      }),
-    } as DurableObjectNamespace;
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async () => {
+        throw new Error("journal save should not call the agent synchronously");
+      },
+    });
     const app = createApp({ dbLayer: Db.layerMemory });
 
     const response = await app.request(
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "Ask AI to extract this action durably",
           localDate: "2026-06-22",
@@ -2220,14 +2908,14 @@ describe("web app", () => {
           localDate: "2026-06-22",
           revisionId: saved.analysisRun.sourceId,
           runId: saved.analysisRun.id,
-          userId: anonymousUserId,
+          userId: testUserId,
           workflowVersion: 1,
         }),
       }),
     ]);
 
     const exported = await (
-      await app.request("/api/export", { headers: anonymousHeaders }, env)
+      await app.request("/api/export", { headers: authenticatedHeaders }, env)
     ).json();
     expect(exported.agentRuns).toEqual([expect.objectContaining({ status: "queued" })]);
     expect(exported.extractedItems).toEqual([]);
@@ -2241,7 +2929,7 @@ describe("web app", () => {
       "/api/journal",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           bodyText: "I have now written to michael",
           localDate: "2026-06-21",
@@ -2253,7 +2941,7 @@ describe("web app", () => {
 
     expect(response.status).toBe(200);
     const actions = await (
-      await app.request("/api/actions", { headers: anonymousHeaders }, env)
+      await app.request("/api/actions", { headers: authenticatedHeaders }, env)
     ).json();
     expect(actions.latestRun).toEqual(
       expect.objectContaining({ model: "@cf/zai-org/glm-4.7-flash", status: "queued" }),
@@ -2268,7 +2956,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2284,7 +2972,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2297,7 +2985,11 @@ describe("web app", () => {
       env,
     );
 
-    const signalsResponse = await app.request("/api/signals", { headers: anonymousHeaders }, env);
+    const signalsResponse = await app.request(
+      "/api/signals",
+      { headers: authenticatedHeaders },
+      env,
+    );
     const body = await signalsResponse.json();
     const capture = await captureResponse.json();
     const retriedCapture = await retriedCaptureResponse.json();
@@ -2307,7 +2999,7 @@ describe("web app", () => {
     expect(signalsResponse.status).toBe(200);
     expect(body.signals).toEqual([
       expect.objectContaining({
-        userId: anonymousUserId,
+        userId: testUserId,
         type: "user_context_captured",
         payload: { note: "primitive route" },
       }),
@@ -2321,7 +3013,7 @@ describe("web app", () => {
       "/api/quick-captures",
       {
         method: "POST",
-        headers: { ...anonymousJsonHeaders, "x-nudge-client": "desktop" },
+        headers: { ...authenticatedJsonHeaders, "x-nudge-client": "desktop" },
         body: JSON.stringify({
           idempotencyKey: "quick-capture-retry-1",
           note: "Travel this week and follow up with work",
@@ -2335,7 +3027,7 @@ describe("web app", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       capture: expect.objectContaining({
-        userId: anonymousUserId,
+        userId: testUserId,
         type: "manual_check_in_submitted",
         source: "desktop_app",
         occurredAt: "2026-06-12T10:00:00.000Z",
@@ -2363,7 +3055,7 @@ describe("web app", () => {
       "/api/voice/log",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           idempotencyKey: "siri-log-1",
           occurredAt: "2026-06-12T10:00:00.000Z",
@@ -2382,7 +3074,7 @@ describe("web app", () => {
     );
     const voiceLog = await response.json();
     const signals = await (
-      await app.request("/api/signals", { headers: anonymousHeaders }, env)
+      await app.request("/api/signals", { headers: authenticatedHeaders }, env)
     ).json();
 
     expect(response.status).toBe(200);
@@ -2409,7 +3101,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2425,14 +3117,14 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
     const latestResponse = await app.request(
       "/api/syntheses/latest?frameKey=current_state",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     const synthesis = await response.json();
@@ -2459,7 +3151,7 @@ describe("web app", () => {
       "/api/captures",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           type: "user_context_captured",
           source: "api",
@@ -2474,7 +3166,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2484,7 +3176,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2493,14 +3185,14 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
     );
     const listBeforeReviewResponse = await app.request(
       "/api/proposals",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     const listBeforeReview = await listBeforeReviewResponse.json();
@@ -2510,14 +3202,14 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ proposalId: proposal.id, decision: "accepted" }),
       },
       env,
     );
     const listAfterReviewResponse = await app.request(
       "/api/proposals",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
 
@@ -2547,7 +3239,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2556,7 +3248,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2567,7 +3259,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
@@ -2576,14 +3268,14 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ proposalId: proposals[0].id, decision: "accepted" }),
       },
       env,
     );
     const commitmentsResponse = await app.request(
       "/api/commitments",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     const { commitments } = await commitmentsResponse.json();
@@ -2591,7 +3283,7 @@ describe("web app", () => {
       "/api/outcomes",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2604,7 +3296,7 @@ describe("web app", () => {
       "/api/outcomes",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           commitmentId: commitments[0].id,
           result: "completed",
@@ -2613,10 +3305,14 @@ describe("web app", () => {
       },
       env,
     );
-    const outcomesResponse = await app.request("/api/outcomes", { headers: anonymousHeaders }, env);
+    const outcomesResponse = await app.request(
+      "/api/outcomes",
+      { headers: authenticatedHeaders },
+      env,
+    );
     const activeAfterOutcomeResponse = await app.request(
       "/api/commitments",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
 
@@ -2650,7 +3346,7 @@ describe("web app", () => {
       "/api/syntheses",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2659,7 +3355,7 @@ describe("web app", () => {
       "/api/proposals/generate",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({ frameKey: "current_state" }),
       },
       env,
@@ -2670,7 +3366,7 @@ describe("web app", () => {
       "/api/reviews",
       {
         method: "POST",
-        headers: anonymousJsonHeaders,
+        headers: authenticatedJsonHeaders,
         body: JSON.stringify({
           proposalId: proposals[0].id,
           decision: "edited",
@@ -2683,7 +3379,7 @@ describe("web app", () => {
     );
     const commitmentsResponse = await app.request(
       "/api/commitments",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
 
@@ -2713,7 +3409,7 @@ describe("web app", () => {
           "/api/events",
           {
             method: "POST",
-            headers: anonymousJsonHeaders,
+            headers: authenticatedJsonHeaders,
             body: JSON.stringify({
               type,
               source: "api",
@@ -2729,7 +3425,7 @@ describe("web app", () => {
 
     const response = await app.request(
       "/api/events?from=2026-06-07T00:00:00.000Z&to=2026-06-14T23:59:59.999Z",
-      { headers: anonymousHeaders },
+      { headers: authenticatedHeaders },
       env,
     );
     const body = await response.json();
@@ -2740,7 +3436,7 @@ describe("web app", () => {
 
   test("GET /api/openapi.json documents the public events API", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/openapi.json", { headers: anonymousHeaders }, env);
+    const response = await app.request("/api/openapi.json", { headers: authenticatedHeaders }, env);
     const spec = await response.json();
 
     expect(response.status).toBe(200);
@@ -2784,7 +3480,7 @@ describe("web app", () => {
 
   test("GET /api/docs serves human-readable API documentation", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
-    const response = await app.request("/api/docs", { headers: anonymousHeaders }, env);
+    const response = await app.request("/api/docs", { headers: authenticatedHeaders }, env);
     const body = await response.text();
 
     expect(response.status).toBe(200);

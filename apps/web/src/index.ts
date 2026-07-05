@@ -23,16 +23,25 @@ import {
   createTraceId,
   parseTraceparent,
   persistAgentTraceRun,
+  persistTraceCacheSpan,
   safeErrorFields,
   traceparentHeader,
   type AgentTraceRunInput,
+  type SqlInsertRow,
   type RuntimeTraceContext,
   withRuntimeTraceContext,
 } from "@nudge/observability";
 import type { Env } from "./env";
 import { dailyNoteExtractionPrompt, loopIntakeSystemPrompt } from "./agent-prompts";
+import {
+  aiRateLimitResponse,
+  aiRouteQuotaRequestSchema,
+  reserveAiAgentQuota,
+  reserveConfiguredAiQuota,
+} from "./ai-rate-limit";
 import { createApp } from "./app";
 import {
+  braintrustRawAiTelemetryEnabled,
   ensureBraintrustTracing,
   runBraintrustSpan,
   wrapBraintrustAISDK,
@@ -47,7 +56,9 @@ import {
 import { resolveDbLayerForEnv } from "./db-layer";
 
 const app = createApp();
-const tracedAI = wrapBraintrustAISDK({ generateObject, smoothStream, streamText });
+const baseAI = { generateObject, smoothStream, streamText };
+const aiSdkForEnv = (env: Env) =>
+  wrapBraintrustAISDK(baseAI, { rawTelemetry: braintrustRawAiTelemetryEnabled(env) });
 const extractionModelName = (env: Env) => env.EXTRACTION_MODEL ?? env.THINK_MODEL;
 
 export default app;
@@ -76,6 +87,13 @@ const persistDailyNoteAgentTrace = async (env: Env, input: AgentTraceRunInput) =
   }
 };
 
+const safeRecordSpan = (env: Env) => (row: SqlInsertRow) => {
+  const traceDb = env.DB;
+  if (typeof traceDb?.prepare !== "function") return;
+  const persistence = persistTraceCacheSpan(traceDb, row).pipe(Effect.catch(() => Effect.void));
+  void Effect.runPromise(persistence);
+};
+
 const runtimeTraceContextFromRequest = (
   env: Env,
   request: Request,
@@ -89,11 +107,13 @@ const runtimeTraceContextFromRequest = (
   const path = new URL(request.url).pathname;
 
   return {
+    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: request.method,
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path,
+    recordSpan: safeRecordSpan(env),
     requestId,
     rootSpanId,
     routeName,
@@ -114,11 +134,13 @@ const runtimeTraceContextFromWorkflow = (
   const rootSpanId = createSpanId();
 
   return {
+    cacheable: true,
     environment: env.ENVIRONMENT ?? "unknown",
     flags: incomingTrace?.flags ?? "01",
     method: "WORKFLOW",
     parentSpanId: incomingTrace?.parentSpanId ?? rootSpanId,
     path: routeName,
+    recordSpan: safeRecordSpan(env),
     requestId: input.kind === "daily-note-analysis" ? (input.requestId ?? null) : null,
     rootSpanId,
     routeName,
@@ -150,6 +172,8 @@ const traceHeadersFromContext = (traceContext: RuntimeTraceContext) => ({
 interface UserAgentSessionState {
   readonly conversationId: string | null;
   readonly createdAt: string | null;
+  readonly recentAiRequestsAt: ReadonlyArray<string>;
+  readonly recentAiRouteRequests: Readonly<Record<string, ReadonlyArray<string>>>;
   readonly recentMemoryRetrievalsAt: ReadonlyArray<string>;
   readonly recentToolEvents: ReadonlyArray<{
     readonly at: string;
@@ -262,6 +286,8 @@ const reasoningHarness = {
 const initialUserAgentSessionState = {
   conversationId: null,
   createdAt: null,
+  recentAiRequestsAt: [],
+  recentAiRouteRequests: {},
   recentMemoryRetrievalsAt: [],
   recentToolEvents: [],
   updatedAt: null,
@@ -275,6 +301,9 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const url = new URL(request.url);
     if (url.pathname === "/metadata") {
       return this.metadata(request);
+    }
+    if (url.pathname === "/quota/ai" && request.method === "POST") {
+      return this.reserveRouteAiQuota(request);
     }
     if (url.pathname === "/tools/list-recent-signals") {
       return this.listRecentSignals(request, url);
@@ -335,6 +364,42 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     return [now.toISOString(), ...recent].slice(0, 30);
   }
 
+  private async reserveRouteAiQuota(request: Request) {
+    const user = this.resolveUser(request);
+    const conversationId = "ai-quota";
+    if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
+    if (!(await this.verifyInternalRequest(request, user, conversationId))) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+    const input = aiRouteQuotaRequestSchema.parse(await request.json());
+    const previous = this.state ?? initialUserAgentSessionState;
+    const previousRouteRequests = previous.recentAiRouteRequests ?? {};
+    const decision = reserveConfiguredAiQuota({
+      max: input.max,
+      previousTimestamps: previousRouteRequests[input.route] ?? [],
+      windowSeconds: input.windowSeconds,
+    });
+
+    if (decision.allowed) {
+      const timestamp = new Date().toISOString();
+      this.setState({
+        conversationId,
+        createdAt: previous.createdAt ?? timestamp,
+        recentAiRequestsAt: previous.recentAiRequestsAt ?? [],
+        recentAiRouteRequests: {
+          ...previousRouteRequests,
+          [input.route]: decision.reservedTimestamps,
+        },
+        recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
+        recentToolEvents: previous.recentToolEvents ?? [],
+        updatedAt: timestamp,
+        userId: user.id,
+      });
+    }
+
+    return Response.json(decision);
+  }
+
   private async metadata(request: Request) {
     const conversationId = request.headers.get("x-nudge-conversation-id") ?? "default";
     const user = this.resolveUser(request);
@@ -386,6 +451,8 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentAiRequestsAt: previous.recentAiRequestsAt ?? [],
+      recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         recentToolEvent({ at: timestamp, resultCount: signals.length, tool: "listRecentSignals" }),
@@ -455,6 +522,8 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentAiRequestsAt: previous.recentAiRequestsAt ?? [],
+      recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
       recentMemoryRetrievalsAt,
       recentToolEvents: [
         recentToolEvent({
@@ -492,6 +561,22 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const message = String(body.message ?? "").trim();
     const previous = this.state ?? initialUserAgentSessionState;
     const now = new Date();
+    const aiQuota = reserveAiAgentQuota({
+      env: this.env,
+      previousTimestamps: previous.recentAiRequestsAt ?? [],
+    });
+    if (!aiQuota.allowed) return aiRateLimitResponse(aiQuota);
+    const reservedAt = now.toISOString();
+    this.setState({
+      conversationId,
+      createdAt: previous.createdAt ?? reservedAt,
+      recentAiRequestsAt: aiQuota.reservedTimestamps,
+      recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
+      recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
+      recentToolEvents: previous.recentToolEvents ?? [],
+      updatedAt: reservedAt,
+      userId: user.id,
+    });
     const recentMemoryRetrievalsAt = this.reserveMemoryRetrieval(previous, now);
     const memoryResults = recentMemoryRetrievalsAt
       ? await this.retrieveMemoryResults(user, message, 5, traceContext)
@@ -509,6 +594,8 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     this.setState({
       conversationId,
       createdAt: previous.createdAt ?? timestamp,
+      recentAiRequestsAt: aiQuota.reservedTimestamps,
+      recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
       recentMemoryRetrievalsAt: recentMemoryRetrievalsAt ?? previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         recentToolEvent({ at: timestamp, resultCount: draft.draft ? 1 : 0, tool: "reply" }),
@@ -577,17 +664,37 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
     const body = journalInterpretRequestBodySchema.parse(await request.json());
     const changedText = String(body.changedText ?? "").trim();
     const localDate = String(body.localDate ?? "today");
+    const previous = this.state ?? initialUserAgentSessionState;
+    let recentAiRequestsAt = previous.recentAiRequestsAt ?? [];
     let extraction: ThinkDailyNoteExtraction = {
       items: [],
       model: extractionModelName(this.env),
       provider: "cloudflare-think",
     };
     if (changedText.length > 0) {
+      const aiQuota = reserveAiAgentQuota({
+        env: this.env,
+        previousTimestamps: recentAiRequestsAt,
+      });
+      if (!aiQuota.allowed) return aiRateLimitResponse(aiQuota);
+      recentAiRequestsAt = aiQuota.reservedTimestamps;
+      const reservedAt = new Date().toISOString();
+      this.setState({
+        conversationId: "journal",
+        createdAt: previous.createdAt ?? reservedAt,
+        recentAiRequestsAt,
+        recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
+        recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
+        recentToolEvents: previous.recentToolEvents ?? [],
+        updatedAt: reservedAt,
+        userId: user.id,
+      });
       const intake = await this.subAgent(LoopIntakeThinkAgent, "journal-current-state");
       ensureBraintrustTracing(this.env.BRAINTRUST_API_KEY);
       try {
         extraction = await runBraintrustSpan(
           {
+            apiKey: this.env.BRAINTRUST_API_KEY,
             attributes: {
               "nudge.ai.changed_text_chars": changedText.length,
               "nudge.ai.local_date": localDate,
@@ -623,10 +730,11 @@ export class UserAgentSession extends Agent<Env, UserAgentSessionState> {
       }
     }
     const timestamp = new Date().toISOString();
-    const previous = this.state ?? initialUserAgentSessionState;
     this.setState({
       conversationId: "journal",
       createdAt: previous.createdAt ?? timestamp,
+      recentAiRequestsAt,
+      recentAiRouteRequests: previous.recentAiRouteRequests ?? {},
       recentMemoryRetrievalsAt: previous.recentMemoryRetrievalsAt ?? [],
       recentToolEvents: [
         recentToolEvent({
@@ -716,9 +824,10 @@ export class LoopIntakeThinkAgent extends Think<Env> {
           `Draft rationale: ${input.draft.rationale}`,
         ].join("\n")
       : "No review draft was created.";
-    const result = tracedAI.streamText({
+    const ai = aiSdkForEnv(this.env);
+    const result = ai.streamText({
       abortSignal: AbortSignal.timeout(30_000),
-      experimental_transform: tracedAI.smoothStream({
+      experimental_transform: ai.smoothStream({
         chunking: "word",
         delayInMs: 20,
       }),
@@ -748,7 +857,8 @@ export class LoopIntakeThinkAgent extends Think<Env> {
     readonly changedText: string;
     readonly localDate: string;
   }): Promise<ThinkDailyNoteExtraction> {
-    const { object } = await tracedAI.generateObject({
+    const ai = aiSdkForEnv(this.env);
+    const { object } = await ai.generateObject({
       abortSignal: AbortSignal.timeout(10_000),
       model: this.getExtractionModel(),
       prompt: dailyNoteExtractionPrompt(input),
@@ -929,6 +1039,8 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
           this.env,
           traceContext,
           NoteAnalysisWorkflows.markAnalysisRunRunning({
+            ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+            localDate: input.localDate,
             runId: input.runId,
             userId: input.userId,
           }),
@@ -1000,6 +1112,9 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
                 provider: extraction.provider,
               },
               localDate: input.localDate,
+              ...(input.idempotencyKey !== undefined
+                ? { idempotencyKey: input.idempotencyKey }
+                : {}),
               noteId: input.noteId,
               revisionId: input.revisionId,
               runId: input.runId,
@@ -1051,6 +1166,10 @@ export class DailyDigestWorkflow extends WorkflowEntrypoint<Env, NudgeWorkflowPa
             traceContext,
             NoteAnalysisWorkflows.markAnalysisRunFailed({
               errorCode,
+              ...(input.idempotencyKey !== undefined
+                ? { idempotencyKey: input.idempotencyKey }
+                : {}),
+              localDate: input.localDate,
               runId: input.runId,
               userId: input.userId,
             }),

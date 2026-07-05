@@ -11,7 +11,17 @@ export interface Env {
   ENVIRONMENT?: string;
   APP_VERSION?: string;
   LOG_HTTP_REQUESTS?: string;
+  TRACE_API_ENABLED?: string;
+  TRACE_API_USER_IDS?: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENABLED?: string;
+  SENTRY_TRACES_SAMPLE_RATE?: string;
   BRAINTRUST_API_KEY?: string;
+  BRAINTRUST_RAW_AI_TELEMETRY?: string;
+  AI_AGENT_RATE_LIMIT_MAX?: string;
+  AI_AGENT_RATE_LIMIT_WINDOW_SECONDS?: string;
+  AI_ROUTE_RATE_LIMIT_MAX?: string;
+  AI_ROUTE_RATE_LIMIT_WINDOW_SECONDS?: string;
   AGENT_INTERNAL_SECRET?: string;
   CLERK_AUTHORIZED_PARTIES?: string;
   CLERK_PUBLISHABLE_KEY?: string;

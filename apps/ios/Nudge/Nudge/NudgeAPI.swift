@@ -1,3 +1,4 @@
+import ClerkKit
 import Foundation
 
 struct VoiceLogResponse: Decodable {
@@ -29,10 +30,6 @@ struct JournalResponse: Decodable {
 struct JournalSaveResponse: Decodable {
     let analysisRun: AgentRun?
     let document: JournalDocument
-}
-
-struct AgentRunResponse: Decodable {
-    let run: AgentRun?
 }
 
 struct MediaUploadResponse: Decodable {
@@ -437,19 +434,14 @@ enum NudgeAPI {
         return response.document
     }
 
-    static func getAgentRun(runId: String) async throws -> AgentRun? {
-        let escaped = runId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? runId
-        let response: AgentRunResponse = try await get("/api/agent-runs/\(escaped)")
-        return response.run
-    }
-
     static func saveDailyNote(
         _ note: String,
         attachments: [JournalMediaAttachment] = [],
         existingJournalText: String? = nil,
         trailingNote: String = "",
         localDate: String,
-        treatsNoteAsFullBody: Bool = false
+        treatsNoteAsFullBody: Bool = false,
+        idempotencyKey: String? = nil
     ) async throws -> SavedCapture {
         let storedAttachments = try await uploadMediaAttachments(attachments)
         let composition = JournalSaveCompositionPolicy.evaluate(
@@ -473,6 +465,7 @@ enum NudgeAPI {
             body: JournalSaveRequest(
                 bodyDocument: bodyDocument,
                 bodyText: composition.journalBodyText,
+                idempotencyKey: idempotencyKey,
                 localDate: localDate,
                 title: localDate
             )
@@ -518,7 +511,7 @@ enum NudgeAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path, queryItems: queryItems))
         request.httpMethod = "GET"
-        applyClientIdentity(to: &request)
+        try await applyClientIdentity(to: &request)
         return try await send(request)
     }
 
@@ -528,7 +521,7 @@ enum NudgeAPI {
     ) async throws -> Response {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
-        applyClientIdentity(to: &request)
+        try await applyClientIdentity(to: &request)
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try encoder.encode(body)
         return try await send(request)
@@ -572,9 +565,12 @@ enum NudgeAPI {
         )
     }
 
-    private static func applyClientIdentity(to request: inout URLRequest) {
-        request.setValue(NudgeInstallIdentity.currentUserID(), forHTTPHeaderField: "x-nudge-anonymous-user-id")
+    private static func applyClientIdentity(to request: inout URLRequest) async throws {
         request.setValue("ios", forHTTPHeaderField: "x-nudge-client")
+        guard let token = try await Clerk.shared.auth.getToken() else {
+            throw NudgeAPIError.authenticationRequired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     private static func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -598,25 +594,6 @@ enum NudgeAPI {
             throw NudgeAPIError.badURL
         }
         return url
-    }
-}
-
-enum NudgeInstallIdentity {
-    static let userIDKey = "nudge.anonymousUserID"
-
-    static func currentUserID(defaults: UserDefaults = .standard) -> String {
-        if let existing = defaults.string(forKey: userIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           existing.hasPrefix("anon_") {
-            return existing.lowercased()
-        }
-
-        let userID = generatedUserID(uuidString: UUID().uuidString)
-        defaults.set(userID, forKey: userIDKey)
-        return userID
-    }
-
-    static func generatedUserID(uuidString: String) -> String {
-        "anon_\(uuidString.lowercased())"
     }
 }
 
@@ -681,6 +658,7 @@ private struct MediaUploadRequest: Encodable {
 private struct JournalSaveRequest: Encodable {
     let bodyDocument: [RichTextBlock]
     let bodyText: String
+    let idempotencyKey: String?
     let localDate: String
     let title: String
 }
@@ -757,6 +735,7 @@ private struct CaptureAttachmentPayload: Encodable {
 }
 
 enum NudgeAPIError: LocalizedError {
+    case authenticationRequired
     case badResponse
     case badURL
     case badMediaData
@@ -764,6 +743,8 @@ enum NudgeAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .authenticationRequired:
+            return "Server sign-in required."
         case .badResponse:
             return "The server returned an unreadable response."
         case .badURL:

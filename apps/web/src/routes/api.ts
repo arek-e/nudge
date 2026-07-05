@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import type { DesktopSignInTokenFactory } from "../auth";
 import type { ResolveRequestApp } from "../request-context";
+import { aiRateLimitResponse, reserveAiRouteQuota } from "../ai-rate-limit";
 import { conversationMessageInputSchema } from "../api-contract";
 import { makeApiHandler, type ApiContext } from "../api-router";
 import { conversationStreamPath, proxyConversationStream } from "../conversation-proxy";
@@ -34,13 +35,35 @@ export function registerApiRoutes(
 
   app.use("/api/*", async (c, next) => {
     const { appServices, runEffect } = await resolveRequestApp(c);
+    if (hasUnsafeApiPath(rawPathFromRequest(c.req.raw)) || hasUnsafeApiPath(c.req.path)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const clientSurface = c.req.header("x-nudge-client");
+    if (clientSurface !== undefined) {
+      addWideEventFields(c, { clientSurface });
+    }
     const auth = await runWithRequestSpan(
       c,
       { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
       () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
     );
-    if (!auth.user && !c.req.path.startsWith("/api/session")) {
+    addWideEventFields(c, {
+      authMode: auth.authMode,
+      ...(auth.user ? { userId: auth.user.id, workspaceId: auth.user.id } : {}),
+    });
+    if (!auth.user && !isPublicApiSessionPath(c.req.path)) {
       return c.json({ error: "Authentication required" }, 401);
+    }
+    if (isTraceApiPath(c.req.path)) {
+      const traceUser = auth.user;
+      if (auth.authMode !== "clerk" || !traceUser) {
+        return c.json({ error: "Authentication required" }, 401);
+      }
+      const access = traceApiAccess(c.env, traceUser.id);
+      if (access === "disabled") {
+        return c.json({ error: "Not found" }, 404);
+      }
+      if (access === "forbidden") return c.json({ error: "Forbidden" }, 403);
     }
 
     const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
@@ -58,6 +81,20 @@ export function registerApiRoutes(
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
     const streamConversationId = conversationStreamPath(c.req.path);
+    const expensiveAiRoute = expensiveAiRouteFor(c.req.method, c.req.path, streamConversationId);
+    if (expensiveAiRoute) {
+      const quota = await reserveAiRouteQuota({
+        agentSessions: appServices.agentSessions,
+        env: c.env,
+        ...(appServices.agentInternalSecret
+          ? { internalSecret: appServices.agentInternalSecret }
+          : {}),
+        route: expensiveAiRoute,
+        user,
+      });
+      if (!quota.allowed) return aiRateLimitResponse(quota);
+    }
+
     if (streamConversationId && c.req.method === "POST") {
       const input = conversationMessageInputSchema.safeParse(
         await c.req.raw
@@ -115,7 +152,6 @@ export function registerApiRoutes(
       return new Response(object.body, { headers });
     }
 
-    const clientSurface = c.req.header("x-nudge-client");
     const result = await runWithRequestSpan(
       c,
       { attributes: { "rpc.system": "orpc" }, name: "orpc.handle" },
@@ -132,6 +168,7 @@ export function registerApiRoutes(
             db: appServices.db,
             getOkfSandbox: () => appServices.okfSandboxFor(user),
             ...(clientSurface !== undefined ? { clientSurface } : {}),
+            ...(appServices.mediaFiles ? { mediaFiles: appServices.mediaFiles } : {}),
             recordSpan,
             runEffect,
             session: auth,
@@ -153,6 +190,58 @@ export function registerApiRoutes(
 
     await next();
   });
+}
+
+function expensiveAiRouteFor(method: string, path: string, streamConversationId: string | null) {
+  if (method !== "POST") return null;
+  if (streamConversationId) return "conversation_message";
+  if (/^\/api\/conversations\/[^/]+\/messages$/.test(path)) return "conversation_message";
+  if (path === "/api/journal") return "journal_analysis";
+  return null;
+}
+
+function isPublicApiSessionPath(path: string) {
+  return path === "/api/session" || path === "/api/session/";
+}
+
+function hasUnsafeApiPath(path: string) {
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.includes("%2e") || lowerPath.includes("%2f") || lowerPath.includes("%5c")) {
+    return true;
+  }
+  return path.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+function rawPathFromRequest(request: Request) {
+  const schemeEnd = request.url.indexOf("://");
+  const pathStart = request.url.indexOf("/", schemeEnd === -1 ? 0 : schemeEnd + 3);
+  if (pathStart === -1) return "/";
+  const queryStart = request.url.indexOf("?", pathStart);
+  return queryStart === -1
+    ? request.url.slice(pathStart)
+    : request.url.slice(pathStart, queryStart);
+}
+
+function isTraceApiPath(path: string) {
+  return path.startsWith("/api/traces");
+}
+
+function traceApiEnabled(env: ObservabilityHonoEnv["Bindings"]) {
+  return (
+    env.TRACE_API_ENABLED === "true" || env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test"
+  );
+}
+
+function traceApiAccess(env: ObservabilityHonoEnv["Bindings"], userId: string) {
+  if (!traceApiEnabled(env)) return "disabled";
+  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") return "allowed";
+  const allowedUserIds = new Set(
+    (env.TRACE_API_USER_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  );
+  return allowedUserIds.has(userId) ? "allowed" : "forbidden";
 }
 
 function responseWithMutableHeaders(response: Response) {

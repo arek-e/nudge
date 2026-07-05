@@ -5,28 +5,32 @@ let loggerApiKey: string | undefined;
 
 export const ensureBraintrustTracing = (apiKey?: string) => {
   const normalizedApiKey = apiKey?.trim() || undefined;
-  if (loggerInitialized && loggerApiKey === normalizedApiKey) return;
+  if (!normalizedApiKey) return false;
+  if (loggerInitialized && loggerApiKey === normalizedApiKey) return true;
   initLogger({
     projectName: "Nudge",
-    ...(normalizedApiKey ? { apiKey: normalizedApiKey } : {}),
+    apiKey: normalizedApiKey,
   });
   loggerInitialized = true;
   loggerApiKey = normalizedApiKey;
+  return true;
 };
 
-export const wrapBraintrustAISDK = <T>(aiSDK: T): T => {
+export const wrapBraintrustAISDK = <T>(aiSDK: T, input: { readonly rawTelemetry: boolean }): T => {
+  if (!input.rawTelemetry) return aiSDK;
   return wrapAISDK(aiSDK);
 };
 
 export const runBraintrustSpan = <A>(
   input: {
+    readonly apiKey?: string | undefined;
     readonly attributes?: Readonly<Record<string, unknown>>;
     readonly name: string;
     readonly type?: "function" | "task";
   },
   task: () => Promise<A>,
 ) => {
-  ensureBraintrustTracing();
+  if (!ensureBraintrustTracing(input.apiKey)) return task();
   return traced(task, {
     name: input.name,
     type: input.type ?? "function",
@@ -35,6 +39,6 @@ export const runBraintrustSpan = <A>(
 };
 
 export const flushBraintrustTracing = async (apiKey?: string) => {
-  ensureBraintrustTracing(apiKey);
+  if (!ensureBraintrustTracing(apiKey)) return;
   await flush();
 };

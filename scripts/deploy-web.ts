@@ -1,23 +1,31 @@
+import { validateDeployVersion, wranglerDeployArgs } from "./deploy-web-config";
+import { uploadSentrySourcemaps } from "./sentry-artifacts";
+
 const root = new URL("..", import.meta.url).pathname;
 const web = new URL("../apps/web", import.meta.url).pathname;
-const wrangler = `${root}node_modules/.bin/wrangler`;
+const webClientDist = new URL("../apps/web/dist/client", import.meta.url).pathname;
 
 const args = new Set(process.argv.slice(2));
 const allowDirty = args.has("--allow-dirty");
 const dryRun = args.has("--dry-run");
 const envArg = process.argv.find((arg) => arg.startsWith("--env="));
 const env = envArg?.slice("--env=".length);
-const containersRolloutArg = process.argv.find((arg) => arg.startsWith("--containers-rollout="));
 const versionArg = process.argv.find((arg) => arg.startsWith("--version="));
-const requestedVersion = versionArg?.slice("--version=".length).trim();
+const requestedVersion = versionArg
+  ? validateDeployVersion(versionArg.slice("--version=".length))
+  : undefined;
 
 const run = (
-  command: string,
-  options: { readonly cwd?: string; readonly env?: Record<string, string> } = {},
+  command: readonly string[],
+  options: {
+    readonly cwd?: string;
+    readonly env?: Record<string, string>;
+    readonly processEnv?: NodeJS.ProcessEnv;
+  } = {},
 ) => {
-  const result = Bun.spawnSync(["bash", "-lc", command], {
+  const result = Bun.spawnSync(command, {
     cwd: options.cwd ?? root,
-    env: { ...process.env, ...options.env },
+    env: { ...(options.processEnv ?? process.env), ...options.env },
     stderr: "inherit",
     stdout: "inherit",
   });
@@ -27,8 +35,8 @@ const run = (
   }
 };
 
-const output = (command: string) => {
-  const result = Bun.spawnSync(["bash", "-lc", command], {
+const output = (command: readonly string[]) => {
+  const result = Bun.spawnSync(command, {
     cwd: root,
     stderr: "pipe",
     stdout: "pipe",
@@ -42,7 +50,7 @@ const output = (command: string) => {
   return result.stdout.toString().trim();
 };
 
-const status = output("git status --porcelain");
+const status = output(["git", "status", "--porcelain"]);
 if (status && !allowDirty) {
   console.error("Refusing to deploy with uncommitted changes.");
   console.error(
@@ -51,19 +59,29 @@ if (status && !allowDirty) {
   process.exit(1);
 }
 
-const commit = output("git rev-parse --short HEAD");
-const version = requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit);
+const commit = validateDeployVersion(output(["git", "rev-parse", "--short", "HEAD"]));
+const version = validateDeployVersion(
+  requestedVersion || (allowDirty && status ? `${commit}-dirty` : commit),
+);
 const deployEnvironment = env ?? "production";
 const clientEnvironmentByDeployTarget: Record<string, Record<string, string>> = {
   production: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k",
     VITE_CLERK_PROXY_URL: "/__clerk",
     VITE_CONVEX_URL: "https://friendly-lion-904.eu-west-1.convex.cloud",
+    VITE_SENTRY_DSN:
+      "https://3fe4af305fc498b5a216f68af4e898ab@o4510926758150144.ingest.de.sentry.io/4510926760312912",
+    VITE_SENTRY_ENVIRONMENT: "production",
+    VITE_SENTRY_TRACES_SAMPLE_RATE: "0.05",
   },
   staging: {
     VITE_CLERK_PUBLISHABLE_KEY: "pk_test_cmVuZXdlZC1zZWFzbmFpbC0zOC5jbGVyay5hY2NvdW50cy5kZXYk",
     VITE_CONVEX_URL: "https://abundant-retriever-130.eu-west-1.convex.cloud",
     VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg",
+    VITE_SENTRY_DSN:
+      "https://3fe4af305fc498b5a216f68af4e898ab@o4510926758150144.ingest.de.sentry.io/4510926760312912",
+    VITE_SENTRY_ENVIRONMENT: "staging",
+    VITE_SENTRY_TRACES_SAMPLE_RATE: "0.05",
   },
 };
 const clientEnvironment = clientEnvironmentByDeployTarget[deployEnvironment];
@@ -71,27 +89,36 @@ if (!clientEnvironment) {
   console.error(`Unknown deploy environment: ${deployEnvironment}`);
   process.exit(1);
 }
-const deployTargetArgs = [`--env ${deployEnvironment}`];
 const serverConvexUrl = clientEnvironment.VITE_CONVEX_URL;
-const containersRollout =
-  containersRolloutArg ?? (deployEnvironment === "production" ? "--containers-rollout=none" : "");
-const deployArgs = [
-  ...deployTargetArgs,
-  containersRollout,
-  dryRun ? "--dry-run" : "",
-  `--var ENVIRONMENT:${deployEnvironment}`,
-  `--var APP_VERSION:${version}`,
-  `--var CONVEX_URL:${serverConvexUrl}`,
-  `--tag ${version}`,
-  `--message ${JSON.stringify(`Deploy ${version}`)}`,
-]
-  .filter(Boolean)
-  .join(" ");
+const deployArgs = wranglerDeployArgs({ deployEnvironment, dryRun, serverConvexUrl, version });
 
-run("bun run check");
-run("bun run build", { cwd: web, env: clientEnvironment });
-run(`${wrangler} deploy ${deployArgs}`, { cwd: web });
+run(["mise", "exec", "--", "bun", "run", "check"], {
+  processEnv: processEnvWithoutDeploySecrets(process.env),
+});
+run(["mise", "exec", "--", "bun", "run", "build"], {
+  cwd: web,
+  env: { ...clientEnvironment, VITE_APP_VERSION: version },
+  processEnv: processEnvWithoutDeploySecrets(process.env),
+});
+await uploadSentrySourcemaps({
+  directory: webClientDist,
+  env: dryRun ? { ...process.env, SENTRY_UPLOAD_ARTIFACTS: "false" } : process.env,
+  project: "nudge-web-client",
+  release: `nudge-web-client@${version}`,
+});
+run(["mise", "exec", "--", "bunx", "wrangler", "deploy", ...deployArgs], { cwd: web });
 
 console.log(
   `${dryRun ? "Dry-run verified" : "Deployed"} nudge-web ${deployEnvironment} at ${version}`,
 );
+
+function processEnvWithoutDeploySecrets(sourceEnv: NodeJS.ProcessEnv) {
+  const safeEnv: Record<string, string> = {};
+  for (const [name, value] of Object.entries(sourceEnv)) {
+    if (value === undefined) continue;
+    if (name === "CLOUDFLARE_API_TOKEN" || name === "CLOUDFLARE_ACCOUNT_ID") continue;
+    if (name === "SENTRY_AUTH_TOKEN") continue;
+    safeEnv[name] = value;
+  }
+  return safeEnv;
+}
