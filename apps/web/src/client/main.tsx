@@ -59,7 +59,12 @@ import {
   currentAppSurface,
   surfaceContextRefetchInterval,
 } from "./surface-runtime";
-import { saveWebCapture, type WebMediaAttachmentDraft, type WebMediaMimeType } from "./web-capture";
+import {
+  saveWebCapture,
+  saveWebDailyNoteDraft,
+  type WebMediaAttachmentDraft,
+  type WebMediaMimeType,
+} from "./web-capture";
 import {
   clearWebLocalDraft,
   loadWebLocalDraft,
@@ -1029,6 +1034,8 @@ function NewNoteComposer(props: {
   readonly localDate: string;
 }) {
   const initialDraftRef = useRef<WebInitialLocalDraft | null>(null);
+  const journalBaseTextRef = useRef<string | undefined>(props.existingJournalText);
+  const autosaveGenerationRef = useRef(0);
   if (initialDraftRef.current === null) {
     initialDraftRef.current = initialWebLocalDraft(props.localDate);
   }
@@ -1052,11 +1059,10 @@ function NewNoteComposer(props: {
       const trailingNote = continuationText.trim();
       const attachmentNote = mediaAttachments.map((attachment) => attachment.label).join("\n");
       const noteText = leadingNote || (trailingNote ? "" : attachmentNote);
+      const existingJournalText = journalBaseTextRef.current;
       return await saveWebCapture({
         attachments: { color },
-        ...(props.existingJournalText !== undefined
-          ? { existingJournalText: props.existingJournalText }
-          : {}),
+        ...(existingJournalText !== undefined ? { existingJournalText } : {}),
         localDate: props.localDate,
         mediaAttachments,
         note: noteText,
@@ -1069,6 +1075,7 @@ function NewNoteComposer(props: {
       setBodyText("");
       setContinuationText("");
       setMediaAttachments([]);
+      journalBaseTextRef.current = saved.journal.bodyText;
       clearCurrentWebLocalDraft(props.localDate);
       setStatusMessage(saved.analysisRun ? "Added. AI review queued." : "Added");
       void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
@@ -1076,6 +1083,8 @@ function NewNoteComposer(props: {
   });
 
   useEffect(() => {
+    autosaveGenerationRef.current += 1;
+    journalBaseTextRef.current = props.existingJournalText;
     const draft = initialWebLocalDraft(props.localDate);
     setBodyText(draft.bodyText);
     setContinuationText(draft.continuationText);
@@ -1083,13 +1092,46 @@ function NewNoteComposer(props: {
   }, [props.localDate]);
 
   useEffect(() => {
+    if (!bodyText.trim() && !continuationText.trim()) {
+      journalBaseTextRef.current = props.existingJournalText;
+    }
+  }, [bodyText, continuationText, props.existingJournalText]);
+
+  useEffect(() => {
+    const generation = autosaveGenerationRef.current + 1;
+    autosaveGenerationRef.current = generation;
     const timeout = window.setTimeout(() => {
       const draft = saveCurrentWebLocalDraft({
         bodyText,
         continuationText,
         localDate: props.localDate,
       });
-      if (draft) setStatusMessage("Saved on this device");
+      if (!draft) return;
+      setStatusMessage("Saved on this device");
+
+      void saveWebDailyNoteDraft({
+        ...(draft.continuationText ? { continuationNote: draft.continuationText } : {}),
+        ...(journalBaseTextRef.current !== undefined
+          ? { existingJournalText: journalBaseTextRef.current }
+          : {}),
+        idempotencyKey: webDraftAutosaveIdempotencyKey({
+          bodyText: draft.bodyText,
+          continuationText: draft.continuationText,
+          localDate: props.localDate,
+        }),
+        localDate: props.localDate,
+        note: draft.bodyText,
+      })
+        .then((saved) => {
+          if (autosaveGenerationRef.current !== generation) return;
+          setStatusMessage(saved.analysisRun ? "AI review queued" : "Saved to Nudge");
+          void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
+        })
+        .catch(() => {
+          if (autosaveGenerationRef.current === generation) {
+            setStatusMessage("Saved on this device");
+          }
+        });
     }, 700);
     return () => window.clearTimeout(timeout);
   }, [bodyText, continuationText, props.localDate]);
@@ -1268,6 +1310,23 @@ function clearCurrentWebLocalDraft(localDate: string) {
     storage,
     surface: currentAppSurface(),
   });
+}
+
+function webDraftAutosaveIdempotencyKey(input: {
+  readonly bodyText: string;
+  readonly continuationText: string;
+  readonly localDate: string;
+}) {
+  const payload = [input.bodyText, input.continuationText].join("\n\n");
+  return `${currentAppSurface()}:journal-autosave:${input.localDate}:${stableWebTextHash(payload)}`;
+}
+
+function stableWebTextHash(value: string) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash * 33) ^ value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 function browserDraftStorage(): WebDraftStorage | null {

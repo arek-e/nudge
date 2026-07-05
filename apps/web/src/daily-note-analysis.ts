@@ -1,4 +1,34 @@
+import { z } from "zod";
 import type { DurableWorkflowStepConfig } from "@nudge/effect-services";
+
+const nullAsUndefined = (value: unknown) => (value === null ? undefined : value);
+const optionalString = (schema: z.ZodString) => z.preprocess(nullAsUndefined, schema.optional());
+const optionalNumber = (schema: z.ZodNumber) => z.preprocess(nullAsUndefined, schema.optional());
+
+export const dailyNoteExtractedItemSchema = z.object({
+  body: z.string().min(1).max(2_000),
+  confidence: optionalNumber(z.number().min(0).max(1)),
+  dueAt: optionalString(z.string()),
+  eventEndsAt: optionalString(z.string()),
+  eventStartsAt: optionalString(z.string()),
+  kind: z.enum(["task", "reminder", "follow_up", "event", "memory", "question", "idea"]),
+  remindAt: optionalString(z.string()),
+  title: z.string().min(1).max(200),
+});
+
+export const dailyNoteExtractionObjectSchema = z.object({
+  dailySummary: optionalString(z.string().max(2_000)),
+  items: z.array(dailyNoteExtractedItemSchema).default([]),
+});
+
+export const dailyNoteExtractionSchema = dailyNoteExtractionObjectSchema.extend({
+  model: z.string().min(1),
+  provider: z.string().min(1),
+});
+
+export type DailyNoteExtractedItem = z.infer<typeof dailyNoteExtractedItemSchema>;
+export type DailyNoteExtractionObject = z.infer<typeof dailyNoteExtractionObjectSchema>;
+export type DailyNoteExtraction = z.infer<typeof dailyNoteExtractionSchema>;
 
 export const dailyNoteAnalysisExtractionStepConfig = {
   retries: {
@@ -50,6 +80,28 @@ export const dailyNoteAnalysisHttpStatus = (errorCode: string) =>
 
 export const dailyNoteAnalysisResponseError = (errorCode: string) =>
   errorCode === "AI_EXTRACTION_TIMEOUT" ? "ai_extraction_timeout" : "ai_extraction_failed";
+
+export function emptyDailyNoteExtraction(
+  modelRef: Pick<DailyNoteExtraction, "model" | "provider">,
+): DailyNoteExtraction {
+  return {
+    items: [],
+    model: modelRef.model,
+    provider: modelRef.provider,
+  };
+}
+
+export function dailyNoteExtractionFromObject(input: {
+  readonly model: string;
+  readonly object: DailyNoteExtractionObject;
+  readonly provider: string;
+}): DailyNoteExtraction {
+  return dailyNoteExtractionSchema.parse({
+    ...input.object,
+    model: input.model,
+    provider: input.provider,
+  });
+}
 
 const isTimeoutError = (error: unknown) => {
   if (error instanceof DOMException && error.name === "TimeoutError") return true;

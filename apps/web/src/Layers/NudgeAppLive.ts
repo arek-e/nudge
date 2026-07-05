@@ -1,4 +1,5 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { resolveNudgeAiModelConfig } from "@nudge/ai";
 import { Db } from "@nudge/db";
 import type { AuthSessionResolver } from "../auth";
 import type { Env } from "../env";
@@ -24,11 +25,18 @@ export function makeNudgeAppLayer(input: MakeNudgeAppLayerInput) {
       const db = yield* Db;
       const env = input.env;
       const agentInternalSecret = env.AGENT_INTERNAL_SECRET;
+      const aiConfig = resolveNudgeAiModelConfig({
+        braintrustApiKey: env.BRAINTRUST_API_KEY,
+        extractionModel: env.EXTRACTION_MODEL,
+        provider: env.AI_PROVIDER,
+        thinkModel: env.THINK_MODEL,
+      });
 
       return NudgeApp.of({
         agentSessions: env.USER_AGENT_SESSION,
         ...(agentInternalSecret ? { agentInternalSecret } : {}),
-        aiModel: env.EXTRACTION_MODEL ?? env.THINK_MODEL,
+        aiModel: aiConfig.extractionModelName,
+        aiProvider: aiConfig.provider,
         dailyAnalysisWorkflow: env.DAILY_DIGEST_WORKFLOW,
         db,
         env,

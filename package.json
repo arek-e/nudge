@@ -8,6 +8,7 @@
     ],
     "catalog": {
       "@base-ui/react": "1.5.0",
+      "@ai-sdk/openai-compatible": "2.0.56",
       "@clerk/backend": "3.10.0",
       "@clerk/react": "6.11.3",
       "@cloudflare/sandbox": "0.12.2",
@@ -104,8 +105,10 @@
   "dependencies": {},
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "@nudge/ai": "workspace:*",
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
+    "ai": "catalog:",
     "convex": "catalog:",
     "konsistent": "catalog:",
     "lefthook": "catalog:",

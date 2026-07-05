@@ -27,6 +27,16 @@ export interface SaveWebCaptureInput extends AppendWebCaptureInput {
   readonly treatsNoteAsFullBody?: boolean;
 }
 
+export interface SaveWebDailyNoteDraftInput {
+  readonly continuationNote?: string;
+  readonly existingJournalText?: string;
+  readonly idempotencyKey?: string;
+  readonly localDate: string;
+  readonly note: string;
+  readonly title?: string;
+  readonly treatsNoteAsFullBody?: boolean;
+}
+
 export interface WebMediaAttachmentDraft {
   readonly dataURL: string;
   readonly id: string;
@@ -47,6 +57,12 @@ export interface StoredWebMediaAttachment {
 
 export interface SavedWebCapture {
   readonly capture: SurfaceEventRecord;
+  readonly journal: SurfaceJournalDocument;
+  readonly revision: SurfaceJournalRevision;
+  readonly analysisRun?: SurfaceAgentRun;
+}
+
+export interface SavedWebDailyNoteDraft {
   readonly journal: SurfaceJournalDocument;
   readonly revision: SurfaceJournalRevision;
   readonly analysisRun?: SurfaceAgentRun;
@@ -76,6 +92,8 @@ export type WebCaptureJournalClient = Pick<
   "appendManualCapture" | "saveJournal"
 >;
 export type WebCaptureJournalClientFactory = () => Promise<WebCaptureJournalClient>;
+export type WebDailyNoteDraftClient = Pick<SurfaceEngineClient, "saveJournal">;
+export type WebDailyNoteDraftClientFactory = () => Promise<WebDailyNoteDraftClient>;
 export type WebMediaUploader = (
   attachment: WebMediaAttachmentDraft,
 ) => Promise<StoredWebMediaAttachment>;
@@ -131,6 +149,35 @@ export async function saveWebCapture(
   return {
     ...(journal.analysisRun !== undefined ? { analysisRun: journal.analysisRun } : {}),
     capture,
+    journal: journal.document,
+    revision: journal.revision,
+  };
+}
+
+export async function saveWebDailyNoteDraft(
+  input: SaveWebDailyNoteDraftInput,
+  clientFactory: WebDailyNoteDraftClientFactory = createWebSurfaceEngineClient,
+): Promise<SavedWebDailyNoteDraft> {
+  const composition = webJournalSaveComposition({
+    existingJournalText: input.existingJournalText,
+    leadingNote: input.note,
+    trailingNote: input.continuationNote,
+    treatsLeadingNoteAsFullBody: input.treatsNoteAsFullBody ?? false,
+  });
+  if (!composition.journalBodyText) throw new Error("Write a note first.");
+
+  const client = await clientFactory();
+  const bodyDocument = journalBodyDocument(composition, []);
+  const journal = await client.saveJournal({
+    ...(bodyDocument.length > 0 ? { bodyDocument } : {}),
+    bodyText: composition.journalBodyText,
+    ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+    localDate: input.localDate,
+    title: input.title ?? input.localDate,
+  });
+
+  return {
+    ...(journal.analysisRun !== undefined ? { analysisRun: journal.analysisRun } : {}),
     journal: journal.document,
     revision: journal.revision,
   };

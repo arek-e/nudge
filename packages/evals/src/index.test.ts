@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
   agentEvalCases,
+  createBraintrustAgentEvalRows,
   createCodexCliJudge,
   createEvalTraceSink,
   createHttpAgentRunner,
+  publishAgentEvalReportToBraintrust,
   renderCodexEvalReport,
   runAgentEvalSuite,
   type AgentEvalArtifact,
+  type BraintrustEvalRunInput,
   type AgentJudgeInput,
 } from "./index";
 
@@ -257,5 +260,106 @@ describe("agent evals", () => {
     expect(packet).toContain("Do not apply patches automatically");
     expect(packet).toContain("cite the OKF path in the reply");
     expect(packet).toContain("journal-follow-up-maya-travel");
+  });
+
+  test("publishes the local eval report as a Braintrust experiment", async () => {
+    const report = await runAgentEvalSuite({
+      cases: [agentEvalCases[0]!],
+    });
+    const rows = createBraintrustAgentEvalRows(report);
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "agent_result:current:journal-follow-up-maya-travel",
+      "guidance_result:current:okf-context-discovery",
+      "guidance_result:current:okf-reviewable-write-policy",
+    ]);
+
+    const runs: BraintrustEvalRunInput[] = [];
+    const published = await publishAgentEvalReportToBraintrust(report, {
+      apiKey: "bt-st-test",
+      experimentName: "agent-eval-test",
+      projectId: "project_123",
+      projectName: "Nudge",
+      runner: {
+        run: async (input) => {
+          runs.push(input);
+          return {
+            summary: {
+              experimentName: input.evaluator.experimentName,
+              experimentUrl: "https://www.braintrust.dev/app/Teampitch/p/Nudge/experiments/exp",
+              projectName: input.projectName,
+            },
+          };
+        },
+      },
+    });
+
+    expect(published).toEqual({
+      experimentName: "agent-eval-test",
+      experimentUrl: "https://www.braintrust.dev/app/Teampitch/p/Nudge/experiments/exp",
+      projectName: "Nudge",
+      rowCount: 3,
+    });
+
+    const run = runs.at(0);
+    if (!run) throw new Error("Expected Braintrust eval run");
+    expect(run.projectName).toBe("Nudge");
+    expect(run.evaluator.projectId).toBe("project_123");
+    expect(run.evaluator.metadata).toEqual(
+      expect.objectContaining({
+        localPassed: true,
+        localScore: 1,
+        source: "@nudge/evals",
+        suite: "agent-workflow",
+      }),
+    );
+
+    const agentRow = run.evaluator.data.at(0);
+    if (!agentRow) throw new Error("Expected Braintrust eval row");
+    expect(agentRow.input).toEqual({
+      candidateId: "current",
+      caseId: "journal-follow-up-maya-travel",
+      note: "Follow up with Maya about the travel plan before lunch.",
+      resultType: "agent_result",
+      rowId: "agent_result:current:journal-follow-up-maya-travel",
+    });
+
+    const output = await run.evaluator.task(agentRow.input, {
+      expected: agentRow.expected,
+      metadata: agentRow.metadata,
+      parameters: {},
+      reportProgress: () => undefined,
+      span: {},
+      tags: agentRow.tags,
+      trialIndex: 0,
+      meta: () => undefined,
+    });
+    expect(output).toEqual(report.results[0]?.output);
+
+    const scores = await run.evaluator.scores[0]?.({
+      ...agentRow,
+      error: undefined,
+      output,
+      scores: {},
+    });
+    expect(scores).toEqual([
+      {
+        metadata: {
+          notes: [],
+          passed: true,
+          resultType: "agent_result",
+        },
+        name: "overall",
+        score: 1,
+      },
+      {
+        name: "passed",
+        score: 1,
+      },
+      {
+        name: "deterministic",
+        score: 1,
+      },
+    ]);
   });
 });

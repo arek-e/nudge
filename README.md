@@ -227,6 +227,23 @@ bun run test:e2e       # desktop-mounted web Playwright e2e
 bun run dev            # build web and start the Worker with wrangler dev
 ```
 
+Agent evals run locally by default and are part of `bun run check`:
+
+```bash
+bun run eval:agent
+```
+
+To publish the same local eval report to Braintrust as an experiment, opt in
+explicitly:
+
+```bash
+BRAINTRUST_EVALS=true \
+BRAINTRUST_API_KEY=<from OpenBao teampitch/nudge/braintrust> \
+BRAINTRUST_ORG_NAME=Teampitch \
+BRAINTRUST_PROJECT_ID=2ce231a6-edbc-4e8d-8bfe-a54e70bdb738 \
+bun run eval:agent
+```
+
 GitHub Actions deploys the Cloudflare Worker from the production workflow.
 Release builds for macOS and Raycast are documented in
 [docs/releasing-apps.md](docs/releasing-apps.md).

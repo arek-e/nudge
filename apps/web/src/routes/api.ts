@@ -165,6 +165,7 @@ export function registerApiRoutes(
               ? { agentInternalSecret: appServices.agentInternalSecret }
               : {}),
             aiModel: appServices.aiModel,
+            aiProvider: appServices.aiProvider,
             dailyAnalysisWorkflow: appServices.dailyAnalysisWorkflow,
             db: appServices.db,
             getOkfSandbox: () => appServices.okfSandboxFor(user),

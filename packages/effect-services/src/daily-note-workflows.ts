@@ -16,6 +16,8 @@ import {
 } from "@nudge/db";
 import { currentWorkflowVersion, type WorkflowVersion } from "./workflow-config";
 
+const defaultAnalysisProvider = "cloudflare-workers-ai";
+
 export interface DailyNoteAnalysisWorkflowParams {
   readonly changedText: string;
   readonly documentId: string;
@@ -447,7 +449,7 @@ export const NoteAnalysisWorkflows = {
   saveJournalCapture: (input: SaveJournalCaptureInput) =>
     Effect.gen(function* () {
       const db = yield* Db;
-      const analysisProvider = input.analysisProvider ?? "cloudflare-think";
+      const analysisProvider = input.analysisProvider ?? defaultAnalysisProvider;
       yield* db.ensureUser(input.user);
       const journal = yield* db.upsertJournalDocument({
         bodyText: input.bodyText,
