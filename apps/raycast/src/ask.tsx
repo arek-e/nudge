@@ -2,6 +2,9 @@ import { Action, ActionPanel, Detail, Form, Toast, showToast } from "@raycast/ap
 import { type ReactElement, useState } from "react";
 import { askRaycastNudge } from "./ask-service";
 import { raycastEngineClient } from "./engine-client";
+import { captureRaycastException, initializeRaycastSentry } from "./sentry";
+
+initializeRaycastSentry("ask");
 
 interface AskFormValues {
   readonly message: string;
@@ -22,6 +25,7 @@ export default function Command(): ReactElement {
       setReply(response.reply);
       await showToast({ style: Toast.Style.Success, title: "Nudge replied" });
     } catch (error) {
+      await captureRaycastException(error, { command: "ask", operation: "submit" });
       await showToast({
         message: error instanceof Error ? error.message : "Could not ask Nudge",
         style: Toast.Style.Failure,

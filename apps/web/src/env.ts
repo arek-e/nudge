@@ -13,6 +13,9 @@ export interface Env {
   LOG_HTTP_REQUESTS?: string;
   TRACE_API_ENABLED?: string;
   TRACE_API_USER_IDS?: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENABLED?: string;
+  SENTRY_TRACES_SAMPLE_RATE?: string;
   BRAINTRUST_API_KEY?: string;
   BRAINTRUST_RAW_AI_TELEMETRY?: string;
   AI_AGENT_RATE_LIMIT_MAX?: string;

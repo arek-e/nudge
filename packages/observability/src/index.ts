@@ -277,6 +277,10 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
   const aiSystem = nullableStringField(event, "aiSystem");
   const aiModel = nullableStringField(event, "aiModel");
   const errorType = nullableStringField(event, "errorType");
+  const clientSurface = nullableStringField(event, "clientSurface");
+  const runtimeSurface = nullableStringField(event, "runtimeSurface");
+  const userId = nullableStringField(event, "userId");
+  const workspaceId = nullableStringField(event, "workspaceId");
 
   return {
     "otel.name": stringField(event, "routeName", stringField(event, "event", "unknown")),
@@ -290,6 +294,10 @@ export const buildDebugWideEventFields = (input: BuildDebugWideEventInput) => {
     "service.version": stringField(event, "version", "0.0.0"),
     "deployment.environment.name": stringField(event, "environment", "unknown"),
     "nudge.request_id": nullableStringField(event, "requestId"),
+    ...(clientSurface ? { "nudge.client.surface": clientSurface } : {}),
+    ...(runtimeSurface ? { "nudge.runtime.surface": runtimeSurface } : {}),
+    ...(userId ? { "nudge.user_id": userId } : {}),
+    ...(workspaceId ? { "nudge.workspace_id": workspaceId } : {}),
     "nudge.outcome": nullableStringField(event, "outcome"),
     "nudge.duration_ms": numberField(event, "durationMs"),
     "nudge.sample_reason": nullableStringField(event, "sampleReason"),

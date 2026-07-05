@@ -14,6 +14,10 @@
 	<string>$(NUDGE_ENGINE_URL)</string>
 	<key>NudgeConvexDeploymentURL</key>
 	<string>$(NUDGE_CONVEX_DEPLOYMENT_URL)</string>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN)</string>
+	<key>SentryTracesSampleRate</key>
+	<string>$(SENTRY_TRACES_SAMPLE_RATE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

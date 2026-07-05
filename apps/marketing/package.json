@@ -5,15 +5,17 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "cf-typegen": "wrangler types",
-    "deploy": "bun run build && wrangler deploy",
+    "deploy": "bun run build && bun ../../scripts/sentry-artifacts.ts sourcemaps --project nudge-marketing-client --path dist && wrangler deploy",
     "dev": "vite dev",
     "preview": "vite preview",
     "test": "bun test src"
   },
   "dependencies": {
     "@fontsource-variable/geist": "catalog:",
+    "@nudge/observability": "workspace:*",
     "@nudge/ui": "workspace:*",
     "@paper-design/shaders-react": "catalog:",
+    "@sentry/react": "^10.63.0",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "react": "catalog:",

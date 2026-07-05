@@ -53,6 +53,7 @@ import {
 import { DesktopSettingsSurface } from "./DesktopSettingsSurface";
 import { JournalStack } from "./journal-stack";
 import { QuickCaptureSurface } from "./QuickCaptureSurface";
+import { initializeWebClientSentry } from "./sentry";
 import {
   anonymousUiEnabled,
   currentAppSurface,
@@ -73,6 +74,8 @@ import {
 } from "./web-draft";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
+
+initializeWebClientSentry();
 
 const queryClient = new QueryClient();
 const convexUrl =

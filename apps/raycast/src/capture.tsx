@@ -2,6 +2,9 @@ import { Action, ActionPanel, Form, Toast, showToast } from "@raycast/api";
 import { type ReactElement, useState } from "react";
 import { appendRaycastCapture } from "./capture-service";
 import { raycastEngineClient } from "./engine-client";
+import { captureRaycastException, initializeRaycastSentry } from "./sentry";
+
+initializeRaycastSentry("capture");
 
 interface CaptureFormValues {
   readonly note: string;
@@ -26,6 +29,7 @@ export default function Command(): ReactElement {
       setNote("");
       await showToast({ style: Toast.Style.Success, title: "Captured in Nudge" });
     } catch (error) {
+      await captureRaycastException(error, { command: "capture", operation: "submit" });
       const message = error instanceof Error ? error.message : "Could not capture in Nudge";
       await showToast({ message, style: Toast.Style.Failure, title: "Capture failed" });
     } finally {
