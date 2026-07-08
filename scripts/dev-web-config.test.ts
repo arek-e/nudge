@@ -1,28 +1,66 @@
 import { describe, expect, test } from "bun:test";
 import {
   envFileContent,
+  missingRequiredLocalDevSecrets,
+  missingRequiredLocalDevSecretsMessage,
   wranglerClerkEnvEntries,
-  wranglerClerkEnvFileArgs,
+  wranglerDevEnvFileArgs,
+  wranglerDevEnvEntries,
+  wranglerDevVarArgs,
   wranglerLocalConfigArgs,
 } from "./dev-web-config";
 
 describe("dev web config", () => {
-  test("passes Clerk dev values through an env file instead of argv vars", () => {
+  test("passes Clerk secrets through an env file instead of argv vars", () => {
     const entries = wranglerClerkEnvEntries({
       CLERK_AUTHORIZED_PARTIES: "http://localhost:3000",
       CLERK_PUBLISHABLE_KEY: "pk_test_public",
       CLERK_SECRET_KEY: "sk_test_secret",
     });
-    const args = wranglerClerkEnvFileArgs("/tmp/nudge-clerk.env");
+    const args = wranglerDevEnvFileArgs("/tmp/nudge-worker.env");
 
-    expect(entries).toEqual([
-      ["CLERK_AUTHORIZED_PARTIES", "http://localhost:3000"],
-      ["CLERK_PUBLISHABLE_KEY", "pk_test_public"],
-      ["CLERK_SECRET_KEY", "sk_test_secret"],
-    ]);
-    expect(args).toEqual(["--env-file", "/tmp/nudge-clerk.env"]);
+    expect(entries).toEqual([["CLERK_SECRET_KEY", "sk_test_secret"]]);
+    expect(args).toEqual(["--env-file", "/tmp/nudge-worker.env"]);
     expect(args).not.toContain("--var");
     expect(args.join(" ")).not.toContain("sk_test_secret");
+  });
+
+  test("passes Worker runtime secrets through the same env file", () => {
+    const entries = wranglerDevEnvEntries({
+      CLERK_AUTHORIZED_PARTIES: "http://localhost:3000",
+      CLERK_PUBLISHABLE_KEY: "pk_test_public",
+      CLERK_SECRET_KEY: "sk_test_secret",
+      CONVEX_RUNTIME_SECRET: "convex-runtime-secret",
+      CONVEX_URL: "https://convex.example",
+    });
+
+    expect(entries).toEqual([
+      ["CLERK_SECRET_KEY", "sk_test_secret"],
+      ["CONVEX_RUNTIME_SECRET", "convex-runtime-secret"],
+    ]);
+  });
+
+  test("passes local authorized parties as a non-secret Wrangler var", () => {
+    const args = wranglerDevVarArgs([["CLERK_AUTHORIZED_PARTIES", "http://localhost:43300"]]);
+
+    expect(args).toEqual(["--var", "CLERK_AUTHORIZED_PARTIES:http://localhost:43300"]);
+  });
+
+  test("reports missing local Worker secrets before starting dev services", () => {
+    expect(missingRequiredLocalDevSecrets({})).toEqual([
+      "CLERK_SECRET_KEY",
+      "CONVEX_RUNTIME_SECRET",
+    ]);
+    expect(
+      missingRequiredLocalDevSecrets({
+        CLERK_SECRET_KEY: "sk_test_secret",
+        CONVEX_RUNTIME_SECRET: "convex-runtime-secret",
+      }),
+    ).toEqual([]);
+    expect(missingRequiredLocalDevSecretsMessage(["CLERK_SECRET_KEY"])).toContain(
+      "Missing required local Worker secrets: CLERK_SECRET_KEY",
+    );
+    expect(missingRequiredLocalDevSecretsMessage([])).toBeNull();
   });
 
   test("quotes generated env file values", () => {

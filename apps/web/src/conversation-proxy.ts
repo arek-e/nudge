@@ -98,10 +98,6 @@ export async function proxyConversationStream(
     }),
   );
 
-  if (!response.ok) {
-    throw new Error(`Conversation agent stream failed with ${response.status}`);
-  }
-
   return response;
 }
 

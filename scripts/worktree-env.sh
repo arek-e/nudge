@@ -34,4 +34,10 @@ nudge_export_worktree_env() {
   nudge_export_if_unset CLERK_PUBLISHABLE_KEY \
     "pk_test_dWx0aW1hdGUta2l3aS05Mi5jbGVyay5hY2NvdW50cy5kZXYk"
   nudge_export_if_unset VITE_CLERK_PUBLISHABLE_KEY "$CLERK_PUBLISHABLE_KEY"
+  nudge_export_if_unset CLERK_AUTHORIZED_PARTIES \
+    "${NUDGE_DEV_URL},http://127.0.0.1:${NUDGE_DEV_PORT},https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev"
+  nudge_export_if_unset CONVEX_URL \
+    "https://grandiose-hamster-855.eu-west-1.convex.cloud"
+  nudge_export_if_unset VITE_CONVEX_URL "$CONVEX_URL"
+  nudge_export_if_unset CONVEX_DEPLOYMENT "dev:grandiose-hamster-855"
 }

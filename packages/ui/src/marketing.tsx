@@ -137,7 +137,7 @@ export function MarketingNudgeWord(props: { readonly children: ReactNode }) {
     <span
       className="nudge-word text-logo-orange inline-block rounded-[0.16em] px-[0.04em]"
       data-slot="marketing-nudge-word"
-      data-nudge-direction={direction}
+      data-direction={direction}
       onMouseEnter={toggleDirection}
       onTouchStart={toggleDirection}
     >

@@ -1,7 +1,6 @@
 import { initLogger } from "evlog";
 import { evlog, type EvlogVariables } from "evlog/hono";
 import type { Context, MiddlewareHandler } from "hono";
-import { timing } from "hono/timing";
 import { Effect } from "effect";
 import {
   buildRootServerSpan,
@@ -329,11 +328,22 @@ export const requestTraceHeaders = (c: AppContext) => {
   };
 };
 
-export const serverTiming = () => {
-  return timing({
-    total: true,
-    totalDescription: "Total Response Time",
-  });
+export const serverTiming = (): AppMiddleware => {
+  return async (c, next) => {
+    const startedAt = now();
+    await next();
+
+    const headers = new Headers(c.res.headers);
+    headers.append(
+      "Server-Timing",
+      `total;dur=${Number((now() - startedAt).toFixed(1))};desc="Total Response Time"`,
+    );
+    c.res = new Response(c.res.body, {
+      headers,
+      status: c.res.status,
+      statusText: c.res.statusText,
+    });
+  };
 };
 
 const stringField = (event: Record<string, unknown>, key: string, fallback = "") => {

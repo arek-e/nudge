@@ -17,12 +17,17 @@
         "elementNamePattern": ["effect", "effect/**"]
       },
       {
+        "groupName": "react-scan",
+        "elementNamePattern": ["react-scan"]
+      },
+      {
         "groupName": "workspace",
         "elementNamePattern": ["@nudge/**"]
       }
     ],
     "groups": [
       "type-import",
+      "react-scan",
       ["value-builtin", "value-external"],
       "cloudflare",
       "hono",

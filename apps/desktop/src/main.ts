@@ -27,6 +27,7 @@ import {
   type DesktopUpdatesService,
 } from "./updates/DesktopUpdates.js";
 import { ElectronUpdaterLive } from "./updates/ElectronUpdater.js";
+import { desktopSurfaceTokens } from "./window-theme.js";
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDirectory = dirname(currentFile);
@@ -52,7 +53,7 @@ initializeDesktopSentry({
 
 function createMainWindow() {
   const browserWindow = new BrowserWindow({
-    backgroundColor: "#0c1118",
+    backgroundColor: desktopSurfaceTokens.warm.value,
     height: 900,
     minHeight: 720,
     minWidth: 980,
@@ -94,7 +95,7 @@ function createMainWindow() {
 function createQuickCaptureWindow() {
   const browserWindow = new BrowserWindow({
     alwaysOnTop: true,
-    backgroundColor: "#eef1f5",
+    backgroundColor: desktopSurfaceTokens.captureCanvas.value,
     frame: false,
     height: 240,
     maxHeight: 260,

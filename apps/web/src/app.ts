@@ -104,7 +104,9 @@ export function createApp(options: CreateAppOptions = {}) {
     proxyHeaders.delete("accept-encoding");
     proxyHeaders.delete("host");
     proxyHeaders.delete("content-length");
-    proxyHeaders.set("Clerk-Proxy-Url", clerkProxyUrl(c.req.url, c.env));
+    const proxyUrl = clerkProxyUrl(c.req.url, c.env);
+    normalizeClerkProxyRequestHeaders(proxyHeaders, c.req.raw);
+    proxyHeaders.set("Clerk-Proxy-Url", proxyUrl);
     proxyHeaders.set("Clerk-Secret-Key", secretKey);
     proxyHeaders.set("X-Forwarded-For", c.req.header("CF-Connecting-IP") ?? "");
 
@@ -119,7 +121,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const proxyRequest = new Request(targetUrl.toString(), proxyInit);
     const response = await fetch(proxyRequest);
 
-    return clerkProxyResponse(response);
+    return clerkProxyResponse(response, clerkPath, c.req.raw, proxyUrl);
   });
 
   app.post(
@@ -172,7 +174,7 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   });
 
-  registerApiRoutes(app, resolveRequestApp, desktopSignInTokenFactory);
+  registerApiRoutes(app, resolveRequestApp, desktopSignInTokenFactory, resolveSession);
 
   app.onError((error, c) => {
     captureWebWorkerException(error, {
@@ -219,29 +221,123 @@ function clerkProxyUrl(requestUrl: string, env: Env) {
   return url.toString();
 }
 
+function originalRequestUrl(request: Request) {
+  const previewUrl = request.headers.get("mf-original-url")?.trim();
+  return previewUrl && previewUrl.length > 0 ? previewUrl : request.url;
+}
+
+function normalizeClerkProxyRequestHeaders(headers: Headers, request: Request) {
+  const originalUrl = originalRequestUrl(request);
+  if (originalUrl === request.url) return;
+
+  const workerUrl = new URL(request.url);
+  const previewUrl = new URL(originalUrl);
+  if (workerUrl.origin === previewUrl.origin) return;
+
+  if (headers.get("origin") === previewUrl.origin) {
+    headers.set("origin", workerUrl.origin);
+  }
+
+  const referer = headers.get("referer");
+  if (!referer) return;
+
+  const refererUrl = new URL(referer);
+  if (refererUrl.origin !== previewUrl.origin) return;
+  refererUrl.protocol = workerUrl.protocol;
+  refererUrl.host = workerUrl.host;
+  refererUrl.port = workerUrl.port;
+  headers.set("referer", refererUrl.toString());
+}
+
 function clerkProxyBody(request: Request) {
   return request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 }
 
-function clerkProxyResponse(response: Response) {
+async function clerkProxyResponse(
+  response: Response,
+  clerkPath: string,
+  request: Request,
+  proxyUrl: string,
+) {
+  if (clerkPath === "/v1/environment" && isJsonResponse(response)) {
+    const normalized = normalizeClerkEnvironmentBranding(await response.json());
+    const headers = clerkProxyResponseHeaders(response.headers);
+    rewriteClerkProxyLocationHeader(headers, request, proxyUrl);
+    headers.set("content-type", "application/json");
+    return new Response(JSON.stringify(normalized), {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  }
+
+  const headers = clerkProxyResponseHeaders(response.headers);
+  rewriteClerkProxyLocationHeader(headers, request, proxyUrl);
   return new Response(response.body, {
-    headers: clerkProxyResponseHeaders(response.headers),
+    headers,
     status: response.status,
     statusText: response.statusText,
   });
 }
 
+function rewriteClerkProxyLocationHeader(headers: Headers, request: Request, proxyUrl: string) {
+  const location = headers.get("location");
+  const originalUrl = originalRequestUrl(request);
+  if (!location || originalUrl === request.url) return;
+
+  const publicProxy = new URL(proxyUrl);
+  const previewProxy = new URL(originalUrl);
+  previewProxy.pathname = "/__clerk";
+  previewProxy.search = "";
+  previewProxy.hash = "";
+
+  const locationUrl = new URL(location, publicProxy.origin);
+  if (locationUrl.origin !== publicProxy.origin) return;
+  if (!locationUrl.pathname.startsWith(publicProxy.pathname)) return;
+
+  locationUrl.protocol = previewProxy.protocol;
+  locationUrl.host = previewProxy.host;
+  locationUrl.pathname = `${previewProxy.pathname}${locationUrl.pathname.slice(
+    publicProxy.pathname.length,
+  )}`;
+  headers.set("location", locationUrl.toString());
+}
+
+function isJsonResponse(response: Response) {
+  return response.headers.get("content-type")?.toLowerCase().includes("application/json") === true;
+}
+
 function clerkProxyResponseHeaders(headers: Headers) {
-  const proxyHeaders = new Headers(headers);
-  proxyHeaders.delete("connection");
-  proxyHeaders.delete("keep-alive");
-  proxyHeaders.delete("proxy-authenticate");
-  proxyHeaders.delete("proxy-authorization");
-  proxyHeaders.delete("te");
-  proxyHeaders.delete("trailer");
-  proxyHeaders.delete("transfer-encoding");
-  proxyHeaders.delete("upgrade");
-  return proxyHeaders;
+  const nextHeaders = new Headers(headers);
+  nextHeaders.delete("connection");
+  nextHeaders.delete("content-length");
+  nextHeaders.delete("keep-alive");
+  nextHeaders.delete("proxy-authenticate");
+  nextHeaders.delete("proxy-authorization");
+  nextHeaders.delete("te");
+  nextHeaders.delete("trailer");
+  nextHeaders.delete("transfer-encoding");
+  nextHeaders.delete("upgrade");
+  return nextHeaders;
+}
+
+function normalizeClerkEnvironmentBranding(value: unknown) {
+  if (!isRecord(value)) return value;
+
+  const displayConfig = value.display_config;
+  if (!isRecord(displayConfig)) return value;
+
+  return {
+    ...value,
+    display_config: {
+      ...displayConfig,
+      application_name: "Nudge",
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function decodeClerkProxyPath(path: string) {

@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { ApiContext } from "../api/context";
-import type { DesktopSignInTokenFactory } from "../auth";
+import type { AuthSession, AuthSessionResolver, DesktopSignInTokenFactory } from "../auth";
 import type { ResolveRequestApp } from "../request-context";
 import { aiRateLimitResponse, reserveAiRouteQuota } from "../ai-rate-limit";
 import { conversationMessageInputSchema } from "../api-contract";
@@ -14,12 +14,12 @@ import {
   runWithRequestSpan,
   wideEventFieldsFrom,
 } from "../observability";
-import { resolveCurrentUser } from "../request-auth";
 
 export function registerApiRoutes(
   app: Hono<ObservabilityHonoEnv>,
   resolveRequestApp: ResolveRequestApp,
   createDesktopSignInToken: DesktopSignInTokenFactory,
+  resolveSession: AuthSessionResolver,
 ) {
   const apiHandler = makeApiHandler();
 
@@ -35,7 +35,6 @@ export function registerApiRoutes(
   });
 
   app.use("/api/*", async (c, next) => {
-    const { appServices, runEffect } = await resolveRequestApp(c);
     if (hasUnsafeApiPath(rawPathFromRequest(c.req.raw)) || hasUnsafeApiPath(c.req.path)) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -43,42 +42,50 @@ export function registerApiRoutes(
     if (clientSurface !== undefined) {
       addWideEventFields(c, { clientSurface });
     }
-    const auth = await runWithRequestSpan(
+    if (isPublicApiSessionPath(c.req.path)) {
+      const session = await runWithRequestSpan(
+        c,
+        { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
+        () => resolveSession({ env: c.env, request: c.req.raw }),
+      );
+      const response = publicSessionResponse(session);
+      addSessionWideEventFields(c, response);
+      return c.json(response);
+    }
+
+    const session = await runWithRequestSpan(
       c,
       { attributes: { "nudge.auth.provider": "clerk" }, name: "auth.current_user" },
-      () => resolveCurrentUser({ app: appServices, request: c.req.raw }),
+      () => resolveSession({ env: c.env, request: c.req.raw }),
     );
-    addWideEventFields(c, {
-      authMode: auth.authMode,
-      ...(auth.user ? { userId: auth.user.id, workspaceId: auth.user.id } : {}),
-    });
-    if (!auth.user && !isPublicApiSessionPath(c.req.path)) {
-      return c.json({ error: "Authentication required" }, 401);
-    }
+    const auth = requestSessionFromAuthSession(session);
+    addSessionWideEventFields(c, auth);
+    const user = auth.user;
+    if (!user) return c.json({ error: "Authentication required" }, 401);
+
     if (isTraceApiPath(c.req.path)) {
-      const traceUser = auth.user;
-      if (auth.authMode !== "clerk" || !traceUser) {
+      if (auth.authMode !== "clerk") {
         return c.json({ error: "Authentication required" }, 401);
       }
-      const access = traceApiAccess(c.env, traceUser.id);
+      const access = traceApiAccess(c.env, user.id);
       if (access === "disabled") {
         return c.json({ error: "Not found" }, 404);
       }
       if (access === "forbidden") return c.json({ error: "Forbidden" }, 403);
     }
 
-    const user = auth.user ?? { displayName: "Unauthenticated", id: "unauthenticated" };
     if (c.req.path === "/api/auth/desktop-ticket" && c.req.method === "POST") {
-      if (auth.authMode !== "clerk" || !auth.user) {
+      if (auth.authMode !== "clerk") {
         return c.json({ error: "Clerk session required" }, 401);
       }
       const signInToken = await createDesktopSignInToken({
-        env: appServices.env,
-        userId: auth.user.id,
+        env: c.env,
+        userId: user.id,
       });
       return c.json(signInToken);
     }
 
+    const { appServices, runEffect } = await resolveRequestApp(c);
     const recordSpan: ApiContext["recordSpan"] = (name, input, task) =>
       runWithRequestSpan(c, { ...input, name }, task);
     const streamConversationId = conversationStreamPath(c.req.path);
@@ -191,6 +198,60 @@ export function registerApiRoutes(
     }
 
     await next();
+  });
+}
+
+interface PublicSessionResponse {
+  readonly authMode: "clerk" | "unauthenticated";
+  readonly user: { readonly displayName: string; readonly id: string } | null;
+  readonly workspace: { readonly id: string; readonly label: string } | null;
+}
+
+type RequestSessionResponse = Pick<PublicSessionResponse, "authMode" | "user">;
+
+function publicSessionResponse(session: AuthSession | null): PublicSessionResponse {
+  const requestSession = requestSessionFromAuthSession(session);
+  if (!requestSession.user) {
+    return {
+      ...requestSession,
+      workspace: null,
+    };
+  }
+
+  return {
+    ...requestSession,
+    workspace: {
+      id: requestSession.user.id,
+      label: `${requestSession.user.displayName}'s workspace`,
+    },
+  };
+}
+
+function requestSessionFromAuthSession(session: AuthSession | null): RequestSessionResponse {
+  if (!session) {
+    return {
+      authMode: "unauthenticated",
+      user: null,
+    };
+  }
+
+  const displayName = session.user.name ?? session.user.email ?? "Nudge User";
+  return {
+    authMode: "clerk",
+    user: {
+      displayName,
+      id: session.user.id,
+    },
+  };
+}
+
+function addSessionWideEventFields(
+  c: Parameters<typeof addWideEventFields>[0],
+  session: Pick<PublicSessionResponse, "authMode" | "user">,
+) {
+  addWideEventFields(c, {
+    authMode: session.authMode,
+    ...(session.user ? { userId: session.user.id, workspaceId: session.user.id } : {}),
   });
 }
 

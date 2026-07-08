@@ -1,11 +1,12 @@
+import { scan } from "react-scan";
 import {
   ClerkFailed,
   ClerkLoaded,
   ClerkLoading,
   ClerkProvider,
   SignIn,
-  UserButton,
   useAuth,
+  useUser,
 } from "@clerk/react";
 import { useSignIn } from "@clerk/react/legacy";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
@@ -19,8 +20,16 @@ import {
 } from "@tanstack/react-router";
 import { ConvexReactClient, useConvex, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { type PointerEvent, type ReactNode, StrictMode, useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
+import {
+  type ReactNode,
+  StrictMode,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
+import { createRoot, type Root } from "react-dom/client";
 import {
   type AppSurface,
   type SurfaceActionItem,
@@ -33,11 +42,18 @@ import {
 import {
   NoteComposerSurface,
   NoteFirstWorkspaceSurface,
+  type NoteWorkspaceAskPanelContent,
+  type NoteWorkspaceChatMessage,
+  type NoteWorkspaceEditorContent,
+  type NoteWorkspaceHeaderContent,
   type NoteWorkspaceItem,
+  type NoteWorkspaceReviewRailContent,
+  type NoteWorkspaceSourceItem,
   NudgeSidebarNavigationSurface,
   type NudgeSidebarNavigationItem,
-  SettingsSurface,
-  type StickyColor,
+  type NudgeSidebarNotificationItem,
+  type NudgeSidebarTodayItem,
+  NudgeWorkspaceShellSurface,
 } from "@nudge/ui";
 import { api } from "../../../../convex/_generated/api";
 import {
@@ -46,47 +62,61 @@ import {
   setSessionTokenResolver,
   streamConversationMessage,
 } from "./api-client";
-import {
-  normalizeWebMediaMimeType,
-  preferredBrowserVoiceMimeType,
-  webMediaAttachmentDraft,
-} from "./browser-media";
 import { DesktopSettingsSurface } from "./DesktopSettingsSurface";
-import { QuickCaptureSurface } from "./QuickCaptureSurface";
+import { restoreReactScanToolbarHitTargets } from "./react-scan-devtools";
 import { initializeWebClientSentry } from "./sentry";
+import { sidebarProfileDisplayName } from "./sidebar-profile";
 import {
   anonymousUiEnabled,
   currentAppSurface,
   surfaceContextRefetchInterval,
 } from "./surface-runtime";
 import {
-  saveWebCapture,
-  saveWebDailyNoteDraft,
-  type WebMediaAttachmentDraft,
-  type WebMediaMimeType,
-} from "./web-capture";
-import {
-  clearWebLocalDraft,
-  loadWebLocalDraft,
-  saveWebLocalDraft,
-  type WebDraftStorage,
-} from "./web-draft";
+  createWorkspaceFrontendState,
+  type CreateWorkspaceFrontendStateInput,
+  type WorkspaceAgentState,
+  type WorkspaceContextItem,
+  workspaceFrontendStateReducer,
+  type WorkspaceFrontendStateEvent,
+  type WorkspaceNotificationItem,
+  type WorkspaceNoteProjection,
+} from "./workspace-state";
 // oxlint-disable-next-line import/no-unassigned-import -- Vite loads the Tailwind entrypoint through this side-effect import.
 import "./styles.css";
+
+const reactScanEnabled =
+  (import.meta.env.DEV && import.meta.env.VITE_NUDGE_REACT_SCAN !== "0") ||
+  import.meta.env.VITE_NUDGE_REACT_SCAN === "1";
+const reactGrabEnabled =
+  (import.meta.env.DEV && import.meta.env.VITE_NUDGE_REACT_GRAB !== "0") ||
+  import.meta.env.VITE_NUDGE_REACT_GRAB === "1";
+
+scan({
+  animationSpeed: "fast",
+  enabled: reactScanEnabled,
+  log: false,
+  showToolbar: true,
+});
+
+if (reactScanEnabled) {
+  restoreReactScanToolbarHitTargets();
+}
+
+if (reactGrabEnabled) {
+  void import("react-grab");
+}
 
 initializeWebClientSentry();
 
 const queryClient = new QueryClient();
-const convexUrl =
-  import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud";
-const convexClient = new ConvexReactClient(convexUrl);
+const convexClient = anonymousUiEnabled() ? null : new ConvexReactClient(requiredConvexUrl());
+const productionAppHostname = "app.explorenudge.com";
 const clerkPublishableKey = anonymousUiEnabled() ? null : requiredClerkPublishableKey();
 const clerkProxyUrl = optionalEnvString(
   import.meta.env.VITE_CLERK_PROXY_URL ?? import.meta.env.CLERK_PROXY_URL,
 );
 const logoLongSrc =
   import.meta.env.VITE_NUDGE_LOGO_LONG_SRC ?? "/icons/nudge-logo-lockup-blobby-n-transparent.svg";
-const productionAppHostname = "app.explorenudge.com";
 const desktopAuthRequestParam = "desktop_auth";
 const desktopAuthRequestValue = "browser";
 const desktopAuthCallbackParam = "desktop_callback";
@@ -105,6 +135,13 @@ function requiredClerkPublishableKey() {
     return value;
   }
   throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
+}
+
+function requiredConvexUrl() {
+  const value = import.meta.env.VITE_CONVEX_URL;
+  if (typeof value === "string" && value.startsWith("https://")) return value;
+
+  throw new Error("VITE_CONVEX_URL is required to run Nudge");
 }
 
 function optionalEnvString(value: unknown) {
@@ -126,7 +163,7 @@ function recoverStaleAuthCallbackNavigation() {
   writeAuthCallbackRecoveryUrl(currentUrl);
 
   document.body.innerHTML =
-    '<main class="min-h-dvh bg-[#0f1110]" aria-label="Finishing sign-in"></main>';
+    '<main class="min-h-dvh bg-surface-inverse-canvas" aria-label="Finishing sign-in"></main>';
 
   const serviceWorkerCleanup =
     "serviceWorker" in navigator
@@ -223,7 +260,7 @@ function ClerkAppShell() {
   const auth = useAuth();
 
   if (!auth.isLoaded) {
-    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
+    return <main className="bg-surface-inverse-canvas min-h-dvh" aria-label="Loading Nudge" />;
   }
 
   const desktopTicket = desktopTicketFromLocation();
@@ -247,7 +284,7 @@ function ClerkAppShell() {
 function ClerkSignInScreen(props: { readonly forceRedirectUrl?: string }) {
   const redirectUrl = props.forceRedirectUrl ?? currentBrowserReturnUrl();
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8">
+    <main className="bg-surface-inverse-canvas flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
       {props.forceRedirectUrl ? (
         <SignIn
@@ -269,16 +306,16 @@ function currentBrowserReturnUrl() {
 
 function ClerkUnavailableScreen() {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-4 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-4 rounded-lg p-6 text-center shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign-in unavailable</h1>
-        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+        <p className="text-content-inverse-subtle m-0 text-sm leading-6">
           Nudge could not reach the authentication service. Check the Clerk production DNS setup and
           try again.
         </p>
         <button
-          className="min-h-12 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+          className="bg-surface-inverse-action text-content-inverse-bright min-h-12 rounded-lg px-4 text-sm font-semibold shadow-[0_10px_24px_var(--overlay-inverse-action-18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
           type="button"
           onClick={() => window.location.reload()}
         >
@@ -318,17 +355,17 @@ function DesktopSignInScreen() {
   }, []);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-5 rounded-lg bg-[#141615] p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-5 rounded-lg p-6 shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
         <div className="grid gap-2 text-center">
           <h1 className="m-0 text-2xl font-semibold tracking-normal">Sign in to Nudge</h1>
-          <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+          <p className="text-content-inverse-subtle m-0 text-sm leading-6">
             We will open your default browser so you can use your existing Apple or Google login.
           </p>
         </div>
         <button
-          className="min-h-12 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
+          className="bg-surface-inverse-action text-content-inverse-bright min-h-12 rounded-lg px-4 text-sm font-semibold shadow-[0_10px_24px_var(--overlay-inverse-action-18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
           disabled={status === "opening"}
           type="button"
           onClick={openBrowserSignIn}
@@ -336,12 +373,12 @@ function DesktopSignInScreen() {
           {status === "opening" ? "Opening browser..." : "Open browser"}
         </button>
         {status === "opened" ? (
-          <p className="m-0 text-center text-sm leading-6 text-[#a8aea9]">
+          <p className="text-content-inverse-subtle m-0 text-center text-sm leading-6">
             Finish sign-in in your browser. Nudge will reopen automatically.
           </p>
         ) : null}
         {status === "error" ? (
-          <p className="m-0 text-center text-sm leading-6 text-[#b74417]">
+          <p className="text-status-danger-content m-0 text-center text-sm leading-6">
             Browser sign-in could not be opened.
           </p>
         ) : null}
@@ -390,11 +427,11 @@ function DesktopBrowserAuthBridge() {
   }, []);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-3 rounded-lg p-6 text-center shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Opening Nudge</h1>
-        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+        <p className="text-content-inverse-subtle m-0 text-sm leading-6">
           {errorMessage ?? "Returning your signed-in session to the desktop app."}
         </p>
       </section>
@@ -452,11 +489,11 @@ function RaycastOAuthBridge() {
   }, [auth]);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-3 rounded-lg p-6 text-center shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Opening Raycast</h1>
-        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+        <p className="text-content-inverse-subtle m-0 text-sm leading-6">
           {errorMessage ?? "Returning your signed-in session to Raycast."}
         </p>
       </section>
@@ -495,11 +532,11 @@ function DesktopTicketSignInScreen(props: { readonly ticket: string }) {
   }, [isLoaded, props.ticket, setActive, signIn]);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0f1110] px-4 py-8 text-[#e7e9e4]">
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
       <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
-      <section className="grid w-full max-w-md gap-3 rounded-lg bg-[#141615] p-6 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-3 rounded-lg p-6 text-center shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
         <h1 className="m-0 text-2xl font-semibold tracking-normal">Signing in</h1>
-        <p className="m-0 text-sm leading-6 text-[#a8aea9]">
+        <p className="text-content-inverse-subtle m-0 text-sm leading-6">
           {errorMessage ?? "Completing your browser sign-in."}
         </p>
       </section>
@@ -598,8 +635,11 @@ function errorMessageFrom(error: unknown, fallback: string) {
 
 function AuthenticatedAppShell() {
   const session = useSession();
-  if (!session.data) {
-    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
+  if (!session.data && !anonymousUiEnabled()) {
+    return <main className="bg-surface-inverse-canvas min-h-dvh" aria-label="Loading Nudge" />;
+  }
+  if (!anonymousUiEnabled() && session.data?.authMode !== "clerk") {
+    return <BackendSessionUnavailableScreen />;
   }
 
   return (
@@ -607,6 +647,27 @@ function AuthenticatedAppShell() {
       <Outlet />
       <DesktopUpdateToast />
     </>
+  );
+}
+
+function BackendSessionUnavailableScreen() {
+  return (
+    <main className="bg-surface-inverse-canvas text-content-inverse flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-8">
+      <img className="h-9 w-auto" src={logoLongSrc} alt="Nudge" />
+      <section className="bg-surface-inverse-panel grid w-full max-w-md gap-4 rounded-lg p-6 text-center shadow-[0_0_0_1px_var(--overlay-surface-8),0_16px_42px_var(--overlay-scrim-28)]">
+        <h1 className="m-0 text-2xl font-semibold tracking-normal">Session unavailable</h1>
+        <p className="text-content-inverse-subtle m-0 text-sm leading-6">
+          Nudge could not verify your signed-in session. Check the local Clerk secret and reload.
+        </p>
+        <button
+          className="bg-surface-inverse-action text-content-inverse-bright min-h-12 rounded-lg px-4 text-sm font-semibold shadow-[0_10px_24px_var(--overlay-inverse-action-18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+          type="button"
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      </section>
+    </main>
   );
 }
 
@@ -632,14 +693,14 @@ function DesktopUpdateToast() {
 
   return (
     <aside
-      className="fixed right-4 bottom-4 z-50 grid w-[calc(100%-2rem)] max-w-sm gap-3 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_52px_rgba(0,0,0,0.32)]"
+      className="bg-surface-inverse-panel text-content-inverse fixed right-4 bottom-4 z-50 grid w-[calc(100%-2rem)] max-w-sm gap-3 rounded-lg p-4 shadow-[0_0_0_1px_var(--overlay-surface-8),0_18px_52px_var(--overlay-scrim-32)]"
       role={state.status === "error" ? "alert" : "status"}
       aria-live="polite"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="m-0 text-sm font-semibold">{desktopUpdateTitle(state)}</p>
-          <p className="m-0 mt-1 text-sm leading-5 text-[#a8aea9]">{detail}</p>
+          <p className="text-content-inverse-subtle m-0 mt-1 text-sm leading-5">{detail}</p>
         </div>
         <span
           className={`mt-1 size-2.5 shrink-0 rounded-full ${desktopUpdateIndicatorClassName(
@@ -649,13 +710,13 @@ function DesktopUpdateToast() {
         />
       </div>
       {state.status === "downloading" ? (
-        <div className="h-1.5 overflow-hidden rounded-full bg-[#dce6e1]">
-          <div className="h-full rounded-full bg-[#f15a24]" style={{ width: progressWidth }} />
+        <div className="bg-surface-progress-track h-1.5 overflow-hidden rounded-full">
+          <div className="bg-accent-vivid h-full rounded-full" style={{ width: progressWidth }} />
         </div>
       ) : null}
       {action ? (
         <button
-          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
+          className="bg-surface-inverse-action text-content-inverse-bright min-h-10 rounded-lg px-3 text-sm font-semibold shadow-[0_10px_24px_var(--overlay-inverse-action-18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
           disabled={updates.pendingAction !== null}
           type="button"
           onClick={() => {
@@ -785,10 +846,10 @@ function desktopUpdateDetail(state: NudgeDesktopUpdateState, actionMessage: stri
 }
 
 function desktopUpdateIndicatorClassName(status: NudgeDesktopUpdateStatus) {
-  if (status === "downloaded") return "bg-[#2a7251]";
-  if (status === "error") return "bg-[#dc2626]";
-  if (status === "downloading") return "bg-[#f15a24]";
-  return "bg-[#2f80c6]";
+  if (status === "downloaded") return "bg-status-downloaded";
+  if (status === "error") return "bg-status-danger";
+  if (status === "downloading") return "bg-accent-vivid";
+  return "bg-status-info";
 }
 
 function parseDesktopUpdateActionResult(value: unknown): NudgeDesktopUpdateActionResult | null {
@@ -851,8 +912,10 @@ function NotesScreen() {
   const session = useSession();
   const localDate = todayLocalDate();
   const surfaceContext = useSurfaceContext(localDate);
+  const [reviewRailOpen, setReviewRailOpen] = useState(true);
   const signedInAs =
     surfaceContext.data?.session.user?.displayName ?? session.data?.user?.displayName ?? "You";
+  const profileStatus = session.data?.workspace?.label ?? "Workspace";
   const pendingActions = pendingActionItems(surfaceContext.data?.actions.actions ?? []);
   const latestRun = surfaceContext.data?.actions.latestRun;
   const statusMessage = surfaceContext.isLoading
@@ -861,29 +924,101 @@ function NotesScreen() {
       ? agentRunText(latestRun)
       : "Connected";
   const notes = notesFromSurfaceContext(surfaceContext.data);
+  const signalCount = surfaceContext.data?.signals.length ?? 0;
+  const workspaceProjection = useMemo(
+    () =>
+      workspaceFrontendProjection({
+        context: surfaceContext.data,
+        localDate,
+        note: notes[0],
+        pendingActions,
+      }),
+    [localDate, surfaceContext.data],
+  );
+  const [workspaceState, dispatchWorkspaceState] = useReducer(
+    workspaceFrontendStateReducer,
+    workspaceProjection,
+    createWorkspaceFrontendState,
+  );
+  useEffect(() => {
+    dispatchWorkspaceState({
+      input: workspaceProjection,
+      type: "workspaceProjectionRefreshed",
+    });
+  }, [workspaceProjection]);
+  const headerContent = noteWorkspaceHeaderContent(statusMessage, {
+    onAsk: () =>
+      dispatchWorkspaceState({
+        command: {
+          id: `command:open-agent:${Date.now()}`,
+          kind: "openPanel",
+          label: "Open agent panel",
+          status: "applied",
+          target: "agent",
+        },
+        type: "agentCommandApplied",
+      }),
+    onRefresh: () => {
+      void queryClient.invalidateQueries({ queryKey: ["surface-context", localDate] });
+    },
+  });
+  const editorContent = noteWorkspaceEditorContent(workspaceState, dispatchWorkspaceState);
 
   return (
     <NoteFirstWorkspaceSurface
+      askPanel={noteWorkspaceAskPanelContent(workspaceState.agent)}
       composerSlot={
-        <NewNoteComposer
-          existingJournalText={surfaceContext.data?.journal?.bodyText}
-          localDate={localDate}
-        />
+        <WorkspaceAskComposerDock agent={workspaceState.agent} dispatch={dispatchWorkspaceState} />
       }
+      editor={editorContent}
+      header={headerContent}
       navigationSlot={
         <MainSidebarNavigation
           active="overview"
+          activeTodayFilter={workspaceState.navigation.activeTodayFilter}
+          inboxCount={signalCount}
+          notificationItems={sidebarNotificationItems({
+            dispatch: dispatchWorkspaceState,
+            items: workspaceState.notifications.items,
+            onNavigate: navigate,
+          })}
+          notificationTrayOpen={workspaceState.notifications.open}
+          pendingActionCount={pendingActions.length}
+          profileStatus={profileStatus}
           signedInAs={signedInAs}
+          sourceUpdateCount={signalCount}
           statusMessage={statusMessage}
+          onNotificationTrayToggle={() =>
+            dispatchWorkspaceState({
+              type: workspaceState.notifications.open
+                ? "notificationTrayClosed"
+                : "notificationTrayOpened",
+            })
+          }
           onNavigate={navigate}
+          onTodayFilterSelect={(filter) =>
+            dispatchWorkspaceState({ filter, type: "todayFilterSelected" })
+          }
         />
       }
       notes={notes}
+      notesList={noteWorkspaceNotesListContent(localDate)}
+      reviewRail={noteWorkspaceReviewRailContent({
+        context: surfaceContext.data,
+        onClose: () => setReviewRailOpen(false),
+        pendingActions,
+        statusMessage,
+      })}
+      reviewRailOpen={reviewRailOpen}
       reviewSlot={
         <NotesActionReviewPanel context={surfaceContext.data} loading={surfaceContext.isLoading} />
       }
+      sidebarCollapsed={workspaceState.shell.sidebarCollapsed}
       signedInAs={signedInAs}
       statusMessage={statusMessage}
+      onSidebarCollapsedChange={(collapsed) =>
+        dispatchWorkspaceState({ collapsed, type: "sidebarCollapsedChanged" })
+      }
       utilitySlot={
         <MobileNoteWorkspaceUtilities
           pendingActionCount={pendingActions.length}
@@ -902,32 +1037,361 @@ function MobileNoteWorkspaceUtilities(props: {
     <div className="flex flex-wrap items-center justify-end gap-2">
       {props.pendingActionCount > 0 ? (
         <button
-          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+          className="bg-surface-inverse-action text-content-inverse-bright min-h-10 rounded-lg px-3 text-sm font-semibold shadow-[0_10px_24px_var(--overlay-inverse-action-18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
           type="button"
           onClick={() => props.onNavigate({ to: "/review" })}
         >
           {props.pendingActionCount} to review
         </button>
       ) : null}
-      <button
-        className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-        type="button"
-        onClick={() => props.onNavigate({ to: "/settings" })}
-      >
-        Settings
-      </button>
-      {anonymousUiEnabled() ? <AnonymousSessionPill /> : <UserButton />}
+      {anonymousUiEnabled() ? <AnonymousSessionPill /> : null}
     </div>
   );
 }
 
-function MainSidebarNavigation(props: {
+function WorkspaceRouteShell(props: {
   readonly active: NudgeSidebarNavigationItem["key"];
-  readonly signedInAs: string;
-  readonly statusMessage: string;
-  readonly onNavigate: ReturnType<typeof useNavigate>;
+  readonly children: ReactNode;
+  readonly title: string;
+  readonly leadingSlot?: ReactNode;
+  readonly searchPlaceholder?: string;
+  readonly trailingSlot?: ReactNode;
 }) {
+  const navigate = useNavigate();
+  const session = useSession();
+  const localDate = todayLocalDate();
+  const surfaceContext = useSurfaceContext(localDate);
+  const signedInAs =
+    surfaceContext.data?.session.user?.displayName ?? session.data?.user?.displayName ?? "You";
+  const profileStatus = session.data?.workspace?.label ?? "Workspace";
+  const pendingActions = pendingActionItems(surfaceContext.data?.actions.actions ?? []);
+  const latestRun = surfaceContext.data?.actions.latestRun;
+  const statusMessage = surfaceContext.isLoading
+    ? "Updating context"
+    : latestRun
+      ? agentRunText(latestRun)
+      : "Connected";
+  const signalCount = surfaceContext.data?.signals.length ?? 0;
+  const header = {
+    ...noteWorkspaceHeaderContent(statusMessage, {
+      onAsk: () => navigate({ to: "/ask" }),
+      onRefresh: () => {
+        void queryClient.invalidateQueries({ queryKey: ["surface-context", localDate] });
+      },
+    }),
+    ...(props.searchPlaceholder ? { searchPlaceholder: props.searchPlaceholder } : {}),
+    title: props.title,
+  } satisfies NoteWorkspaceHeaderContent;
+
+  return (
+    <NudgeWorkspaceShellSurface
+      contentClassName="min-h-0 overflow-y-auto px-4 pb-4 lg:px-3 lg:pb-3"
+      header={header}
+      {...(props.leadingSlot !== undefined ? { leadingSlot: props.leadingSlot } : {})}
+      navigationSlot={
+        <MainSidebarNavigation
+          active={props.active}
+          inboxCount={signalCount}
+          pendingActionCount={pendingActions.length}
+          profileStatus={profileStatus}
+          signedInAs={signedInAs}
+          sourceUpdateCount={signalCount}
+          statusMessage={statusMessage}
+          onNavigate={navigate}
+        />
+      }
+      signedInAs={signedInAs}
+      statusMessage={statusMessage}
+      {...(props.trailingSlot !== undefined ? { trailingSlot: props.trailingSlot } : {})}
+      utilitySlot={
+        <MobileNoteWorkspaceUtilities
+          pendingActionCount={pendingActions.length}
+          onNavigate={navigate}
+        />
+      }
+    >
+      {props.children}
+    </NudgeWorkspaceShellSurface>
+  );
+}
+
+function noteWorkspaceHeaderContent(
+  statusMessage: string,
+  actions: {
+    readonly onAsk?: () => void;
+    readonly onRefresh?: () => void;
+  } = {},
+): NoteWorkspaceHeaderContent {
+  return {
+    askLabel: "Ask Nudge",
+    refreshLabel: "Refresh workspace",
+    searchPlaceholder: "Search notes...",
+    searchShortcut: "⌘ K",
+    statusMessage,
+    title: "Notes",
+    ...actions,
+  };
+}
+
+function noteWorkspaceNotesListContent(localDate: string) {
+  return {
+    emptyBody: "Capture a note and Nudge will turn each paragraph into reviewable context.",
+    emptyTitle: "No notes captured.",
+    filterLabel: formatLocalDateLabel(localDate),
+    title: "Notes",
+    viewLabel: "Notes view",
+  };
+}
+
+type WorkspaceFrontendDispatch = (event: WorkspaceFrontendStateEvent) => void;
+
+function workspaceFrontendProjection(input: {
+  readonly context: SurfaceRefreshContext | undefined;
+  readonly localDate: string;
+  readonly note: NoteWorkspaceItem | undefined;
+  readonly pendingActions: ReadonlyArray<SurfaceActionItem>;
+}): CreateWorkspaceFrontendStateInput {
+  const note = noteProjectionFromWorkspaceItem(input.note, input.localDate);
+  return {
+    contextItems: workspaceContextItems({
+      context: input.context,
+      note,
+    }),
+    localDate: input.localDate,
+    note,
+    notifications: workspaceNotifications({
+      context: input.context,
+      pendingActions: input.pendingActions,
+    }),
+  };
+}
+
+function noteProjectionFromWorkspaceItem(
+  note: NoteWorkspaceItem | undefined,
+  localDate: string,
+): WorkspaceNoteProjection {
+  return {
+    bodyText: note?.bodyText ?? "",
+    id: note?.id ?? `daily-note:${localDate}`,
+    revision: note?.id ?? `local:${localDate}`,
+    title: note?.title ?? "Today's note",
+  };
+}
+
+function workspaceContextItems(input: {
+  readonly context: SurfaceRefreshContext | undefined;
+  readonly note: WorkspaceNoteProjection;
+}): ReadonlyArray<WorkspaceContextItem> {
+  const items: WorkspaceContextItem[] = [
+    {
+      domain: "note",
+      id: input.note.id,
+      label: input.note.title,
+      selected: true,
+    },
+  ];
+  for (const signal of input.context?.signals.slice(0, 6) ?? []) {
+    items.push({
+      domain: "source",
+      id: `source:${signal.id}`,
+      label: labelFromIdentifier(signal.source),
+      selected: false,
+    });
+  }
+  return items;
+}
+
+function workspaceNotifications(input: {
+  readonly context: SurfaceRefreshContext | undefined;
+  readonly pendingActions: ReadonlyArray<SurfaceActionItem>;
+}): ReadonlyArray<WorkspaceNotificationItem> {
+  const reviewNotifications: WorkspaceNotificationItem[] = input.pendingActions
+    .slice(0, 4)
+    .map((action) => ({
+      body: action.dueAt
+        ? `Due ${formatShortDateTime(action.dueAt)}`
+        : labelFromIdentifier(action.kind),
+      domain: "review",
+      id: `review:${action.id}`,
+      title: action.title,
+    }));
+  const sourceNotifications: WorkspaceNotificationItem[] =
+    input.context?.signals.slice(0, 4).map((signal) => ({
+      body: formatShortDateTime(signal.occurredAt),
+      domain: "source",
+      id: `source:${signal.id}`,
+      title: `${labelFromIdentifier(signal.source)} updated`,
+    })) ?? [];
+  return [...reviewNotifications, ...sourceNotifications];
+}
+
+function noteWorkspaceAskPanelContent(agent: WorkspaceAgentState): NoteWorkspaceAskPanelContent {
+  return {
+    assistantInitial: "N",
+    assistantName: "Nudge",
+    header: {
+      ariaLabel: "Ask Nudge",
+      closeLabel: "Close Ask Nudge",
+      expandLabel: "Expand Ask Nudge",
+      showClose: true,
+      showExpand: true,
+      title: "Ask Nudge",
+    },
+    messages: agent.messages.map(agentMessageToWorkspaceMessage),
+    prompt: "",
+    responseBullets: [],
+    responseIntro: "",
+    sources: [],
+    userLabel: "You",
+  };
+}
+
+function agentMessageToWorkspaceMessage(
+  message: WorkspaceAgentState["messages"][number],
+): NoteWorkspaceChatMessage {
+  return {
+    body: message.body,
+    ...(message.commands
+      ? {
+          commands: message.commands.map((command) => ({
+            id: command.id,
+            label: command.label,
+            status: command.status,
+          })),
+        }
+      : {}),
+    id: message.id,
+    ...(message.kind ? { kind: message.kind } : {}),
+    label: message.role === "assistant" ? "Nudge" : "You",
+    role: message.role,
+  };
+}
+
+function noteWorkspaceEditorContent(
+  state: ReturnType<typeof createWorkspaceFrontendState>,
+  dispatch: WorkspaceFrontendDispatch,
+): NoteWorkspaceEditorContent {
+  const activeTab = state.note.tabs.find((tab) => tab.id === state.note.activeTabId);
+  const title = activeTab?.title ?? "Today's note";
+  return {
+    bodyText: state.note.draftBodyText,
+    editorLabel: "Today's note editor",
+    editorPlaceholder: "Start today's note...",
+    fallbackTitle: "Today's note",
+    pageOpen: state.note.pageOpen,
+    saveStatus: state.note.saveStatus,
+    tabs: state.note.tabs.map((tab) => {
+      const active = tab.id === state.note.activeTabId;
+      return {
+        active,
+        id: tab.id,
+        title: tab.title,
+        titleEditable: active,
+        onClose: () => dispatch({ tabId: tab.id, type: "noteTabClosed" }),
+        onSelect: () => dispatch({ tabId: tab.id, type: "noteTabSelected" }),
+        ...(active
+          ? {
+              saveStatus: tab.saveStatus,
+              onTitleChange: (nextTitle: string) =>
+                dispatch({ title: nextTitle, type: "noteTitleChanged" }),
+              onTitleDirty: () => dispatch({ type: "noteTitleEditingStarted" }),
+            }
+          : {}),
+      };
+    }),
+    title,
+    titleEditable: true,
+    onAddTab: () =>
+      dispatch({
+        tab: {
+          bodyText: "",
+          dirty: false,
+          id: `local-note:${crypto.randomUUID()}`,
+          revision: "local",
+          saveStatus: "Saved",
+          title: "Untitled note",
+        },
+        type: "noteTabAdded",
+      }),
+    onBodyTextChange: (bodyText) => dispatch({ bodyText, type: "noteDraftChanged" }),
+    onBodyTextDirty: () => dispatch({ type: "noteDraftEditingStarted" }),
+    onClose: () => dispatch({ tabId: state.note.activeTabId, type: "noteTabClosed" }),
+    onTitleChange: (nextTitle) => dispatch({ title: nextTitle, type: "noteTitleChanged" }),
+    onTitleDirty: () => dispatch({ type: "noteTitleEditingStarted" }),
+  };
+}
+
+function noteWorkspaceReviewRailContent(input: {
+  readonly context: SurfaceRefreshContext | undefined;
+  readonly onClose?: () => void;
+  readonly pendingActions: ReadonlyArray<SurfaceActionItem>;
+  readonly statusMessage: string;
+}): NoteWorkspaceReviewRailContent {
+  return {
+    collapseLabel: "Collapse AI review",
+    followUps: input.pendingActions.slice(0, 4).map(followUpFromAction),
+    followUpTitle: "Follow up",
+    sources: sourcesFromSurfaceContext(input.context),
+    sourcesTitle: "Sources",
+    summary:
+      input.pendingActions.length > 0
+        ? `${countLabel(input.pendingActions.length, "item", "items")} need review.`
+        : "No follow ups need review.",
+    summaryTitle: "Summary",
+    title: "AI Review",
+    ...(input.onClose ? { onClose: input.onClose } : {}),
+  };
+}
+
+type MainSidebarNavigationProps = {
+  readonly active: NudgeSidebarNavigationItem["key"];
+  readonly activeTodayFilter?: "all" | "review" | "sources";
+  readonly inboxCount: number;
+  readonly notificationItems?: ReadonlyArray<NudgeSidebarNotificationItem>;
+  readonly notificationTrayOpen?: boolean;
+  readonly pendingActionCount: number;
+  readonly profileStatus: string;
+  readonly signedInAs: string;
+  readonly sourceUpdateCount: number;
+  readonly statusMessage: string;
+  readonly onNotificationTrayToggle?: () => void;
+  readonly onNavigate: ReturnType<typeof useNavigate>;
+  readonly onTodayFilterSelect?: (filter: "all" | "review" | "sources") => void;
+};
+
+function MainSidebarNavigation(props: MainSidebarNavigationProps) {
+  if (anonymousUiEnabled()) return <MainSidebarNavigationSurface {...props} />;
+  return <AuthenticatedMainSidebarNavigation {...props} />;
+}
+
+function AuthenticatedMainSidebarNavigation(props: MainSidebarNavigationProps) {
+  const clerkUser = useUser();
+  const profileAvatarSrc = clerkUser.user?.imageUrl;
+  const profileDisplayName = sidebarProfileDisplayName(clerkUser.user, props.signedInAs);
+  const profileAvatarAlt = `${profileDisplayName} profile photo`;
+  return (
+    <MainSidebarNavigationSurface
+      {...props}
+      signedInAs={profileDisplayName}
+      {...(profileAvatarSrc ? { profileAvatarAlt, profileAvatarSrc } : {})}
+    />
+  );
+}
+
+function MainSidebarNavigationSurface(
+  props: MainSidebarNavigationProps & {
+    readonly profileAvatarAlt?: string;
+    readonly profileAvatarSrc?: string;
+  },
+) {
   const items: ReadonlyArray<NudgeSidebarNavigationItem> = [
+    {
+      group: "Workspace",
+      key: "inbox",
+      label: "Inbox",
+      onSelect: () => props.onNavigate({ to: "/" }),
+      ...(props.inboxCount > 0 ? { badge: props.inboxCount } : {}),
+    },
     {
       active: props.active === "overview",
       group: "Workspace",
@@ -936,34 +1400,346 @@ function MainSidebarNavigation(props: {
       onSelect: () => props.onNavigate({ to: "/" }),
     },
     {
-      active: props.active === "actions" || props.active === "review",
+      active: props.active === "review",
       group: "Workspace",
-      key: "actions",
-      label: "AI Review",
+      key: "review",
+      label: "Review",
       onSelect: () => props.onNavigate({ to: "/review" }),
+      ...(props.pendingActionCount > 0 ? { badge: props.pendingActionCount } : {}),
     },
     {
-      active: props.active === "ask",
-      group: "Review",
-      key: "ask",
-      label: "Ask Nudge",
-      onSelect: () => props.onNavigate({ to: "/ask" }),
-    },
-    {
-      active: props.active === "settings",
-      group: "System",
-      key: "settings",
-      label: "Settings",
-      onSelect: () => props.onNavigate({ to: "/settings" }),
+      active: props.active === "capture",
+      group: "Workspace",
+      key: "capture",
+      label: "Capture",
+      onSelect: () => props.onNavigate({ to: "/quick-capture" }),
     },
   ];
 
   return (
     <NudgeSidebarNavigationSurface
-      footerSlot={anonymousUiEnabled() ? <AnonymousSessionPill /> : <UserButton />}
       items={items}
+      logoSrc={logoLongSrc}
+      showAppName={false}
+      notificationActive={props.pendingActionCount > 0 || props.sourceUpdateCount > 0}
+      {...(props.notificationItems !== undefined
+        ? { notificationItems: props.notificationItems }
+        : {})}
+      {...(props.notificationTrayOpen !== undefined
+        ? { notificationTrayOpen: props.notificationTrayOpen }
+        : {})}
+      {...(props.onNotificationTrayToggle !== undefined
+        ? { onNotificationTrayToggle: props.onNotificationTrayToggle }
+        : {})}
+      profile={{
+        name: props.signedInAs,
+        status: props.profileStatus,
+        ...(props.profileAvatarSrc
+          ? {
+              avatarAlt: props.profileAvatarAlt ?? `${props.signedInAs} profile photo`,
+              avatarSrc: props.profileAvatarSrc,
+            }
+          : {}),
+      }}
+      profileActions={[
+        {
+          description: "Account, workspace, and desktop preferences",
+          id: "settings",
+          label: "Settings",
+          onSelect: () => props.onNavigate({ to: "/settings" }),
+        },
+      ]}
+      profileMenuDescription={props.profileStatus}
+      profileMenuTitle="User settings"
       signedInAs={props.signedInAs}
       statusMessage={props.statusMessage}
+      todayItems={sidebarTodayItems({
+        activeTodayFilter: props.activeTodayFilter ?? "all",
+        pendingActionCount: props.pendingActionCount,
+        sourceUpdateCount: props.sourceUpdateCount,
+        ...(props.onTodayFilterSelect !== undefined
+          ? { onTodayFilterSelect: props.onTodayFilterSelect }
+          : {}),
+      })}
+    />
+  );
+}
+
+function followUpFromAction(action: SurfaceActionItem) {
+  return {
+    id: action.id,
+    label: action.title,
+    meta: action.dueAt
+      ? `Due ${formatShortDateTime(action.dueAt)}`
+      : labelFromIdentifier(action.kind),
+    urgent: action.status === "proposed",
+    urgentLabel: action.dueAt ? "Due" : "Review",
+  };
+}
+
+function sourcesFromSurfaceContext(
+  context: SurfaceRefreshContext | undefined,
+): ReadonlyArray<NoteWorkspaceSourceItem> {
+  return (
+    context?.signals.slice(0, 4).map((signal) => ({
+      id: signal.id,
+      label: labelFromIdentifier(signal.source),
+      meta: formatShortDateTime(signal.occurredAt),
+      tone: "blue",
+    })) ?? []
+  );
+}
+
+function sidebarNotificationItems(input: {
+  readonly dispatch: WorkspaceFrontendDispatch;
+  readonly items: ReadonlyArray<WorkspaceNotificationItem>;
+  readonly onNavigate: ReturnType<typeof useNavigate>;
+}): ReadonlyArray<NudgeSidebarNotificationItem> {
+  return input.items.map((item) => ({
+    body: item.body,
+    id: item.id,
+    onSelect: () => {
+      input.dispatch({ notificationId: item.id, type: "notificationSelected" });
+      if (item.domain === "review") {
+        input.onNavigate({ to: "/review" });
+        return;
+      }
+      if (item.domain === "source") {
+        input.dispatch({ filter: "sources", type: "todayFilterSelected" });
+      }
+    },
+    title: item.title,
+    tone: item.domain === "review" ? "orange" : "blue",
+  }));
+}
+
+function sidebarTodayItems(input: {
+  readonly activeTodayFilter: "all" | "review" | "sources";
+  readonly onTodayFilterSelect?: (filter: "all" | "review" | "sources") => void;
+  readonly pendingActionCount: number;
+  readonly sourceUpdateCount: number;
+}): ReadonlyArray<NudgeSidebarTodayItem> {
+  return [
+    {
+      active: input.activeTodayFilter === "review",
+      id: "follow-ups",
+      label:
+        input.pendingActionCount > 0
+          ? countLabel(input.pendingActionCount, "follow up", "follow ups")
+          : "No follow ups",
+      onSelect: () => input.onTodayFilterSelect?.("review"),
+      tone: "orange",
+    },
+    {
+      active: input.activeTodayFilter === "sources",
+      id: "sources",
+      label:
+        input.sourceUpdateCount > 0
+          ? `${countLabel(input.sourceUpdateCount, "source", "sources")} updated`
+          : "No sources updated",
+      onSelect: () => input.onTodayFilterSelect?.("sources"),
+      tone: "blue",
+    },
+  ];
+}
+
+function countLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatLocalDateLabel(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.valueOf())) return value;
+  return date.toLocaleDateString([], {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+const agentModelOptions = [
+  { id: "nudge-5.5", label: "5.5" },
+  { id: "nudge-5.5-thinking", label: "5.5 thinking" },
+] satisfies ReadonlyArray<{
+  readonly id: string;
+  readonly label: string;
+}>;
+
+function WorkspaceAskComposerDock(props: {
+  readonly agent: WorkspaceAgentState;
+  readonly dispatch: WorkspaceFrontendDispatch;
+}) {
+  return (
+    <div className="grid gap-2">
+      <WorkspaceAgentContextPanel agent={props.agent} dispatch={props.dispatch} />
+      <WorkspaceAgentModelPanel agent={props.agent} dispatch={props.dispatch} />
+      <WorkspaceAskComposer agent={props.agent} dispatch={props.dispatch} />
+    </div>
+  );
+}
+
+function WorkspaceAgentContextPanel(props: {
+  readonly agent: WorkspaceAgentState;
+  readonly dispatch: WorkspaceFrontendDispatch;
+}) {
+  if (!props.agent.contextWindowOpen) return null;
+  const selectedCount = props.agent.contextItems.filter((item) => item.selected).length;
+  return (
+    <section
+      className="bg-surface-base/68 rounded-2xl p-3 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]"
+      data-testid="context-window"
+      aria-label="Agent context window"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+            Context
+          </p>
+          <p className="text-content-primary m-0 mt-1 text-sm font-medium">
+            {selectedCount} selected for this ask
+          </p>
+        </div>
+        <button
+          className="text-content-muted hover:bg-content-primary/6 grid size-8 place-items-center rounded-lg transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+          type="button"
+          onClick={() => props.dispatch({ type: "agentContextWindowClosed" })}
+          aria-label="Close context window"
+        >
+          x
+        </button>
+      </div>
+      <div className="mt-3 grid gap-1.5">
+        {props.agent.contextItems.map((item) => (
+          <button
+            aria-pressed={item.selected}
+            className={`flex min-h-10 items-center justify-between gap-3 rounded-lg px-3 text-left text-sm font-semibold transition-[scale,background-color] duration-150 ease-out active:scale-[0.98] ${
+              item.selected
+                ? "bg-surface-base/78 text-content-primary"
+                : "text-content-muted hover:bg-surface-base/46"
+            }`}
+            key={item.id}
+            type="button"
+            onClick={() => props.dispatch({ itemId: item.id, type: "agentContextItemToggled" })}
+          >
+            <span className="min-w-0 truncate">{item.label}</span>
+            <span className="shrink-0 text-xs font-medium">{labelFromIdentifier(item.domain)}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WorkspaceAgentModelPanel(props: {
+  readonly agent: WorkspaceAgentState;
+  readonly dispatch: WorkspaceFrontendDispatch;
+}) {
+  if (!props.agent.modelPickerOpen) return null;
+  return (
+    <section
+      className="bg-surface-base/68 rounded-2xl p-3 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]"
+      data-testid="model-picker"
+      aria-label="Agent model picker"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+          Model
+        </p>
+        <button
+          className="text-content-muted text-xs font-semibold"
+          type="button"
+          onClick={() => props.dispatch({ type: "agentModelPickerClosed" })}
+        >
+          Close
+        </button>
+      </div>
+      <div className="mt-2 grid gap-1">
+        {agentModelOptions.map((model) => (
+          <button
+            aria-pressed={props.agent.selectedModel === model.id}
+            className={`min-h-10 rounded-lg px-3 text-left text-sm font-semibold transition-[scale,background-color] duration-150 ease-out active:scale-[0.98] ${
+              props.agent.selectedModel === model.id
+                ? "bg-surface-base/78 text-content-primary"
+                : "text-content-muted hover:bg-surface-base/46"
+            }`}
+            key={model.id}
+            type="button"
+            onClick={() => props.dispatch({ model: model.id, type: "agentModelSelected" })}
+          >
+            {model.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function agentModelDisplayName(model: string) {
+  const option = agentModelOptions.find((item) => item.id === model);
+  return option?.label ?? model;
+}
+
+function WorkspaceAskComposer(props: {
+  readonly agent: WorkspaceAgentState;
+  readonly dispatch: WorkspaceFrontendDispatch;
+}) {
+  const sending = props.agent.sending;
+  const [draftMessage, setDraftMessage] = useState("");
+
+  const submitMessage = async () => {
+    const value = draftMessage.trim();
+    if (!value || sending) return;
+
+    props.dispatch({ type: "agentSendStarted" });
+    props.dispatch({
+      body: value,
+      messageId: `message:user:${crypto.randomUUID()}`,
+      type: "agentUserMessageQueued",
+    });
+    setDraftMessage("");
+    try {
+      const stream = await streamConversationMessage({
+        conversationId: "default",
+        message: value,
+      });
+      const replyText = (await new Response(stream.body).text()).trim();
+      props.dispatch({
+        body: replyText || "Nudge completed the run without a text reply.",
+        messageId: `message:assistant:${crypto.randomUUID()}`,
+        type: "agentAssistantMessageReceived",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["surface-context"] });
+    } catch (error) {
+      props.dispatch({
+        message: errorMessageFrom(error, "Ask failed."),
+        messageId: `message:error:${crypto.randomUUID()}`,
+        type: "agentSendFailed",
+      });
+    }
+  };
+
+  return (
+    <NoteComposerSurface
+      addContextLabel="Add context"
+      bodyText={draftMessage}
+      color="yellow"
+      contextWindowLabel="Context window"
+      disabled={sending}
+      modelPickerLabel="Select AI model"
+      modelValue={agentModelDisplayName(props.agent.selectedModel)}
+      placeholder={sending ? "Nudge is thinking..." : "Ask for follow-up changes"}
+      statusMessage={props.agent.statusMessage}
+      submitLabel={sending ? "Asking Nudge" : "Send Ask Nudge message"}
+      variant="chat"
+      voiceInputLabel="Start voice input"
+      onAddContext={() => props.dispatch({ type: "agentContextWindowOpened" })}
+      onBodyTextChange={setDraftMessage}
+      onChange={() => {}}
+      onOpenContextWindow={() => props.dispatch({ type: "agentContextWindowOpened" })}
+      onOpenModelPicker={() => props.dispatch({ type: "agentModelPickerOpened" })}
+      onSubmit={() => {
+        void submitMessage();
+      }}
+      onVoiceInput={() => props.dispatch({ state: "unavailable", type: "agentVoiceStateChanged" })}
     />
   );
 }
@@ -1023,776 +1799,10 @@ function labelFromIdentifier(value: string) {
 
 function AnonymousSessionPill() {
   return (
-    <div className="flex min-h-10 items-center rounded-lg bg-[#12331f] px-3 text-sm font-semibold text-[#78e18c] shadow-[inset_0_0_0_1px_rgba(87,214,109,0.18)]">
+    <div className="bg-surface-success-dark text-status-success-bright flex min-h-10 items-center rounded-lg px-3 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--overlay-success-18)]">
       Local
     </div>
   );
-}
-
-function NewNoteComposer(props: {
-  readonly existingJournalText: string | undefined;
-  readonly localDate: string;
-}) {
-  const initialDraftRef = useRef<WebInitialLocalDraft | null>(null);
-  const journalBaseTextRef = useRef<string | undefined>(props.existingJournalText);
-  const autosaveGenerationRef = useRef(0);
-  if (initialDraftRef.current === null) {
-    initialDraftRef.current = initialWebLocalDraft(props.localDate);
-  }
-  const initialDraft = initialDraftRef.current;
-  const [bodyText, setBodyText] = useState(initialDraft.bodyText);
-  const [color, setColor] = useState<StickyColor>("yellow");
-  const [continuationText, setContinuationText] = useState(initialDraft.continuationText);
-  const [mediaAttachments, setMediaAttachments] = useState<ReadonlyArray<WebMediaAttachmentDraft>>(
-    [],
-  );
-  const [statusMessage, setStatusMessage] = useState(
-    initialDraft.restored ? "Saved on this device" : "",
-  );
-  const [drawingPadOpen, setDrawingPadOpen] = useState(false);
-  const [voiceRecorderOpen, setVoiceRecorderOpen] = useState(false);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const voiceInputRef = useRef<HTMLInputElement | null>(null);
-  const capture = useMutation({
-    mutationFn: async () => {
-      const leadingNote = bodyText.trim();
-      const trailingNote = continuationText.trim();
-      const attachmentNote = mediaAttachments.map((attachment) => attachment.label).join("\n");
-      const noteText = leadingNote || (trailingNote ? "" : attachmentNote);
-      const existingJournalText = journalBaseTextRef.current;
-      return await saveWebCapture({
-        attachments: { color },
-        ...(existingJournalText !== undefined ? { existingJournalText } : {}),
-        localDate: props.localDate,
-        mediaAttachments,
-        note: noteText,
-        ...(trailingNote ? { trailingNote } : {}),
-      });
-    },
-    onError: (error) =>
-      setStatusMessage(error instanceof Error ? error.message : "Could not capture note."),
-    onSuccess: (saved) => {
-      setBodyText("");
-      setContinuationText("");
-      setMediaAttachments([]);
-      journalBaseTextRef.current = saved.journal.bodyText;
-      clearCurrentWebLocalDraft(props.localDate);
-      setStatusMessage(saved.analysisRun ? "Added. AI review queued." : "Added");
-      void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
-    },
-  });
-
-  useEffect(() => {
-    autosaveGenerationRef.current += 1;
-    journalBaseTextRef.current = props.existingJournalText;
-    const draft = initialWebLocalDraft(props.localDate);
-    setBodyText(draft.bodyText);
-    setContinuationText(draft.continuationText);
-    if (draft.restored) setStatusMessage("Saved on this device");
-  }, [props.localDate]);
-
-  useEffect(() => {
-    if (!bodyText.trim() && !continuationText.trim()) {
-      journalBaseTextRef.current = props.existingJournalText;
-    }
-  }, [bodyText, continuationText, props.existingJournalText]);
-
-  useEffect(() => {
-    const generation = autosaveGenerationRef.current + 1;
-    autosaveGenerationRef.current = generation;
-    const timeout = window.setTimeout(() => {
-      const draft = saveCurrentWebLocalDraft({
-        bodyText,
-        continuationText,
-        localDate: props.localDate,
-      });
-      if (!draft) return;
-      setStatusMessage("Saved on this device");
-
-      void saveWebDailyNoteDraft({
-        ...(draft.continuationText ? { continuationNote: draft.continuationText } : {}),
-        ...(journalBaseTextRef.current !== undefined
-          ? { existingJournalText: journalBaseTextRef.current }
-          : {}),
-        idempotencyKey: webDraftAutosaveIdempotencyKey({
-          bodyText: draft.bodyText,
-          continuationText: draft.continuationText,
-          localDate: props.localDate,
-        }),
-        localDate: props.localDate,
-        note: draft.bodyText,
-      })
-        .then((saved) => {
-          if (autosaveGenerationRef.current !== generation) return;
-          setStatusMessage(saved.analysisRun ? "AI review queued" : "Saved to Nudge");
-          void queryClient.invalidateQueries({ queryKey: ["surface-context"] });
-        })
-        .catch(() => {
-          if (autosaveGenerationRef.current === generation) {
-            setStatusMessage("Saved on this device");
-          }
-        });
-    }, 700);
-    return () => window.clearTimeout(timeout);
-  }, [bodyText, continuationText, props.localDate]);
-
-  return (
-    <div className="grid gap-3">
-      <input
-        accept="image/jpeg,image/png"
-        className="sr-only"
-        ref={imageInputRef}
-        type="file"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.item(0);
-          event.currentTarget.value = "";
-          if (!file) return;
-          void appendMediaAttachment(
-            file,
-            {
-              defaultLabel: "Photo",
-              kind: "image",
-              mimeTypes: ["image/jpeg", "image/png"],
-              presentationKind: "photo",
-              statusMessage: "Photo attached",
-              unsupportedMessage: "Choose a JPEG or PNG image.",
-            },
-            setMediaAttachments,
-            setStatusMessage,
-          );
-        }}
-      />
-      <input
-        accept="audio/mp4,audio/webm"
-        className="sr-only"
-        ref={voiceInputRef}
-        type="file"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.item(0);
-          event.currentTarget.value = "";
-          if (!file) return;
-          void appendMediaAttachment(
-            file,
-            {
-              defaultLabel: "Voice recording",
-              kind: "voice",
-              mimeTypes: ["audio/mp4", "audio/webm"],
-              presentationKind: "voice",
-              statusMessage: "Voice attached",
-              unsupportedMessage: "Choose an MP4 or WebM audio recording.",
-            },
-            setMediaAttachments,
-            setStatusMessage,
-          );
-          setVoiceRecorderOpen(false);
-        }}
-      />
-      <NoteComposerSurface
-        attachments={mediaAttachments.map((attachment) => ({
-          id: attachment.id,
-          kind: attachment.presentationKind ?? (attachment.kind === "voice" ? "voice" : "photo"),
-          label: attachment.label,
-        }))}
-        bodyText={bodyText}
-        color={color}
-        continuationText={continuationText}
-        disabled={capture.isPending}
-        statusMessage={statusMessage}
-        onAttachDrawing={() => setDrawingPadOpen(true)}
-        onAttachImage={() => imageInputRef.current?.click()}
-        onAttachVoice={() => setVoiceRecorderOpen(true)}
-        onBodyTextChange={setBodyText}
-        onChange={setColor}
-        onContinuationTextChange={setContinuationText}
-        onRemoveAttachment={(id) =>
-          setMediaAttachments((attachments) =>
-            attachments.filter((attachment) => attachment.id !== id),
-          )
-        }
-        onSubmit={() => capture.mutate()}
-      />
-      <DrawingCaptureDialog
-        open={drawingPadOpen}
-        onAttach={(dataURL) => {
-          appendPreparedMediaAttachment(
-            {
-              dataURL,
-              id: crypto.randomUUID(),
-              kind: "image",
-              label: "Drawing",
-              mimeType: "image/png",
-              presentationKind: "drawing",
-            },
-            {
-              defaultLabel: "Drawing",
-              kind: "image",
-              mimeTypes: ["image/png"],
-              presentationKind: "drawing",
-              statusMessage: "Drawing attached",
-              unsupportedMessage: "Could not prepare drawing.",
-            },
-            setMediaAttachments,
-            setStatusMessage,
-          );
-        }}
-        onClose={() => setDrawingPadOpen(false)}
-      />
-      <VoiceCaptureDialog
-        open={voiceRecorderOpen}
-        onAttach={(blob) => {
-          void appendBlobMediaAttachment(
-            blob,
-            "Voice recording",
-            {
-              defaultLabel: "Voice recording",
-              kind: "voice",
-              mimeTypes: ["audio/mp4", "audio/webm"],
-              presentationKind: "voice",
-              statusMessage: "Voice attached",
-              unsupportedMessage: "Could not prepare voice recording.",
-            },
-            setMediaAttachments,
-            setStatusMessage,
-          );
-          setVoiceRecorderOpen(false);
-        }}
-        onClose={() => setVoiceRecorderOpen(false)}
-        onImportAudio={() => voiceInputRef.current?.click()}
-      />
-    </div>
-  );
-}
-
-interface WebInitialLocalDraft {
-  readonly bodyText: string;
-  readonly continuationText: string;
-  readonly restored: boolean;
-}
-
-function initialWebLocalDraft(localDate: string) {
-  const storage = browserDraftStorage();
-  if (!storage) return { bodyText: "", continuationText: "", restored: false };
-  const draft = loadWebLocalDraft({
-    localDate,
-    storage,
-    surface: currentAppSurface(),
-  });
-  return draft
-    ? {
-        bodyText: draft.bodyText,
-        continuationText: draft.continuationText,
-        restored: true,
-      }
-    : { bodyText: "", continuationText: "", restored: false };
-}
-
-function saveCurrentWebLocalDraft(input: {
-  readonly bodyText: string;
-  readonly continuationText: string;
-  readonly localDate: string;
-}) {
-  const storage = browserDraftStorage();
-  if (!storage) return null;
-  return saveWebLocalDraft({
-    bodyText: input.bodyText,
-    continuationText: input.continuationText,
-    localDate: input.localDate,
-    storage,
-    surface: currentAppSurface(),
-  });
-}
-
-function clearCurrentWebLocalDraft(localDate: string) {
-  const storage = browserDraftStorage();
-  if (!storage) return;
-  clearWebLocalDraft({
-    localDate,
-    storage,
-    surface: currentAppSurface(),
-  });
-}
-
-function webDraftAutosaveIdempotencyKey(input: {
-  readonly bodyText: string;
-  readonly continuationText: string;
-  readonly localDate: string;
-}) {
-  const payload = [input.bodyText, input.continuationText].join("\n\n");
-  return `${currentAppSurface()}:journal-autosave:${input.localDate}:${stableWebTextHash(payload)}`;
-}
-
-function stableWebTextHash(value: string) {
-  let hash = 5381;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash * 33) ^ value.charCodeAt(index)) >>> 0;
-  }
-  return hash.toString(36);
-}
-
-function browserDraftStorage(): WebDraftStorage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function appendMediaAttachment(
-  file: File,
-  options: AppendMediaAttachmentOptions,
-  setMediaAttachments: (
-    updater: (
-      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
-    ) => ReadonlyArray<WebMediaAttachmentDraft>,
-  ) => void,
-  setStatusMessage: (message: string) => void,
-) {
-  await appendBlobMediaAttachment(
-    file,
-    file.name.trim() || options.defaultLabel,
-    options,
-    setMediaAttachments,
-    setStatusMessage,
-  );
-}
-
-async function appendBlobMediaAttachment(
-  blob: Blob,
-  label: string,
-  options: AppendMediaAttachmentOptions,
-  setMediaAttachments: (
-    updater: (
-      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
-    ) => ReadonlyArray<WebMediaAttachmentDraft>,
-  ) => void,
-  setStatusMessage: (message: string) => void,
-) {
-  const mimeType = mediaAttachmentMimeType(blob.type, options.mimeTypes);
-  if (!mimeType) {
-    setStatusMessage(options.unsupportedMessage);
-    return;
-  }
-
-  try {
-    const dataURL = await blobDataURL(blob);
-    appendPreparedMediaAttachment(
-      {
-        dataURL,
-        id: crypto.randomUUID(),
-        kind: options.kind,
-        label,
-        mimeType,
-        presentationKind: options.presentationKind,
-      },
-      options,
-      setMediaAttachments,
-      setStatusMessage,
-    );
-  } catch {
-    setStatusMessage("Could not read attachment.");
-  }
-}
-
-function appendPreparedMediaAttachment(
-  input: {
-    readonly dataURL: string;
-    readonly id: string;
-    readonly kind: "image" | "voice";
-    readonly label: string;
-    readonly mimeType: string;
-    readonly presentationKind: "drawing" | "photo" | "voice";
-  },
-  options: AppendMediaAttachmentOptions,
-  setMediaAttachments: (
-    updater: (
-      attachments: ReadonlyArray<WebMediaAttachmentDraft>,
-    ) => ReadonlyArray<WebMediaAttachmentDraft>,
-  ) => void,
-  setStatusMessage: (message: string) => void,
-) {
-  const draft = webMediaAttachmentDraft(input);
-  if (!draft || !mediaAttachmentMimeType(draft.mimeType, options.mimeTypes)) {
-    setStatusMessage(options.unsupportedMessage);
-    return;
-  }
-
-  setMediaAttachments((attachments) => [...attachments, draft]);
-  setStatusMessage(options.statusMessage);
-}
-
-interface AppendMediaAttachmentOptions {
-  readonly defaultLabel: string;
-  readonly kind: "image" | "voice";
-  readonly mimeTypes: ReadonlyArray<WebMediaMimeType>;
-  readonly presentationKind: "drawing" | "photo" | "voice";
-  readonly statusMessage: string;
-  readonly unsupportedMessage: string;
-}
-
-function mediaAttachmentMimeType(value: string, allowed: ReadonlyArray<WebMediaMimeType>) {
-  const normalized = normalizeWebMediaMimeType(value);
-  if (!normalized) return null;
-  for (const mimeType of allowed) {
-    if (normalized === mimeType) return mimeType;
-  }
-  return null;
-}
-
-async function blobDataURL(blob: Blob) {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read attachment."));
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error("Could not read attachment."));
-    };
-    reader.readAsDataURL(blob);
-  });
-}
-
-function DrawingCaptureDialog(props: {
-  readonly open: boolean;
-  readonly onAttach: (dataURL: string) => void;
-  readonly onClose: () => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const drawingRef = useRef(false);
-  const pointerIdRef = useRef<number | null>(null);
-  const [hasDrawing, setHasDrawing] = useState(false);
-
-  useEffect(() => {
-    if (!props.open) return;
-    prepareDrawingCanvas(canvasRef.current);
-    drawingRef.current = false;
-    pointerIdRef.current = null;
-    setHasDrawing(false);
-  }, [props.open]);
-
-  if (!props.open) return null;
-
-  const startDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
-    const canvas = event.currentTarget;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
-    drawingRef.current = true;
-    pointerIdRef.current = event.pointerId;
-    canvas.setPointerCapture(event.pointerId);
-    const point = drawingCanvasPoint(canvas, event);
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-    setHasDrawing(true);
-  };
-
-  const continueDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current || pointerIdRef.current !== event.pointerId) return;
-    const canvas = event.currentTarget;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
-    const point = drawingCanvasPoint(canvas, event);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-  };
-
-  const finishDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (pointerIdRef.current !== event.pointerId) return;
-    drawingRef.current = false;
-    pointerIdRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const clearDrawing = () => {
-    prepareDrawingCanvas(canvasRef.current);
-    drawingRef.current = false;
-    pointerIdRef.current = null;
-    setHasDrawing(false);
-  };
-
-  const attachDrawing = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !hasDrawing) return;
-    props.onAttach(canvas.toDataURL("image/png"));
-    props.onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
-      <section
-        aria-label="Drawing"
-        aria-modal="true"
-        className="grid w-full max-w-3xl gap-4 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_90px_rgba(0,0,0,0.42)]"
-        role="dialog"
-      >
-        <header className="flex items-center justify-between gap-3">
-          <h2 className="m-0 text-lg font-semibold">Drawing</h2>
-          <button
-            className="min-h-9 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-            type="button"
-            onClick={props.onClose}
-          >
-            Close
-          </button>
-        </header>
-        <canvas
-          aria-label="Drawing canvas"
-          className="h-72 w-full touch-none rounded-lg bg-[#f5eecf] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]"
-          height={540}
-          ref={canvasRef}
-          width={960}
-          onPointerCancel={finishDrawing}
-          onPointerDown={startDrawing}
-          onPointerMove={continueDrawing}
-          onPointerUp={finishDrawing}
-        />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <button
-            className="min-h-10 rounded-lg bg-[#191c1a] px-4 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-            type="button"
-            onClick={clearDrawing}
-          >
-            Clear
-          </button>
-          <button
-            className="min-h-10 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-            disabled={!hasDrawing}
-            type="button"
-            onClick={attachDrawing}
-          >
-            Attach drawing
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-type VoiceRecordingState = "idle" | "ready" | "recording";
-
-function VoiceCaptureDialog(props: {
-  readonly open: boolean;
-  readonly onAttach: (blob: Blob) => void;
-  readonly onClose: () => void;
-  readonly onImportAudio: () => void;
-}) {
-  const chunksRef = useRef<Blob[]>([]);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const timerRef = useRef<number | null>(null);
-  const startedAtRef = useRef<number | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [recordingState, setRecordingState] = useState<VoiceRecordingState>("idle");
-  const [statusMessage, setStatusMessage] = useState("");
-
-  useEffect(() => {
-    return () => {
-      cleanupVoiceResources(timerRef, streamRef, recorderRef);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!props.open) return;
-    chunksRef.current = [];
-    setElapsedSeconds(0);
-    setRecordedBlob(null);
-    setRecordingState("idle");
-    setStatusMessage("");
-  }, [props.open]);
-
-  if (!props.open) return null;
-
-  const startRecording = async () => {
-    setStatusMessage("");
-    setRecordedBlob(null);
-
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setStatusMessage("Microphone unavailable.");
-      return;
-    }
-
-    const preferredMimeType = preferredBrowserVoiceMimeType();
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = preferredMimeType
-        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
-        : new MediaRecorder(stream);
-
-      chunksRef.current = [];
-      streamRef.current = stream;
-      recorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current = [...chunksRef.current, event.data];
-        }
-      };
-      recorder.onstop = () => {
-        const recorderMimeType = normalizeWebMediaMimeType(recorder.mimeType);
-        const mimeType = recorderMimeType ?? preferredMimeType;
-        const chunks = chunksRef.current;
-        cleanupVoiceResources(timerRef, streamRef, recorderRef);
-        if (!mimeType || chunks.length === 0) {
-          setRecordingState("idle");
-          setStatusMessage("No recording captured.");
-          return;
-        }
-        setRecordedBlob(new Blob(chunks, { type: mimeType }));
-        setRecordingState("ready");
-        setStatusMessage("Recording ready");
-      };
-
-      recorder.start();
-      startedAtRef.current = Date.now();
-      setElapsedSeconds(0);
-      setRecordingState("recording");
-      timerRef.current = window.setInterval(() => {
-        const startedAt = startedAtRef.current;
-        if (startedAt === null) return;
-        setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
-      }, 250);
-    } catch {
-      cleanupVoiceResources(timerRef, streamRef, recorderRef);
-      setRecordingState("idle");
-      setStatusMessage("Microphone unavailable.");
-    }
-  };
-
-  const stopRecording = () => {
-    const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
-    recorder.stop();
-  };
-
-  const close = () => {
-    const recorder = recorderRef.current;
-    if (recorder) {
-      recorder.onstop = null;
-      if (recorder.state !== "inactive") recorder.stop();
-    }
-    cleanupVoiceResources(timerRef, streamRef, recorderRef);
-    chunksRef.current = [];
-    props.onClose();
-  };
-
-  const attachRecording = () => {
-    if (!recordedBlob) return;
-    props.onAttach(recordedBlob);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
-      <section
-        aria-label="Voice"
-        aria-modal="true"
-        className="grid w-full max-w-md gap-4 rounded-lg bg-[#141615] p-4 text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_90px_rgba(0,0,0,0.42)]"
-        role="dialog"
-      >
-        <header className="flex items-center justify-between gap-3">
-          <h2 className="m-0 text-lg font-semibold">Voice</h2>
-          <button
-            className="min-h-9 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-            type="button"
-            onClick={close}
-          >
-            Close
-          </button>
-        </header>
-        <div className="grid min-h-28 place-items-center rounded-lg bg-[#0f1110] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
-          <p className="m-0 text-4xl font-semibold tabular-nums">
-            {formatElapsedSeconds(elapsedSeconds)}
-          </p>
-          {statusMessage ? (
-            <p className="m-0 mt-2 text-sm font-medium text-[#8d938f]">{statusMessage}</p>
-          ) : null}
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {recordingState === "recording" ? (
-            <button
-              className="min-h-10 rounded-lg bg-[#f15a24] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(241,90,36,0.24)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-              type="button"
-              onClick={stopRecording}
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              className="min-h-10 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-              disabled={recordingState === "ready"}
-              type="button"
-              onClick={() => void startRecording()}
-            >
-              Record
-            </button>
-          )}
-          <button
-            className="min-h-10 rounded-lg bg-[#191c1a] px-4 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
-            type="button"
-            onClick={props.onImportAudio}
-          >
-            Import audio
-          </button>
-        </div>
-        <button
-          className="min-h-10 rounded-lg bg-[#2a7251] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(42,114,81,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-          disabled={!recordedBlob}
-          type="button"
-          onClick={attachRecording}
-        >
-          Attach recording
-        </button>
-      </section>
-    </div>
-  );
-}
-
-function prepareDrawingCanvas(canvas: HTMLCanvasElement | null) {
-  if (!canvas) return;
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  context.fillStyle = "#f5eecf";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.lineWidth = 7;
-  context.strokeStyle = "#15181d";
-}
-
-function drawingCanvasPoint(canvas: HTMLCanvasElement, event: PointerEvent<HTMLCanvasElement>) {
-  const rect = canvas.getBoundingClientRect();
-  const x = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * canvas.width : 0;
-  const y = rect.height > 0 ? ((event.clientY - rect.top) / rect.height) * canvas.height : 0;
-  return { x, y };
-}
-
-function cleanupVoiceResources(
-  timerRef: { current: number | null },
-  streamRef: { current: MediaStream | null },
-  recorderRef: { current: MediaRecorder | null },
-) {
-  if (timerRef.current !== null) {
-    window.clearInterval(timerRef.current);
-    timerRef.current = null;
-  }
-  const stream = streamRef.current;
-  if (stream) {
-    for (const track of stream.getTracks()) {
-      track.stop();
-    }
-    streamRef.current = null;
-  }
-  recorderRef.current = null;
-}
-
-function formatElapsedSeconds(value: number) {
-  const minutes = Math.floor(value / 60);
-  const seconds = value % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function NotesActionReviewPanel(props: {
@@ -1816,7 +1826,7 @@ function NotesActionReviewPanel(props: {
 
   return (
     <section className="grid gap-3">
-      <p className="m-0 text-sm leading-6 text-pretty text-[#8d938f]">
+      <p className="text-content-note-muted m-0 text-sm leading-6 text-pretty">
         {latestRun
           ? agentRunText(latestRun)
           : props.loading
@@ -1835,9 +1845,9 @@ function NotesActionReviewPanel(props: {
           />
         ))
       ) : (
-        <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
-          <p className="m-0 text-sm font-semibold text-[#f4f5f1]">No suggestions waiting.</p>
-          <p className="m-0 mt-2 text-sm leading-6 text-pretty text-[#8d938f]">
+        <section className="bg-surface-base/72 rounded-lg p-4 shadow-[0_10px_26px_var(--overlay-ink-7),inset_0_0_0_1px_var(--overlay-ink-6)]">
+          <p className="text-content-primary m-0 text-sm font-semibold">No suggestions waiting.</p>
+          <p className="text-content-muted m-0 mt-2 text-sm leading-6 text-pretty">
             Add notes with commitments, reminders, or follow-ups. Suggested actions will appear here
             for approval.
           </p>
@@ -1855,27 +1865,29 @@ function NoteReviewActionCard(props: {
   readonly onDismiss: () => void;
 }) {
   return (
-    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+    <article className="bg-surface-base/72 rounded-lg p-4 shadow-[0_10px_26px_var(--overlay-ink-7),inset_0_0_0_1px_var(--overlay-ink-6)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+          <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
             {labelFromIdentifier(props.action.kind)} · {props.action.status}
           </p>
-          <h3 className="m-0 mt-1 text-base font-semibold text-balance text-[#f4f5f1]">
+          <h3 className="text-content-primary m-0 mt-1 text-base font-semibold text-balance">
             {props.action.title}
           </h3>
         </div>
-        <p className="m-0 rounded-lg bg-[#12331f] px-2.5 py-1 text-xs font-semibold text-[#78e18c] tabular-nums">
+        <p className="bg-surface-success text-status-success-content m-0 rounded-lg px-2.5 py-1 text-xs font-semibold tabular-nums">
           {Math.round(props.action.confidence * 100)}%
         </p>
       </div>
-      <p className="m-0 mt-3 text-sm leading-6 text-pretty text-[#d7dbd6]">{props.action.body}</p>
-      <p className="m-0 mt-3 rounded-lg bg-[#0f1110] px-3 py-2 text-xs font-semibold text-[#a8aea9] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
+      <p className="text-content-body m-0 mt-3 text-sm leading-6 text-pretty">
+        {props.action.body}
+      </p>
+      <p className="bg-surface-warm text-content-muted m-0 mt-3 rounded-lg px-3 py-2 text-xs font-semibold shadow-[inset_0_0_0_1px_var(--overlay-ink-6)]">
         {followThroughText(props.action)}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2">
         <button
-          className="min-h-10 rounded-lg bg-[#14211e] px-2 text-xs font-semibold text-[#f7fbf6] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="bg-accent-primary text-content-on-strong min-h-10 rounded-lg px-2 text-xs font-semibold transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={props.onAccept}
@@ -1883,7 +1895,7 @@ function NoteReviewActionCard(props: {
           Accept
         </button>
         <button
-          className="min-h-10 rounded-lg bg-[#1d201e] px-2 text-xs font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="bg-surface-base text-content-primary min-h-10 rounded-lg px-2 text-xs font-semibold shadow-[inset_0_0_0_1px_var(--overlay-ink-10)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={props.onComplete}
@@ -1891,7 +1903,7 @@ function NoteReviewActionCard(props: {
           Done
         </button>
         <button
-          className="min-h-10 rounded-lg bg-[#1d201e] px-2 text-xs font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="bg-surface-base text-content-primary min-h-10 rounded-lg px-2 text-xs font-semibold shadow-[inset_0_0_0_1px_var(--overlay-ink-10)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={props.onDismiss}
@@ -1908,7 +1920,6 @@ type ReviewInboxItem = ReviewInboxResponse["items"][number];
 type AgentReceipt = ReviewInboxResponse["receipts"][number];
 
 function AskScreen() {
-  const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
@@ -1936,70 +1947,56 @@ function AskScreen() {
   };
 
   return (
-    <main className="min-h-dvh bg-[#0f1110] text-[#e7e9e4]">
-      <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-4 sm:px-6">
-        <header className="flex min-h-14 items-center justify-between gap-3">
-          <button
-            className="flex min-h-10 items-center gap-3 rounded-lg bg-[#141615] px-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
-            type="button"
-            onClick={() => navigate({ to: "/" })}
-          >
-            <img className="h-8 w-auto" src={logoLongSrc} alt="Nudge" />
-          </button>
-          <button
-            className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
-            type="button"
-            onClick={() => navigate({ to: "/review" })}
-          >
-            Review
-          </button>
-        </header>
+    <WorkspaceRouteShell active="ask" title="Ask Nudge">
+      <section className="mx-auto grid h-full max-w-4xl grid-rows-[minmax(0,1fr)_auto] gap-3">
+        <article className="bg-surface-base/64 min-h-0 overflow-y-auto rounded-xl p-6 shadow-[0_22px_64px_var(--overlay-ink-10),inset_0_0_0_1px_var(--overlay-ink-7)] backdrop-blur-xl">
+          <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+            Agent chat
+          </p>
+          <h1 className="text-content-primary m-0 mt-2 text-3xl leading-tight font-semibold tracking-[-0.02em]">
+            Ask Nudge
+          </h1>
+          <div className="mt-6 grid gap-4">
+            {reply ? (
+              <section className="bg-surface-base/72 rounded-xl p-4 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]">
+                <p className="text-content-body m-0 text-sm leading-7 text-pretty whitespace-pre-wrap">
+                  {reply}
+                </p>
+              </section>
+            ) : (
+              <section className="bg-surface-base/54 rounded-xl p-4 shadow-[inset_0_0_0_1px_var(--overlay-ink-6)]">
+                <p className="text-content-muted m-0 text-sm leading-6 text-pretty">
+                  Ask about today&apos;s note, open follow-ups, or context Nudge has already seen.
+                </p>
+              </section>
+            )}
+          </div>
+        </article>
 
-        <form
-          className="grid gap-4 rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]"
-          onSubmit={(event) => {
-            event.preventDefault();
+        <NoteComposerSurface
+          bodyText={message}
+          color="yellow"
+          disabled={sending}
+          placeholder={sending ? "Nudge is thinking..." : "Ask about your workspace"}
+          statusMessage={statusMessage}
+          submitLabel={sending ? "Running Nudge" : "Send Ask Nudge message"}
+          variant="chat"
+          onAddContext={() => setStatusMessage("Using daily notes and recent signals.")}
+          onBodyTextChange={setMessage}
+          onChange={() => {}}
+          onOpenContextWindow={() => setStatusMessage("Context window is coming next.")}
+          onOpenModelPicker={() => setStatusMessage("Using the configured Nudge model.")}
+          onSubmit={() => {
             void submitMessage();
           }}
-        >
-          <div>
-            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
-              Ask Nudge
-            </p>
-            <h1 className="m-0 mt-1 text-xl font-semibold text-balance text-[#f4f5f1]">Agent</h1>
-          </div>
-          <textarea
-            className="min-h-36 resize-y rounded-lg bg-[#0f1110] px-3 py-3 text-base leading-6 text-[#f4f5f1] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] outline-none placeholder:text-[#75877f] focus:shadow-[inset_0_0_0_1px_rgba(241,90,36,0.82),0_0_0_3px_rgba(241,90,36,0.14)]"
-            disabled={sending}
-            placeholder="Ask about your notes, commitments, or next move."
-            value={message}
-            onChange={(event) => setMessage(event.currentTarget.value)}
-          />
-          <div className="flex items-center justify-between gap-3">
-            <p className="m-0 text-sm text-[#8d938f]">{statusMessage}</p>
-            <button
-              className="min-h-11 rounded-lg bg-[#14211e] px-4 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-              disabled={sending || !message.trim()}
-              type="submit"
-            >
-              {sending ? "Running" : "Ask"}
-            </button>
-          </div>
-          {reply ? (
-            <section className="rounded-lg bg-[#0f1110] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
-              <p className="m-0 text-sm leading-6 text-pretty whitespace-pre-wrap text-[#d7dbd6]">
-                {reply}
-              </p>
-            </section>
-          ) : null}
-        </form>
-      </div>
-    </main>
+          onVoiceInput={() => setStatusMessage("Voice input belongs in Capture for now.")}
+        />
+      </section>
+    </WorkspaceRouteShell>
   );
 }
 
 function ReviewScreen() {
-  const navigate = useNavigate();
   const inbox = useReviewInbox();
   const reviewProposal = useMutation({
     mutationFn: async (input: {
@@ -2014,38 +2011,21 @@ function ReviewScreen() {
   const receipts = inbox.data?.receipts ?? [];
 
   return (
-    <main className="min-h-dvh bg-[#0f1110] text-[#e7e9e4]">
-      <div className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-4 sm:px-6">
-        <header className="flex min-h-14 items-center justify-between gap-3">
-          <button
-            className="flex min-h-10 items-center gap-3 rounded-lg bg-[#141615] px-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
-            type="button"
-            onClick={() => navigate({ to: "/" })}
-          >
-            <img className="h-8 w-auto" src={logoLongSrc} alt="Nudge" />
-          </button>
-          <button
-            className="min-h-10 rounded-lg bg-[#141615] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out hover:bg-[#1d201e] active:scale-[0.96]"
-            type="button"
-            onClick={() => navigate({ to: "/ask" })}
-          >
-            Ask
-          </button>
-        </header>
-
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <WorkspaceRouteShell active="review" title="Review">
+      <section className="mx-auto grid h-full max-w-6xl gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="bg-surface-base/64 min-h-0 overflow-y-auto rounded-xl p-4 shadow-[0_22px_64px_var(--overlay-ink-10),inset_0_0_0_1px_var(--overlay-ink-7)] backdrop-blur-xl">
           <div className="grid content-start gap-3">
             <div>
-              <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+              <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
                 Review Inbox
               </p>
-              <h1 className="m-0 mt-1 text-xl font-semibold text-balance text-[#f4f5f1]">
+              <h1 className="text-content-primary m-0 mt-1 text-2xl font-semibold text-balance">
                 Proposals
               </h1>
             </div>
             {inbox.isLoading ? (
-              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
-                <p className="m-0 text-sm font-medium text-[#8d938f]">Loading.</p>
+              <section className="bg-surface-base/72 rounded-lg p-4 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]">
+                <p className="text-content-muted m-0 text-sm font-medium">Loading.</p>
               </section>
             ) : items.length > 0 ? (
               items.map((item) => (
@@ -2057,27 +2037,29 @@ function ReviewScreen() {
                 />
               ))
             ) : (
-              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
-                <p className="m-0 text-sm font-medium text-[#8d938f]">No proposals waiting.</p>
+              <section className="bg-surface-base/72 rounded-lg p-4 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]">
+                <p className="text-content-muted m-0 text-sm font-medium">No proposals waiting.</p>
               </section>
             )}
           </div>
+        </div>
 
-          <aside className="grid content-start gap-3">
-            <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+        <aside className="bg-surface-base/62 min-h-0 overflow-y-auto rounded-xl p-4 shadow-[0_20px_54px_var(--overlay-ink-10),inset_0_0_0_1px_var(--overlay-ink-7)] backdrop-blur-xl">
+          <div className="grid content-start gap-3">
+            <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
               Receipts
             </p>
             {receipts.length > 0 ? (
               receipts.map((item) => <ReviewReceiptCard key={item.id} receipt={item} />)
             ) : (
-              <section className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
-                <p className="m-0 text-sm font-medium text-[#8d938f]">No receipts yet.</p>
+              <section className="bg-surface-base/72 rounded-lg p-4 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]">
+                <p className="text-content-muted m-0 text-sm font-medium">No receipts yet.</p>
               </section>
             )}
-          </aside>
-        </section>
-      </div>
-    </main>
+          </div>
+        </aside>
+      </section>
+    </WorkspaceRouteShell>
   );
 }
 
@@ -2092,21 +2074,21 @@ function ReviewInboxItemCard(props: {
   const proposal = props.item.proposal;
   const explanation = proposal.explanation;
   return (
-    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
+    <article className="bg-surface-base/76 rounded-lg p-4 shadow-[0_10px_26px_var(--overlay-ink-7),inset_0_0_0_1px_var(--overlay-ink-6)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+          <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
             {proposal.kind.replace("_", " ")}
           </p>
-          <h2 className="m-0 mt-1 text-lg font-semibold text-balance text-[#f4f5f1]">
+          <h2 className="text-content-primary m-0 mt-1 text-lg font-semibold text-balance">
             {proposal.title}
           </h2>
         </div>
-        <p className="m-0 rounded-lg bg-[#12331f] px-2 py-1 text-xs font-semibold text-[#78e18c]">
+        <p className="bg-surface-success text-status-success-content m-0 rounded-lg px-2.5 py-1 text-xs font-semibold">
           {Math.round(explanation.confidence * 100)}%
         </p>
       </div>
-      <p className="m-0 mt-3 text-sm leading-6 text-pretty text-[#d7dbd6]">{proposal.body}</p>
+      <p className="text-content-body m-0 mt-3 text-sm leading-6 text-pretty">{proposal.body}</p>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">
         <ReviewFact label="Source" value={explanation.source.label} />
         <ReviewFact label="Reason" value={explanation.reason} />
@@ -2115,7 +2097,7 @@ function ReviewInboxItemCard(props: {
       </dl>
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <button
-          className="min-h-10 rounded-lg bg-[#191c1a] px-3 text-sm font-semibold text-[#e7e9e4] shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_8px_18px_rgba(0,0,0,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="bg-surface-base text-content-primary min-h-10 rounded-lg px-3 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--overlay-ink-10)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={() => props.onReview({ decision: "rejected", proposalId: proposal.id })}
@@ -2123,7 +2105,7 @@ function ReviewInboxItemCard(props: {
           Reject
         </button>
         <button
-          className="min-h-10 rounded-lg bg-[#14211e] px-3 text-sm font-semibold text-[#f7fbf6] shadow-[0_10px_24px_rgba(20,33,30,0.18)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="bg-accent-primary text-content-on-strong min-h-10 rounded-lg px-3 text-sm font-semibold shadow-[0_12px_24px_var(--overlay-accent-24)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           disabled={props.disabled}
           type="button"
           onClick={() => props.onReview({ decision: "accepted", proposalId: proposal.id })}
@@ -2137,26 +2119,31 @@ function ReviewInboxItemCard(props: {
 
 function ReviewFact(props: { readonly label: string; readonly value: string }) {
   return (
-    <div className="rounded-lg bg-[#0f1110] p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
-      <dt className="text-xs font-semibold tracking-[0.14em] text-[#8d938f] uppercase">
+    <div className="bg-surface-warm rounded-lg p-3 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)]">
+      <dt className="text-content-muted text-xs font-semibold tracking-[0.12em] uppercase">
         {props.label}
       </dt>
-      <dd className="m-0 mt-1 text-sm leading-5 text-pretty text-[#d7dbd6]">{props.value}</dd>
+      <dd className="text-content-body m-0 mt-1 text-sm leading-5 text-pretty">{props.value}</dd>
     </div>
   );
 }
 
 function ReviewReceiptCard(props: { readonly receipt: AgentReceipt }) {
   return (
-    <article className="rounded-lg bg-[#141615] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_42px_rgba(0,0,0,0.28)]">
-      <p className="m-0 text-sm font-semibold text-[#f4f5f1]">{props.receipt.action}</p>
-      <p className="m-0 mt-2 text-sm leading-6 text-pretty text-[#d7dbd6]">{props.receipt.why}</p>
-      <p className="m-0 mt-2 text-xs text-[#8d938f]">{formatDateTime(props.receipt.createdAt)}</p>
+    <article className="bg-surface-base/76 rounded-lg p-4 shadow-[0_10px_26px_var(--overlay-ink-7),inset_0_0_0_1px_var(--overlay-ink-6)]">
+      <p className="text-content-primary m-0 text-sm font-semibold">{props.receipt.action}</p>
+      <p className="text-content-body m-0 mt-2 text-sm leading-6 text-pretty">
+        {props.receipt.why}
+      </p>
+      <p className="text-content-muted m-0 mt-2 text-xs">
+        {formatDateTime(props.receipt.createdAt)}
+      </p>
     </article>
   );
 }
 
 function QuickCaptureScreen() {
+  const navigate = useNavigate();
   const [note, setNote] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const closeQuickCapture = async () => {
@@ -2165,7 +2152,7 @@ function QuickCaptureScreen() {
       await bridge.close();
       return;
     }
-    window.close();
+    navigate({ to: "/" });
   };
   const submitQuickCapture = useMutation({
     mutationFn: async () => {
@@ -2196,21 +2183,62 @@ function QuickCaptureScreen() {
   }, []);
 
   return (
-    <QuickCaptureSurface
-      disabled={submitQuickCapture.isPending}
-      note={note}
-      statusMessage={statusMessage}
-      onClose={() => {
-        void closeQuickCapture();
-      }}
-      onNoteChange={setNote}
-      onSubmit={() => submitQuickCapture.mutate()}
-    />
+    <WorkspaceRouteShell active="capture" title="Capture">
+      <section className="mx-auto grid h-full max-w-3xl content-start gap-4">
+        <form
+          className="bg-surface-base/72 grid gap-4 rounded-xl p-5 shadow-[0_22px_64px_var(--overlay-ink-10),inset_0_0_0_1px_var(--overlay-ink-7)] backdrop-blur-xl"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitQuickCapture.mutate();
+          }}
+        >
+          <header className="flex min-h-10 items-start justify-between gap-3">
+            <div>
+              <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+                Quick capture
+              </p>
+              <h1 className="text-content-primary m-0 mt-1 text-2xl font-semibold tracking-[-0.02em]">
+                Add to today
+              </h1>
+            </div>
+            <button
+              className="text-content-body hover:bg-content-primary/6 grid size-9 place-items-center rounded-lg transition-[scale,background-color] duration-150 ease-out active:scale-[0.96]"
+              type="button"
+              onClick={() => {
+                void closeQuickCapture();
+              }}
+              aria-label="Close capture"
+            >
+              x
+            </button>
+          </header>
+          <textarea
+            autoFocus
+            className="bg-surface-base/72 text-content-primary placeholder:text-content-placeholder min-h-44 resize-y rounded-xl p-4 text-base leading-7 shadow-[inset_0_0_0_1px_var(--overlay-ink-7)] outline-none focus:shadow-[inset_0_0_0_1px_var(--overlay-accent-72),0_0_0_3px_var(--overlay-accent-12)]"
+            disabled={submitQuickCapture.isPending}
+            placeholder="What should Nudge process?"
+            value={note}
+            onChange={(event) => setNote(event.currentTarget.value)}
+          />
+          <footer className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+            <p className="text-content-muted m-0 min-w-0 text-sm font-medium" role="status">
+              {statusMessage}
+            </p>
+            <button
+              className="bg-accent-primary text-content-on-strong min-h-10 rounded-lg px-4 text-sm font-semibold shadow-[0_12px_24px_var(--overlay-accent-24)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+              disabled={submitQuickCapture.isPending || !note.trim()}
+              type="submit"
+            >
+              {submitQuickCapture.isPending ? "Capturing" : "Capture"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </WorkspaceRouteShell>
   );
 }
 
 function SettingsScreen() {
-  const navigate = useNavigate();
   const session = useSession();
   const desktopSettings = useDesktopSettingsControls();
   const sessionUser = session.data?.user;
@@ -2235,11 +2263,28 @@ function SettingsScreen() {
   });
 
   return (
-    <SettingsSurface
-      accountName={sessionUser?.displayName ?? "You"}
-      accountSlot={anonymousUiEnabled() ? undefined : <UserButton />}
-      deleteDisabled={deleteData.isPending}
-      desktopSlot={
+    <WorkspaceRouteShell active="settings" title="Settings">
+      <section className="mx-auto grid max-w-4xl gap-4">
+        <section className="bg-surface-base/72 rounded-xl p-5 shadow-[0_22px_64px_var(--overlay-ink-10),inset_0_0_0_1px_var(--overlay-ink-7)] backdrop-blur-xl">
+          <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+            Account
+          </p>
+          <h1 className="text-content-primary m-0 mt-2 text-3xl leading-tight font-semibold tracking-[-0.02em]">
+            {sessionUser?.displayName ?? "You"}
+          </h1>
+          <p className="text-content-muted m-0 mt-2 text-sm font-medium">
+            {workspace?.label ?? "Workspace"} / {surfaceDisplayName(currentAppSurface())}
+          </p>
+        </section>
+
+        <section className="bg-surface-base/64 grid gap-3 rounded-xl p-4 shadow-[0_18px_46px_var(--overlay-ink-9),inset_0_0_0_1px_var(--overlay-ink-6)] backdrop-blur-xl">
+          <SettingsWorkspaceRow label="Name" value={sessionUser?.displayName ?? "You"} />
+          <SettingsWorkspaceRow label="Workspace" value={workspace?.label ?? "Workspace"} />
+          <SettingsWorkspaceRow label="Session" value={session.data?.authMode ?? "Loading"} />
+          <SettingsWorkspaceRow label="Surface" value={surfaceDisplayName(currentAppSurface())} />
+          <SettingsWorkspaceRow label="Engine" value={window.location.origin} />
+        </section>
+
         <DesktopSettingsSurface
           disabled={desktopSettings.isPending}
           isDesktop={desktopSettings.isDesktop}
@@ -2249,16 +2294,40 @@ function SettingsScreen() {
           onSaveShortcut={desktopSettings.saveQuickCaptureShortcut}
           onShortcutChange={desktopSettings.setShortcut}
         />
-      }
-      engineLabel={window.location.origin}
-      exportDisabled={exportData.isPending}
-      sessionLabel={session.data?.authMode ?? "Loading"}
-      surfaceLabel={surfaceDisplayName(currentAppSurface())}
-      workspaceLabel={workspace?.label ?? "Workspace"}
-      onBack={() => navigate({ to: "/" })}
-      onDeleteData={() => deleteData.mutate()}
-      onExportData={() => exportData.mutate()}
-    />
+
+        <section className="bg-surface-base/64 grid gap-3 rounded-xl p-4 shadow-[0_18px_46px_var(--overlay-ink-9),inset_0_0_0_1px_var(--overlay-ink-6)] backdrop-blur-xl sm:grid-cols-2">
+          <button
+            className="bg-accent-primary text-content-on-strong min-h-11 rounded-lg px-4 text-sm font-semibold shadow-[0_12px_24px_var(--overlay-accent-24)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+            disabled={exportData.isPending}
+            type="button"
+            onClick={() => exportData.mutate()}
+          >
+            Export data
+          </button>
+          <button
+            className="bg-surface-base text-content-primary min-h-11 rounded-lg px-4 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--overlay-ink-10)] transition-[scale,background-color] duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+            disabled={deleteData.isPending}
+            type="button"
+            onClick={() => deleteData.mutate()}
+          >
+            Delete local data
+          </button>
+        </section>
+      </section>
+    </WorkspaceRouteShell>
+  );
+}
+
+function SettingsWorkspaceRow(props: { readonly label: string; readonly value: string }) {
+  return (
+    <div className="bg-surface-base/62 grid min-h-12 gap-2 rounded-lg px-3 py-3 shadow-[inset_0_0_0_1px_var(--overlay-ink-6)] sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center">
+      <p className="text-content-muted m-0 text-xs font-semibold tracking-[0.12em] uppercase">
+        {props.label}
+      </p>
+      <p className="text-content-primary m-0 min-w-0 text-sm font-semibold break-words">
+        {props.value}
+      </p>
+    </div>
   );
 }
 
@@ -2431,6 +2500,7 @@ function surfaceDisplayName(surface: AppSurface) {
 function NudgeConvexProvider(props: { readonly children: ReactNode }) {
   if (anonymousUiEnabled()) return <>{props.children}</>;
   if (!clerkPublishableKey) throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required to run Nudge");
+  if (!convexClient) throw new Error("VITE_CONVEX_URL is required to run Nudge");
 
   return (
     <ClerkProvider
@@ -2441,7 +2511,7 @@ function NudgeConvexProvider(props: { readonly children: ReactNode }) {
       {...(clerkProxyUrl ? { proxyUrl: clerkProxyUrl } : {})}
     >
       <ClerkLoading>
-        <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />
+        <main className="bg-surface-inverse-canvas min-h-dvh" aria-label="Loading Nudge" />
       </ClerkLoading>
       <ClerkFailed>
         <ClerkUnavailableScreen />
@@ -2485,7 +2555,7 @@ function ClerkTokenBridge(props: { readonly children: ReactNode }) {
   }, [auth.getToken, auth.isLoaded, auth.isSignedIn]);
 
   if (!auth.isLoaded || readyState !== expectedState) {
-    return <main className="min-h-dvh bg-[#0f1110]" aria-label="Loading Nudge" />;
+    return <main className="bg-surface-inverse-canvas min-h-dvh" aria-label="Loading Nudge" />;
   }
 
   return <>{props.children}</>;
@@ -2504,11 +2574,13 @@ function ConvexUserMaterializer(props: { readonly children: ReactNode }) {
   return <>{props.children}</>;
 }
 
+const reactRootProperty = "__nudgeReactRoot";
+
 if (!recoverStaleAuthCallbackNavigation()) {
   const rootElement = document.getElementById("root");
   if (!rootElement) throw new Error("Missing #root element");
 
-  createRoot(rootElement).render(
+  getOrCreateReactRoot(rootElement).render(
     <StrictMode>
       <NudgeConvexProvider>
         <QueryClientProvider client={queryClient}>
@@ -2517,4 +2589,52 @@ if (!recoverStaleAuthCallbackNavigation()) {
       </NudgeConvexProvider>
     </StrictMode>,
   );
+}
+
+function getOrCreateReactRoot(rootElement: HTMLElement) {
+  const existingRoot = Reflect.get(rootElement, reactRootProperty);
+  if (isReactRoot(existingRoot)) return existingRoot;
+
+  const hotRoot = hotReactRoot();
+  if (isReactRoot(hotRoot)) {
+    rememberReactRoot(rootElement, hotRoot);
+    return hotRoot;
+  }
+
+  if (import.meta.env.DEV && hasExistingReactRootMarker(rootElement)) {
+    window.location.reload();
+    return dormantReactRoot;
+  }
+
+  const root = createRoot(rootElement);
+  rememberReactRoot(rootElement, root);
+  return root;
+}
+
+const dormantReactRoot: Root = {
+  render: () => undefined,
+  unmount: () => undefined,
+};
+
+function rememberReactRoot(rootElement: HTMLElement, root: Root) {
+  Reflect.set(rootElement, reactRootProperty, root);
+  if (import.meta.hot) {
+    Reflect.set(import.meta.hot.data, reactRootProperty, root);
+  }
+}
+
+function hotReactRoot() {
+  if (!import.meta.hot) return undefined;
+
+  return Reflect.get(import.meta.hot.data, reactRootProperty);
+}
+
+function hasExistingReactRootMarker(rootElement: HTMLElement) {
+  return Object.keys(rootElement).some((key) => key.startsWith("__reactContainer$"));
+}
+
+function isReactRoot(value: unknown): value is Root {
+  if (typeof value !== "object" || value === null) return false;
+
+  return typeof Reflect.get(value, "render") === "function";
 }

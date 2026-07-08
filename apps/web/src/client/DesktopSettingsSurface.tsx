@@ -12,25 +12,25 @@ export function DesktopSettingsSurface(props: DesktopSettingsSurfaceProps) {
   if (!props.isDesktop) return null;
 
   return (
-    <section className="rounded-lg border border-[#d2d9e2] bg-white p-4 shadow-sm">
-      <p className="m-0 text-xs font-semibold tracking-[0.14em] text-[#667085] uppercase">
+    <section className="border-line-settings bg-surface-base rounded-lg border p-4 shadow-sm">
+      <p className="text-content-control-muted m-0 text-xs font-semibold tracking-[0.14em] uppercase">
         Desktop
       </p>
       <div className="mt-4 grid gap-4">
         <div className="grid gap-1">
-          <h2 className="m-0 text-base font-semibold text-[#111827]">Quick Capture</h2>
-          <p className="m-0 text-sm leading-6 text-[#4b5563]">Global shortcut</p>
+          <h2 className="text-content-control-strong m-0 text-base font-semibold">Quick Capture</h2>
+          <p className="text-content-control m-0 text-sm leading-6">Global shortcut</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
           <input
             aria-label="Quick Capture global shortcut"
-            className="min-h-11 rounded-md border border-[#c3ccd7] bg-white px-3 text-sm text-[#111827] outline-none focus:border-[#f14f23] focus:ring-2 focus:ring-[#f14f23]/20"
+            className="border-line-control bg-surface-base text-content-control-strong focus:border-accent-primary focus:ring-accent-primary/20 min-h-11 rounded-md border px-3 text-sm outline-none focus:ring-2"
             disabled={props.disabled}
             value={props.shortcut}
             onChange={(event) => props.onShortcutChange(event.currentTarget.value)}
           />
           <button
-            className="min-h-11 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="bg-surface-strong text-content-on-strong min-h-11 rounded-md px-4 text-sm font-semibold disabled:opacity-50"
             disabled={props.disabled}
             type="button"
             onClick={props.onSaveShortcut}
@@ -38,7 +38,7 @@ export function DesktopSettingsSurface(props: DesktopSettingsSurfaceProps) {
             Save
           </button>
           <button
-            className="min-h-11 rounded-md border border-[#c3ccd7] bg-white px-4 text-sm font-semibold text-[#111827] disabled:opacity-50"
+            className="border-line-control bg-surface-base text-content-control-strong min-h-11 rounded-md border px-4 text-sm font-semibold disabled:opacity-50"
             disabled={props.disabled}
             type="button"
             onClick={props.onResetShortcut}
@@ -47,7 +47,7 @@ export function DesktopSettingsSurface(props: DesktopSettingsSurfaceProps) {
           </button>
         </div>
         {props.statusMessage ? (
-          <p className="m-0 text-sm leading-6 text-[#667085]" role="status">
+          <p className="text-content-control-muted m-0 text-sm leading-6" role="status">
             {props.statusMessage}
           </p>
         ) : null}

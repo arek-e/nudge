@@ -22,6 +22,28 @@ Use the project glossary in `CONTEXT.md` for test names, issue names, and domain
 
 Before changing app runtime layers, service seams, or module ownership, read `docs/architecture/layers-and-services.md`. It records what Nudge borrows from `pingdotgg/t3code` and what we intentionally do not copy.
 
+Before changing frontend state for notes, agent chat, derived tasks, review projections, optimistic updates, or app-wide UI state, read `docs/architecture/frontend-state.md`. Use it to decide whether state belongs in the canonical store, editor session, frontend domain layer, or UI-only store before adding Zustand, Effect Atom, React Query, Convex hooks, or local React state.
+
+## Local Dev Logs
+
+`bun dev` tees the app stack to timestamped files under `tmp/logs/<run>/` and updates `tmp/logs/latest` to point at the current run. Each run clears its current log directory before writers open, so `tmp/logs/latest` only reflects the active run. Use bounded reads from those files instead of attaching to endless terminal streams.
+
+- Start the local stack with `bun dev`.
+- Read the combined current-run log with `tail -n 200 tmp/logs/latest/dev.log`.
+- Drill into subsystem logs with `tail -n 200 tmp/logs/latest/vite-dev.log` or `tail -n 200 tmp/logs/latest/wrangler-dev.log`.
+- For build-preview runs, also check `tail -n 200 tmp/logs/latest/build.log`.
+- Prefer targeted searches such as `rg "error|failed|exception" tmp/logs/latest` before restarting services.
+
+## Auth And Runtime Secrets
+
+The web app auth stack is Clerk in the browser and Worker, Convex as the canonical product store, and Cloudflare Workers as the runtime/API boundary. Do not add anonymous or hard-coded fallbacks to make authenticated web dev appear to work.
+
+- `CLERK_SECRET_KEY` and `CONVEX_RUNTIME_SECRET` are required Worker secrets. Keep their values out of git, logs, command arguments, and final responses.
+- Put local secret values in `.envrc.local` or the active direnv environment, then restart `bun dev`. The dev script writes a private `tmp/logs/<run>/worker.env` for Wrangler and fails before starting if required local secrets are missing.
+- `CONVEX_DEPLOYMENT`, `CONVEX_URL`, and `VITE_CONVEX_URL` must refer to the same Convex deployment; the browser must not hard-code a fallback Convex deployment.
+- `CLERK_AUTHORIZED_PARTIES` must include the actual local app origin. `bun dev` generates this from the chosen dev port for local Worker runs.
+- When debugging auth, check presence only with commands like `direnv exec . zsh -lc 'print -r -- ${+CLERK_SECRET_KEY}'` and inspect `tmp/logs/latest/dev.log`; never print secret values.
+
 Before implementing framework/tooling-specific code, check the relevant opencode reference and follow its current conventions:
 
 - `effect-smol` for Effect v4 service, layer, workflow, and test patterns.
