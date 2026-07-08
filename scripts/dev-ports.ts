@@ -33,6 +33,7 @@ export async function findAvailablePort(options: {
   const host = options.host ?? defaultHost;
   const port = options.preferredPort ?? defaultDevPort;
   const reservedPorts = new Set(options.reservedPorts ?? []);
+  if (port > 65_535) throw new Error("No available dev port found.");
 
   return isPortAvailable(host, port).then((available) =>
     available && !reservedPorts.has(port)
@@ -53,10 +54,14 @@ function parsePort(value: string | undefined) {
 
 async function isPortAvailable(host: string, port: number) {
   const hosts = host === "0.0.0.0" ? ["0.0.0.0", defaultHost, "::1"] : [host];
-  const availability = await Promise.all(
-    hosts.map((candidateHost) => isPortAvailableOnHost(candidateHost, port)),
-  );
-  return availability.every(Boolean);
+  return await areHostsAvailable(hosts, port);
+}
+
+async function areHostsAvailable(hosts: readonly string[], port: number): Promise<boolean> {
+  const [host, ...remainingHosts] = hosts;
+  if (!host) return true;
+  if (!(await isPortAvailableOnHost(host, port))) return false;
+  return await areHostsAvailable(remainingHosts, port);
 }
 
 async function isPortAvailableOnHost(host: string, port: number) {
