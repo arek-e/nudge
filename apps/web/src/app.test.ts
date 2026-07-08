@@ -350,6 +350,81 @@ describe("web app", () => {
     }
   });
 
+  test("GET /__clerk rewrites remote dev redirects back to the local preview URL", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const proxiedRequests: Array<Request> = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      proxiedRequests.push(request);
+
+      return Response.redirect(
+        "https://app.staging.explorenudge.com/__clerk/npm/@clerk/clerk-js@6.23.0/dist/clerk.browser.js",
+        307,
+      );
+    });
+
+    try {
+      const response = await app.request(
+        "https://app.staging.explorenudge.com/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+        {
+          headers: {
+            "mf-original-url":
+              "http://127.0.0.1:8802/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+            origin: "http://127.0.0.1:8802",
+            referer: "http://127.0.0.1:8802/?reload=test",
+          },
+        },
+        {
+          ...env,
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+      const proxiedRequest = proxiedRequests[0];
+      if (!proxiedRequest) throw new Error("Expected Clerk proxy request");
+
+      expect(response.status).toBe(307);
+      expect(proxiedRequest.headers.get("Clerk-Proxy-Url")).toBe(
+        "https://app.staging.explorenudge.com/__clerk",
+      );
+      expect(proxiedRequest.headers.get("origin")).toBe("https://app.staging.explorenudge.com");
+      expect(proxiedRequest.headers.get("referer")).toBe(
+        "https://app.staging.explorenudge.com/?reload=test",
+      );
+      expect(response.headers.get("location")).toBe(
+        "http://127.0.0.1:8802/__clerk/npm/@clerk/clerk-js@6.23.0/dist/clerk.browser.js",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  test("GET /__clerk returns upstream redirects with mutable timing headers", async () => {
+    const app = createApp({ dbLayer: Db.layerMemory });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.redirect("https://app.explorenudge.com/__clerk/v1/environment", 307),
+    );
+
+    try {
+      const response = await app.request(
+        "/__clerk/v1/environment",
+        {},
+        {
+          ...env,
+          CLERK_PROXY_URL: "https://app.explorenudge.com/__clerk",
+          CLERK_SECRET_KEY: "sk_test_proxy",
+        },
+      );
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        "https://app.explorenudge.com/__clerk/v1/environment",
+      );
+      expect(response.headers.get("server-timing")).toContain("Total Response Time");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   test("GET /__clerk/v1/proxy-health confirms the Worker proxy path without upstream fetch", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async () => {
@@ -375,7 +450,7 @@ describe("web app", () => {
     }
   });
 
-  test("GET /__clerk/v1/environment proxies Clerk environment responses through the Worker", async () => {
+  test("GET /__clerk/v1/environment normalizes stale upstream Clerk branding", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const staleApplicationName = String.fromCharCode(
       86,
@@ -426,10 +501,17 @@ describe("web app", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("connection")).toBeNull();
-      expect(response.headers.get("content-encoding")).toBe("br");
-      expect(response.headers.get("etag")).toBe("stale-upstream-body");
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(response.headers.get("etag")).toBeNull();
       expect(response.headers.get("transfer-encoding")).toBeNull();
-      expect(await response.text()).toBe(upstreamBody);
+      expect(await response.json()).toEqual({
+        display_config: {
+          application_name: "Nudge",
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      });
     } finally {
       fetchMock.mockRestore();
     }
@@ -1587,6 +1669,31 @@ describe("web app", () => {
     expect(await response.text()).toBe("Hello streamed reply");
   });
 
+  test("POST /api/conversations/:conversationId/messages/stream preserves agent error responses", async () => {
+    const forwardedRequests: Array<Request> = [];
+    const agentNamespace = createQuotaAwareAgentNamespace({
+      onAgentFetch: async (request) => {
+        forwardedRequests.push(request);
+        return Response.json({ error: "Workers AI is unavailable" }, { status: 503 });
+      },
+    });
+    const app = createApp({ dbLayer: Db.layerMemory });
+
+    const response = await app.request(
+      "/api/conversations/focus/messages/stream",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({ message: "Stream this" }),
+      },
+      { ...env, USER_AGENT_SESSION: agentNamespace },
+    );
+
+    expect(response.status).toBe(503);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(await response.json()).toEqual({ error: "Workers AI is unavailable" });
+  });
+
   test("POST /api/conversations/:conversationId/messages/stream enforces per-user AI route quota before agent dispatch", async () => {
     const rateLimitedUser = { displayName: "Rate Limited", id: "rate-user-conversation" };
     const forwardedRequests: Array<Request> = [];
@@ -1884,6 +1991,32 @@ describe("web app", () => {
       user: null,
       workspace: null,
     });
+  });
+
+  test("custom integrations can inspect session before Convex runtime is configured", async () => {
+    const app = createUnauthenticatedApp();
+    const { CONVEX_RUNTIME_SECRET: omittedRuntimeSecret, ...unwiredEnv } = env;
+    void omittedRuntimeSecret;
+
+    const response = await app.request("/api/session", {}, unwiredEnv);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authMode: "unauthenticated",
+      user: null,
+      workspace: null,
+    });
+  });
+
+  test("custom integrations reject unauthenticated product routes before resolving Convex", async () => {
+    const app = createUnauthenticatedApp();
+    const { CONVEX_RUNTIME_SECRET: omittedRuntimeSecret, ...unwiredEnv } = env;
+    void omittedRuntimeSecret;
+
+    const response = await app.request("/api/actions", {}, unwiredEnv);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication required" });
   });
 
   test("custom integrations cannot use session-prefixed paths to bypass API auth", async () => {

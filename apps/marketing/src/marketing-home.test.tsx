@@ -160,7 +160,7 @@ describe("MarketingHome", () => {
     expect(css).not.toContain(".hero-artwork::before");
     expect(css).not.toContain(".hero-artwork::after");
     expect(css).not.toContain(".hero-artwork__image");
-    expect(css).toContain('data-nudge-direction="right"');
+    expect(css).toContain('data-direction="right"');
     expect(css).toContain(".note-action-flow");
     expect(css).toContain(".sticky-note");
     expect(css).toContain(".action-card");

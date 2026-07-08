@@ -11,6 +11,10 @@ export function preferredInspectorPort(devPort: number, env: NodeJS.ProcessEnv =
   return parsePort(env.NUDGE_WRANGLER_INSPECTOR_PORT) ?? devPort + 1;
 }
 
+export function preferredWorkerPort(devPort: number, env: NodeJS.ProcessEnv = process.env) {
+  return parsePort(env.NUDGE_WORKER_DEV_PORT) ?? devPort + 100;
+}
+
 export function localDevUrl(devPort: number, env: NodeJS.ProcessEnv = process.env) {
   return env.NUDGE_DEV_URL ?? `http://localhost:${devPort}`;
 }
@@ -24,12 +28,21 @@ export function wranglerPersistTo(repoRoot: string, env: NodeJS.ProcessEnv = pro
 export async function findAvailablePort(options: {
   readonly host?: string;
   readonly preferredPort?: number;
+  readonly reservedPorts?: ReadonlyArray<number>;
 }) {
   const host = options.host ?? defaultHost;
   const port = options.preferredPort ?? defaultDevPort;
+  const reservedPorts = new Set(options.reservedPorts ?? []);
+  if (port > 65_535) throw new Error("No available dev port found.");
 
   return isPortAvailable(host, port).then((available) =>
-    available ? port : findAvailablePort({ host, preferredPort: port + 1 }),
+    available && !reservedPorts.has(port)
+      ? port
+      : findAvailablePort({
+          host,
+          preferredPort: port + 1,
+          reservedPorts: options.reservedPorts,
+        }),
   );
 }
 
@@ -40,9 +53,24 @@ function parsePort(value: string | undefined) {
 }
 
 async function isPortAvailable(host: string, port: number) {
+  const hosts = host === "0.0.0.0" ? ["0.0.0.0", defaultHost, "::1"] : [host];
+  return await areHostsAvailable(hosts, port);
+}
+
+async function areHostsAvailable(hosts: readonly string[], port: number): Promise<boolean> {
+  const [host, ...remainingHosts] = hosts;
+  if (!host) return true;
+  if (!(await isPortAvailableOnHost(host, port))) return false;
+  return await areHostsAvailable(remainingHosts, port);
+}
+
+async function isPortAvailableOnHost(host: string, port: number) {
   const server = createServer();
   return await new Promise<boolean>((resolve) => {
-    server.once("error", () => resolve(false));
+    server.once("error", (error) => {
+      const code = Reflect.get(error, "code");
+      resolve(code !== "EADDRINUSE" && code !== "EACCES");
+    });
     server.listen(port, host, () => {
       server.close(() => resolve(true));
     });

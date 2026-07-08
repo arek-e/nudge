@@ -95,12 +95,35 @@ export async function streamConversationMessage(input: {
     },
   );
 
-  if (!response.ok || !response.body) {
-    throw new Error("Could not stream conversation message");
+  if (!response.ok) {
+    throw new Error(await conversationStreamErrorMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("Could not stream conversation message: empty response body");
   }
 
   return {
     body: response.body,
     contentType: response.headers.get("content-type") ?? "",
   };
+}
+
+async function conversationStreamErrorMessage(response: Response) {
+  const fallback = `Could not stream conversation message (${response.status})`;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const json = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    const error = typeof json === "object" && json !== null ? Reflect.get(json, "error") : null;
+    if (typeof error === "string" && error.trim().length > 0) return error.trim();
+  }
+
+  const text = await response
+    .clone()
+    .text()
+    .catch(() => "");
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 500) : fallback;
 }

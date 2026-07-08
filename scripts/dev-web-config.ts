@@ -1,15 +1,31 @@
 type EnvSource = Readonly<Record<string, string | undefined>>;
-type ClerkEnvName = "CLERK_AUTHORIZED_PARTIES" | "CLERK_PUBLISHABLE_KEY" | "CLERK_SECRET_KEY";
+type ClerkSecretName = "CLERK_SECRET_KEY";
+type WranglerDevSecretName = ClerkSecretName | "CONVEX_RUNTIME_SECRET";
+type WranglerDevVarName = "CLERK_AUTHORIZED_PARTIES";
+type RequiredLocalDevSecretName = WranglerDevSecretName;
 
-const clerkEnvNames: readonly ClerkEnvName[] = [
-  "CLERK_AUTHORIZED_PARTIES",
-  "CLERK_PUBLISHABLE_KEY",
+const clerkSecretNames: readonly ClerkSecretName[] = ["CLERK_SECRET_KEY"];
+const wranglerDevSecretNames: readonly WranglerDevSecretName[] = [
+  ...clerkSecretNames,
+  "CONVEX_RUNTIME_SECRET",
+];
+const requiredLocalDevSecretNames: readonly RequiredLocalDevSecretName[] = [
   "CLERK_SECRET_KEY",
+  "CONVEX_RUNTIME_SECRET",
 ];
 
 export function wranglerClerkEnvEntries(env: EnvSource = process.env) {
-  const entries: Array<readonly [ClerkEnvName, string]> = [];
-  for (const name of clerkEnvNames) {
+  const entries: Array<readonly [ClerkSecretName, string]> = [];
+  for (const name of clerkSecretNames) {
+    const value = env[name];
+    if (value) entries.push([name, value]);
+  }
+  return entries;
+}
+
+export function wranglerDevEnvEntries(env: EnvSource = process.env) {
+  const entries: Array<readonly [WranglerDevSecretName, string]> = [];
+  for (const name of wranglerDevSecretNames) {
     const value = env[name];
     if (value) entries.push([name, value]);
   }
@@ -21,8 +37,27 @@ export function envFileContent(entries: ReadonlyArray<readonly [string, string]>
   return `${entries.map(([name, value]) => `${name}=${JSON.stringify(value)}`).join("\n")}\n`;
 }
 
-export function wranglerClerkEnvFileArgs(envFile: string | null) {
+export function wranglerDevEnvFileArgs(envFile: string | null) {
   return envFile ? ["--env-file", envFile] : [];
+}
+
+export function wranglerDevVarArgs(entries: ReadonlyArray<readonly [WranglerDevVarName, string]>) {
+  return entries.flatMap(([name, value]) => ["--var", `${name}:${value}`]);
+}
+
+export function missingRequiredLocalDevSecrets(env: EnvSource = process.env) {
+  return requiredLocalDevSecretNames.filter((name) => !env[name]);
+}
+
+export function missingRequiredLocalDevSecretsMessage(
+  missing: ReadonlyArray<RequiredLocalDevSecretName>,
+) {
+  if (missing.length === 0) return null;
+
+  return [
+    `Missing required local Worker secrets: ${missing.join(", ")}`,
+    "Add them to .envrc.local or the current direnv environment, then restart bun dev.",
+  ].join("\n");
 }
 
 export function wranglerLocalConfigArgs(args: readonly string[]) {

@@ -118,11 +118,11 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  .nudge-word[data-nudge-direction="right"] {
+  .nudge-word[data-direction="right"] {
     --nudge-shift: 0.14em;
   }
 
-  .nudge-word[data-nudge-direction="left"] {
+  .nudge-word[data-direction="left"] {
     --nudge-shift: -0.06em;
   }
 

@@ -24,6 +24,8 @@ describe("Nudge Worker environments", () => {
     expect(wrangler).toContain(
       '"CLERK_AUTHORIZED_PARTIES": "https://app.explorenudge.com,https://nudge-web.teampitch.workers.dev"',
     );
+    expect(wrangler).toContain('"secrets"');
+    expect(wrangler).toContain('"required": ["CLERK_SECRET_KEY", "CONVEX_RUNTIME_SECRET"]');
     expect(wrangler).toContain(
       '"CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXBwLmV4cGxvcmVudWRnZS5jb20k"',
     );
@@ -69,7 +71,9 @@ describe("Nudge Worker environments", () => {
     expect(deployScript).toContain(
       'VITE_NUDGE_LOGO_LONG_SRC: "/icons/nudge-logo-lockup-blobby-n-transparent.svg"',
     );
-    expect(clientEntry).toContain(
+    expect(clientEntry).toContain("new ConvexReactClient(requiredConvexUrl())");
+    expect(clientEntry).toContain("VITE_CONVEX_URL is required to run Nudge");
+    expect(clientEntry).not.toContain(
       'import.meta.env.VITE_CONVEX_URL ?? "https://grandiose-hamster-855.eu-west-1.convex.cloud"',
     );
     expect(clientEntry).toContain("import.meta.env.VITE_CLERK_PROXY_URL");
@@ -82,6 +86,7 @@ describe("Nudge Worker environments", () => {
     const ciWorkflow = await readFile(new URL(".github/workflows/ci.yml", repoRoot), "utf8");
     const devScript = await readFile(new URL("scripts/dev-web.ts", repoRoot), "utf8");
     const devConfig = await readFile(new URL("scripts/dev-web-config.ts", repoRoot), "utf8");
+    const worktreeEnv = await readFile(new URL("scripts/worktree-env.sh", repoRoot), "utf8");
     const localWrangler = await readFile(new URL("wrangler.local.jsonc", webRoot), "utf8");
     const playwrightConfig = await readFile(new URL("playwright.config.ts", webRoot), "utf8");
 
@@ -90,14 +95,26 @@ describe("Nudge Worker environments", () => {
     expect(devConfig).toContain('["--config", "wrangler.local.jsonc"]');
     expect(devConfig).toContain('args.includes("--remote")');
     expect(playwrightConfig).toContain("--config wrangler.local.jsonc");
-    expect(devScript).toContain("wranglerClerkEnvFileArgs");
-    expect(devScript).toContain("writeFile(clerkEnvFile");
+    expect(devConfig).toContain("missingRequiredLocalDevSecrets");
+    expect(devScript).toContain("wranglerDevEnvFileArgs");
+    expect(devScript).toContain("wranglerDevVarArgs");
+    expect(devScript).toContain("writeFile(wranglerEnvFile");
+    expect(devScript).toContain("localWorkerEnvSource");
+    expect(devScript).toContain("localAuthorizedParties");
+    expect(devScript).toContain("NUDGE_VITE_PROXY_TARGET");
+    expect(devScript).toContain('"vite"');
     expect(devScript).not.toContain("d1");
-    expect(devScript).not.toContain('["--var"');
     expect(devScript).not.toContain("CLERK_SECRET_KEY:");
+    expect(devScript).not.toContain("CONVEX_RUNTIME_SECRET:");
+    expect(worktreeEnv).toContain('CONVEX_DEPLOYMENT "dev:grandiose-hamster-855"');
+    expect(worktreeEnv).toContain('"https://grandiose-hamster-855.eu-west-1.convex.cloud"');
     expect(localWrangler).not.toContain('"containers"');
     expect(localWrangler).not.toContain('"OKF_SANDBOX"');
+    expect(localWrangler).not.toContain('"CLERK_AUTHORIZED_PARTIES"');
     expect(localWrangler).toContain('"/__clerk/*"');
+    expect(localWrangler).toContain('"required": ["CLERK_SECRET_KEY", "CONVEX_RUNTIME_SECRET"]');
+    expect(localWrangler).toContain('"binding": "AI"');
+    expect(localWrangler).toContain('"remote": true');
     expect(localWrangler).toContain('"USER_AGENT_SESSION"');
     expect(localWrangler).toContain('"DAILY_DIGEST_WORKFLOW"');
   });

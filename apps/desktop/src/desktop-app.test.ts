@@ -17,6 +17,7 @@ import {
   resolveDesktopE2eReadyFile,
   resolveNudgeWebAppUrl,
 } from "./config";
+import { desktopSurfaceTokens } from "./window-theme";
 
 const root = import.meta.dir.replace(/\/src$/, "");
 
@@ -169,6 +170,7 @@ describe("Desktop app", () => {
       "additionalArguments: [`--nudge-app-version=${app.getVersion()}`]",
     );
     expect(mainSource).toContain('preload: join(currentDirectory, "preload.cjs")');
+    expect(mainSource).toContain("backgroundColor: desktopSurfaceTokens.warm.value");
     expect(mainSource).toContain("app.setAsDefaultProtocolClient(desktopProtocol");
     expect(mainSource).toContain('ipcMain.handle("nudge:open-external-auth"');
     expect(mainSource).toContain('ipcMain.handle("nudge:update-get-state"');
@@ -207,4 +209,31 @@ describe("Desktop app", () => {
     expect(preloadSource).toContain('ipcRenderer.on("nudge:update-state"');
     expect(preloadSource).toContain("contextBridge.exposeInMainWorld");
   });
+
+  test("uses purpose-named design tokens for native window backgrounds", () => {
+    const mainSource = readFileSync(join(root, "src/main.ts"), "utf8");
+    const webStyles = readFileSync(join(root, "../web/src/client/styles.css"), "utf8");
+
+    expect(mainSource).toContain("backgroundColor: desktopSurfaceTokens.warm.value");
+    expect(mainSource).toContain("backgroundColor: desktopSurfaceTokens.captureCanvas.value");
+    expect(mainSource).not.toContain('backgroundColor: "#');
+    expect(cssVariableValue(webStyles, desktopSurfaceTokens.warm.cssVariable)).toBe(
+      desktopSurfaceTokens.warm.value,
+    );
+    expect(cssVariableValue(webStyles, desktopSurfaceTokens.captureCanvas.cssVariable)).toBe(
+      desktopSurfaceTokens.captureCanvas.value,
+    );
+  });
 });
+
+function cssVariableValue(source: string, variableName: string) {
+  const line = source
+    .split("\n")
+    .find((candidate) => candidate.trim().startsWith(`${variableName}:`));
+  if (line === undefined) return undefined;
+
+  return line
+    .slice(line.indexOf(":") + 1)
+    .trim()
+    .replace(/;$/, "");
+}

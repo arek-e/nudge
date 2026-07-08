@@ -34,32 +34,32 @@ const DOT_MATRIX_COLOR_PRESETS: Record<
     glow: "var(--color-dot-on)",
   },
   "solid-mint": {
-    fill: "#34d399",
-    glow: "#34d399",
+    fill: "var(--effect-mint)",
+    glow: "var(--effect-mint)",
   },
   "grad-sunset": {
-    fill: "linear-gradient(135deg, #ff5f6d 0%, #ffc371 52%, #ffe29a 100%)",
-    glow: "#ff8b73",
+    fill: "linear-gradient(135deg, var(--effect-sunset-start) 0%, var(--effect-sunset-mid) 52%, var(--effect-sunset-end) 100%)",
+    glow: "var(--effect-sunset-glow)",
   },
   "grad-ocean": {
-    fill: "linear-gradient(140deg, #00c6ff 0%, #0072ff 48%, #4facfe 100%)",
-    glow: "#2f8fff",
+    fill: "linear-gradient(140deg, var(--effect-ocean-start) 0%, var(--effect-ocean-mid) 48%, var(--effect-ocean-end) 100%)",
+    glow: "var(--effect-ocean-glow)",
   },
   "grad-neon": {
-    fill: "linear-gradient(145deg, #b4ff39 0%, #39ffb6 46%, #00d4ff 100%)",
-    glow: "#59ffc8",
+    fill: "linear-gradient(145deg, var(--effect-neon-start) 0%, var(--effect-neon-mid) 46%, var(--effect-neon-end) 100%)",
+    glow: "var(--effect-neon-glow)",
   },
   "grad-aurora": {
-    fill: "linear-gradient(145deg, #ff3cac 0%, #784ba0 45%, #2b86c5 100%)",
-    glow: "#9c64bf",
+    fill: "linear-gradient(145deg, var(--effect-aurora-start) 0%, var(--effect-aurora-mid) 45%, var(--effect-aurora-end) 100%)",
+    glow: "var(--effect-aurora-glow)",
   },
   "grad-fire": {
-    fill: "linear-gradient(145deg, #ff512f 0%, #dd2476 45%, #ffb347 100%)",
-    glow: "#f96a5f",
+    fill: "linear-gradient(145deg, var(--effect-fire-start) 0%, var(--effect-fire-mid) 45%, var(--effect-fire-end) 100%)",
+    glow: "var(--effect-fire-glow)",
   },
   "grad-prism": {
-    fill: "linear-gradient(145deg, #12c2e9 0%, #c471ed 45%, #f64f59 100%)",
-    glow: "#9e7de8",
+    fill: "linear-gradient(145deg, var(--effect-prism-start) 0%, var(--effect-prism-mid) 45%, var(--effect-prism-end) 100%)",
+    glow: "var(--effect-prism-glow)",
   },
 };
 

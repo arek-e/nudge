@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createWebSurfaceEngineClient, setSessionTokenResolver } from "./api-client";
+import {
+  createWebSurfaceEngineClient,
+  setSessionTokenResolver,
+  streamConversationMessage,
+} from "./api-client";
+
+const originalFetch = globalThis.fetch;
 
 describe("web App Surface Engine client", () => {
   afterEach(() => {
     setSessionTokenResolver(null);
+    globalThis.fetch = originalFetch;
   });
 
   test("refreshes iOS-equivalent context through the shared surface client with Clerk identity", async () => {
@@ -98,6 +105,33 @@ describe("web App Surface Engine client", () => {
       expect(request.headers.get("authorization")).toBe("Bearer session-token");
       expect(request.headers.get("x-nudge-client")).toBe("web");
     }
+  });
+
+  test("surfaces stream error payloads from the conversation API", async () => {
+    const requests: Request[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), "https://nudge.example"), init);
+      requests.push(request);
+      return new Response(JSON.stringify({ error: "Workers AI is unavailable" }), {
+        headers: { "content-type": "application/json" },
+        status: 503,
+      });
+    };
+
+    await expect(
+      streamConversationMessage({
+        conversationId: "default",
+        message: "Can you help?",
+      }),
+    ).rejects.toThrow("Workers AI is unavailable");
+
+    expect(
+      requests.map((request) => new URL(request.url, "https://nudge.example").pathname),
+    ).toEqual(["/api/conversations/default/messages/stream"]);
+    expect(requests[0]?.headers.get("x-nudge-client")).toBe("web");
   });
 });
 

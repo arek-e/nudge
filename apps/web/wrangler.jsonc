@@ -56,6 +56,9 @@
     "THINK_MODEL": "@cf/moonshotai/kimi-k2.7-code",
     "TURBOPUFFER_REGION": "aws-eu-west-1",
   },
+  "secrets": {
+    "required": ["CLERK_SECRET_KEY", "CONVEX_RUNTIME_SECRET"],
+  },
   "ai": {
     "binding": "AI",
     "remote": true,
@@ -133,6 +136,9 @@
         "THINK_MODEL": "glm-5.2",
         "TURBOPUFFER_REGION": "aws-eu-west-1",
       },
+      "secrets": {
+        "required": ["CLERK_SECRET_KEY", "CONVEX_RUNTIME_SECRET"],
+      },
       "ai": {
         "binding": "AI",
         "remote": true,
@@ -204,6 +210,9 @@
         "EXTRACTION_MODEL": "glm-5.2",
         "THINK_MODEL": "glm-5.2",
         "TURBOPUFFER_REGION": "aws-eu-west-1",
+      },
+      "secrets": {
+        "required": ["CLERK_SECRET_KEY", "CONVEX_RUNTIME_SECRET"],
       },
       "ai": {
         "binding": "AI",
