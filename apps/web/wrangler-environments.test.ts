@@ -92,9 +92,17 @@ describe("Nudge Worker environments", () => {
 
     expect(ciWorkflow).not.toContain("environment: production");
     expect(ciWorkflow).not.toContain("CLOUDFLARE_API_TOKEN");
+    expect(ciWorkflow).not.toContain(
+      "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    );
+    expect(ciWorkflow).toContain("Install Playwright Chromium");
+    expect(ciWorkflow).toContain("playwright install --with-deps chromium");
+    expect(ciWorkflow).not.toContain("playwright install --with-deps webkit");
+    expect(ciWorkflow).toContain("run: bun run test:e2e");
     expect(devConfig).toContain('["--config", "wrangler.local.jsonc"]');
     expect(devConfig).toContain('args.includes("--remote")');
     expect(playwrightConfig).toContain("--config wrangler.local.jsonc");
+    expect(playwrightConfig).toContain("VITE_NUDGE_ANONYMOUS_UI=1");
     expect(devConfig).toContain("missingRequiredLocalDevSecrets");
     expect(devScript).toContain("wranglerDevEnvFileArgs");
     expect(devScript).toContain("wranglerDevVarArgs");

@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: shouldStartWebServer
     ? {
         command: [
-          `CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} VITE_CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} bun run build`,
+          `VITE_NUDGE_ANONYMOUS_UI=1 CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} VITE_CLERK_PUBLISHABLE_KEY=${shellQuote(clerkPublishableKey)} bun run build`,
           [
             "wrangler dev",
             "--config wrangler.local.jsonc",
