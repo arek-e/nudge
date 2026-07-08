@@ -263,6 +263,8 @@ async function clerkProxyResponse(
     const normalized = normalizeClerkEnvironmentBranding(await response.json());
     const headers = clerkProxyResponseHeaders(response.headers);
     rewriteClerkProxyLocationHeader(headers, request, proxyUrl);
+    headers.delete("content-encoding");
+    headers.delete("etag");
     headers.set("content-type", "application/json");
     return new Response(JSON.stringify(normalized), {
       headers,

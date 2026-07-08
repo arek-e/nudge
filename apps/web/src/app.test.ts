@@ -450,7 +450,7 @@ describe("web app", () => {
     }
   });
 
-  test("GET /__clerk/v1/environment proxies Clerk environment responses through the Worker", async () => {
+  test("GET /__clerk/v1/environment normalizes stale upstream Clerk branding", async () => {
     const app = createApp({ dbLayer: Db.layerMemory });
     const staleApplicationName = String.fromCharCode(
       86,
@@ -501,10 +501,17 @@ describe("web app", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("connection")).toBeNull();
-      expect(response.headers.get("content-encoding")).toBe("br");
-      expect(response.headers.get("etag")).toBe("stale-upstream-body");
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(response.headers.get("etag")).toBeNull();
       expect(response.headers.get("transfer-encoding")).toBeNull();
-      expect(await response.text()).toBe(upstreamBody);
+      expect(await response.json()).toEqual({
+        display_config: {
+          application_name: "Nudge",
+          branded: true,
+          object: "display_config",
+        },
+        object: "environment",
+      });
     } finally {
       fetchMock.mockRestore();
     }
