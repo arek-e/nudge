@@ -34,6 +34,7 @@ export default defineConfig({
           [
             "wrangler dev",
             "--config wrangler.local.jsonc",
+            "--local",
             `--port ${devPort}`,
             `--inspector-port ${inspectorPort}`,
             `--persist-to ${shellQuote(persistTo)}`,

@@ -102,6 +102,7 @@ describe("Nudge Worker environments", () => {
     expect(devConfig).toContain('["--config", "wrangler.local.jsonc"]');
     expect(devConfig).toContain('args.includes("--remote")');
     expect(playwrightConfig).toContain("--config wrangler.local.jsonc");
+    expect(playwrightConfig).toContain('"--local"');
     expect(playwrightConfig).toContain("VITE_NUDGE_ANONYMOUS_UI=1");
     expect(devConfig).toContain("missingRequiredLocalDevSecrets");
     expect(devScript).toContain("wranglerDevEnvFileArgs");
