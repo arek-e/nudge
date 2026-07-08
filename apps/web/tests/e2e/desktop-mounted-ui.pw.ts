@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("desktop-mounted web UI captures a note through the shared Engine APIs", async ({ page }) => {
+test("desktop-mounted web UI edits a note and asks Nudge through shared Engine APIs", async ({
+  page,
+}) => {
   const requests: Array<{
     readonly body?: unknown;
     readonly client: string | null;
@@ -13,13 +15,41 @@ test("desktop-mounted web UI captures a note through the shared Engine APIs", as
   let actionStatus = "proposed";
 
   await page.addInitScript(() => {
+    const updateState = {
+      availableVersion: null,
+      canRetry: false,
+      currentVersion: "e2e",
+      downloadedVersion: null,
+      downloadPercent: null,
+      enabled: false,
+      message: null,
+      status: "disabled",
+    };
+    const updateResult = {
+      accepted: false,
+      completed: true,
+      state: updateState,
+    };
+    const settings = { quickCaptureShortcut: "CommandOrControl+Shift+Space" };
     Object.defineProperty(window, "nudgeDesktop", {
       configurable: true,
-      value: { appVersion: "e2e", surface: "desktop" },
+      value: {
+        appVersion: "e2e",
+        authCallbackUrl: "nudge://auth/callback",
+        checkForUpdate: () => Promise.resolve(updateResult),
+        downloadUpdate: () => Promise.resolve(updateResult),
+        getSettings: () => Promise.resolve({ ok: true, settings }),
+        getUpdateState: () => Promise.resolve(updateState),
+        installUpdate: () => Promise.resolve(updateResult),
+        onUpdateState: () => () => {},
+        openExternalAuth: () => Promise.resolve({ ok: true }),
+        setSettings: () => Promise.resolve({ ok: true, settings }),
+        surface: "desktop",
+      },
     });
   });
 
-  await page.route("**/api/**", async (route) => {
+  await page.route(/http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const body = request.method() === "POST" ? await request.postDataJSON() : undefined;
@@ -199,6 +229,14 @@ test("desktop-mounted web UI captures a note through the shared Engine APIs", as
       return;
     }
 
+    if (url.pathname === "/api/conversations/default/messages/stream") {
+      await route.fulfill({
+        body: "Nudge can review the edited note and track follow-through.",
+        contentType: "text/plain",
+      });
+      return;
+    }
+
     if (url.pathname === "/api/captures") {
       const payload = readObjectProperty(body, "payload");
       capturedNote = readStringProperty(payload, "note") ?? "";
@@ -223,96 +261,57 @@ test("desktop-mounted web UI captures a note through the shared Engine APIs", as
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Daily Operating Loop" })).toBeVisible();
-  await expect(page.getByText("Anonymous User")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Capture" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Nudge workspace shell" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open user settings" })).toContainText(
+    "Anonymous User",
+  );
+  await expect(page.getByRole("region", { name: "Nudge notes workspace" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Today's note editor" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Open Today's note/ })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Ask Nudge agent panel" })).toBeVisible();
 
-  const note = `Desktop UI capture ${Date.now()}`;
-  const continuation = "Send the drawing to the launch reviewer.";
-  await page.getByPlaceholder("What matters now?").fill(note);
-  await page.getByRole("button", { name: "Attach drawing" }).click();
-  const canvas = page.getByLabel("Drawing canvas");
-  const canvasBox = await canvas.boundingBox();
-  if (!canvasBox) throw new Error("Missing drawing canvas box");
-  await page.mouse.move(canvasBox.x + 24, canvasBox.y + 24);
-  await page.mouse.down();
-  await page.mouse.move(canvasBox.x + 84, canvasBox.y + 72);
-  await page.mouse.up();
-  await page
-    .getByRole("dialog", { name: "Drawing" })
-    .getByRole("button", { name: "Attach drawing" })
-    .click();
-  await expect(page.getByLabel("Continuation note")).toBeVisible();
-  await page.getByLabel("Continuation note").fill(continuation);
-  await page.getByRole("button", { name: "Capture" }).click();
+  await expect(page.getByTestId("page-editor")).toBeVisible();
+  const title = `Desktop workspace note ${Date.now()}`;
+  const titleInput = page.getByRole("textbox", { name: "Note title" });
+  await titleInput.fill(title);
+  await expect(titleInput).toHaveValue(title);
+  await expect(page.getByText("Unsaved").first()).toBeVisible();
+  await titleInput.press("Enter");
+  await expect(
+    page.getByRole("tab", { name: new RegExp(`Open ${escapeRegExp(title)}`) }),
+  ).toBeVisible();
 
-  await expect(page.getByText("Capture saved")).toBeVisible();
-  await expect(page.getByText(note).first()).toBeVisible();
-  await expect(page.getByText(continuation).first()).toBeVisible();
-  await expect(page.getByText("Desktop App", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Queued", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Context window" }).click();
+  await expect(page.getByRole("region", { name: "Agent context window" })).toBeVisible();
+  await page.getByRole("button", { name: "Select AI model" }).click();
+  await expect(page.getByRole("region", { name: "Agent model picker" })).toBeVisible();
+  await page.getByRole("button", { name: "5.5 thinking" }).click();
 
-  const mediaPost = requests.find(
-    (request) => request.method === "POST" && request.path === "/api/media",
-  );
-  const journalPost = requests.find(
-    (request) => request.method === "POST" && request.path === "/api/journal",
-  );
-  const capturePost = requests.find(
-    (request) => request.method === "POST" && request.path === "/api/captures",
-  );
+  const ask = "What follow-through matters in this note?";
+  await page.getByPlaceholder("Ask for follow-up changes").fill(ask);
+  await page.getByRole("button", { name: "Send Ask Nudge message" }).click();
 
-  expect(mediaPost?.client).toBe("desktop");
-  expect(mediaPost?.body).toEqual(
-    expect.objectContaining({
-      kind: "image",
-      label: "Drawing",
-      mimeType: "image/png",
-    }),
-  );
-  expect(journalPost?.client).toBe("desktop");
-  expect(capturePost?.client).toBe("desktop");
-  expect(journalPost?.body).toEqual(
-    expect.objectContaining({
-      bodyDocument: expect.arrayContaining([
-        expect.objectContaining({ type: "img" }),
-        expect.objectContaining({
-          children: [{ text: continuation }],
-          type: "p",
-        }),
-      ]),
-      bodyText: `Morning plan\n\n${note}\n\n${continuation}`,
-      localDate: expect.any(String),
-    }),
-  );
-  expect(capturePost?.body).toEqual(
-    expect.objectContaining({
-      payload: expect.objectContaining({
-        attachments: expect.arrayContaining([
-          expect.objectContaining({
-            kind: "image",
-            label: "Drawing",
-            mimeType: "image/png",
-          }),
-        ]),
-        note: `${note}\n\n${continuation}`,
-      }),
-      source: "desktop_app",
-      type: "manual_check_in_submitted",
-    }),
-  );
+  await expect(page.getByText(ask)).toBeVisible();
+  await expect(
+    page.getByText("Nudge can review the edited note and track follow-through."),
+  ).toBeVisible();
+  await expect(page.getByText("Reply ready")).toBeVisible();
 
-  await page.getByRole("button", { name: "Accept" }).click();
-  await expect
-    .poll(() => requests.some((request) => request.path === "/api/actions/action-1/status"))
-    .toBe(true);
-  await expect(page.getByText("FOLLOW_UP · ACCEPTED")).toBeVisible();
-
-  const actionStatusPost = requests.find(
-    (request) => request.method === "POST" && request.path === "/api/actions/action-1/status",
+  const streamPost = requests.find(
+    (request) =>
+      request.method === "POST" && request.path === "/api/conversations/default/messages/stream",
   );
-  expect(actionStatusPost?.client).toBe("desktop");
-  expect(actionStatusPost?.body).toEqual({ itemId: "action-1", status: "accepted" });
+  expect(streamPost?.client).toBe("desktop");
+  expect(streamPost?.body).toEqual({ message: ask });
+  expect(requests.map((request) => request.path)).toEqual(
+    expect.arrayContaining([
+      "/api/session",
+      "/api/calendar/days",
+      "/api/actions",
+      "/api/signals",
+      "/api/conversations/default/messages/stream",
+    ]),
+  );
 });
 
 function readObjectProperty(value: unknown, key: string) {
@@ -327,4 +326,8 @@ function readStringProperty(value: unknown, key: string) {
 function readNumberProperty(value: unknown, key: string) {
   const property = readObjectProperty(value, key);
   return typeof property === "number" ? property : undefined;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
